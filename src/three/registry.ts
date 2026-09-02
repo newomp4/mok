@@ -25,14 +25,17 @@ export const useRenderFlags = create<RenderFlags>()((set) => ({
 }));
 
 /** Measured bounds of loaded glTF devices (scene units, after scale + rotation), keyed by device id. */
-export interface ModelBounds { minY: number; maxY: number; width: number; height: number; screenAspect?: number }
+export interface ModelFeatures { lid: boolean; island: boolean; caseParts: boolean; band: boolean }
+export interface ModelBounds { minY: number; maxY: number; width: number; height: number; screenAspect?: number; features?: ModelFeatures }
 export const useModelBounds = create<{ bounds: Record<string, ModelBounds>; set: (id: string, b: Partial<ModelBounds>) => void }>()((set) => ({
   bounds: {},
   set: (id, b) => set((s) => {
     const prev = s.bounds[id];
     const base: ModelBounds = prev ?? { minY: 0, maxY: 0, width: 0, height: 0 };
     const next: ModelBounds = { ...base, ...b };
-    if (prev && prev.minY === next.minY && prev.width === next.width && prev.height === next.height && prev.screenAspect === next.screenAspect) return s;
+    const f = prev?.features, g = next.features;
+    const sameF = (!f && !g) || (!!f && !!g && f.lid === g.lid && f.island === g.island && f.caseParts === g.caseParts && f.band === g.band);
+    if (prev && prev.minY === next.minY && prev.width === next.width && prev.height === next.height && prev.screenAspect === next.screenAspect && sameF) return s;
     return { bounds: { ...s.bounds, [id]: next } };
   }),
 }));

@@ -48,6 +48,9 @@ interface UIState {
   /** selected keyframe diamonds on the timeline */
   selectedKeys: { shotId: string; prop: AnimProp; t: number }[];
   setSelectedKeys: (k: { shotId: string; prop: AnimProp; t: number }[]) => void;
+  /** shot whose image is being cropped */
+  cropShot: string | null;
+  setCropShot: (id: string | null) => void;
   setGuides: (g: boolean) => void;
   setSnapCenter: (s: boolean) => void;
   setSounds: (s: boolean) => void;
@@ -107,6 +110,8 @@ export const useUI = create<UIState>()(subscribeWithSelector((set, get) => ({
   timelineHeight: (() => { try { return Number(localStorage.getItem("mok:timelineHeight")) || 216; } catch { return 216; } })(),
   selectedKeys: [],
   setSelectedKeys: (selectedKeys) => set({ selectedKeys }),
+  cropShot: null,
+  setCropShot: (cropShot) => set({ cropShot }),
   setGuides: (guides) => set({ guides }),
   setSnapCenter: (snapCenter) => { set({ snapCenter }); savePref("snapCenter", snapCenter); },
   setSounds: (sounds) => { set({ sounds }); savePref("sounds", sounds); },

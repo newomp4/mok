@@ -36,6 +36,8 @@ export function Device({ layout }: { layout: DeviceLayout }) {
   const scenePreset = useEditor((s) => s.project.scene.preset);
   const shot = useActiveShot();
   const media = useMedia(shot?.media);
+  const screenCfg = useEditor((s) => s.project.screen);
+  const screenBgImage = useMedia(screenCfg.bg?.type === "image" ? screenCfg.bg.image : null);
   const invalidate = useThree((s) => s.invalidate);
   const maxAniso = useThree((s) => s.gl.capabilities.getMaxAnisotropy());
 
@@ -69,6 +71,13 @@ export function Device({ layout }: { layout: DeviceLayout }) {
       return () => v.removeEventListener("seeked", onSeeked);
     }
   }, [media, shot?.fit, spec.id, finish.id, surface, invalidate]);
+
+  useEffect(() => {
+    const img = screenCfg.bg?.type === "image" && screenBgImage?.kind === "image" ? (screenBgImage.element as HTMLImageElement) : null;
+    surface.setBackground(screenCfg.bg?.color ?? "#000000", img);
+    surface.setStatusBar(!!screenCfg.statusBar && spec.family === "phone");
+    invalidate();
+  }, [screenCfg.bg?.type, screenCfg.bg?.color, screenCfg.statusBar, screenBgImage, spec.family, surface, invalidate]);
 
   useEffect(() => {
     screenMat.clearcoat = reflection;

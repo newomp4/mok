@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import { temporal } from "zundo";
 import type { AnimProp, AudioTrack, Keyframe, Project, Shot, ShotKind, Transition } from "@/lib/types";
-import { createLogoShot, createProject, createShot, createTextShot } from "@/lib/defaults";
+import { createLogoShot, createProject, createShot, createTextShot, normalizeProject } from "@/lib/defaults";
 import { getBase, hasKeyframeAt, locate, removeKeyframe, reverseTrack, sampleTrack, splitTrack, upsertKeyframe, shotStart } from "@/lib/animation";
 import { uid } from "@/lib/ids";
 import { useUI } from "./ui";
@@ -68,7 +68,7 @@ export const useEditor = create<EditorState>()(
     temporal(
       (set, get) => ({
         project: createProject(),
-        replaceProject: (project) => set({ project }),
+        replaceProject: (project) => set({ project: normalizeProject(project) }),
         update: (mut) => {
           const p = clone(get().project);
           mut(p);

@@ -54,6 +54,7 @@ export function collectMedia(p: Project): MediaRef[] {
   for (const s of p.shots) { if (s.media) out.push(s.media); if (s.logo?.media) out.push(s.logo.media); }
   if (p.scene.background.image) out.push(p.scene.background.image);
   if (p.audio?.media) out.push(p.audio.media);
+  if (p.screen.bg?.image) out.push(p.screen.bg.image);
   const seen = new Set<string>();
   return out.filter((m) => (seen.has(m.id) ? false : (seen.add(m.id), true)));
 }

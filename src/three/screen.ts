@@ -23,6 +23,9 @@ export class ScreenSurface {
   chrome: ScreenChrome = { kind: "none" };
   private lastVideoTime = -1;
   private placeholderKey = "";
+  bg: { color: string; image: HTMLImageElement | null } = { color: "#000000", image: null };
+  statusBar = false;
+  private probe: HTMLCanvasElement | null = null;
 
   constructor(maxAniso = 16) {
     this.canvas = document.createElement("canvas");
@@ -60,6 +63,18 @@ export class ScreenSurface {
     if (changed) this.draw(true);
   }
 
+  setBackground(color: string, image: HTMLImageElement | null) {
+    if (color === this.bg.color && image === this.bg.image) return;
+    this.bg = { color, image };
+    this.draw(true);
+  }
+
+  setStatusBar(on: boolean) {
+    if (on === this.statusBar) return;
+    this.statusBar = on;
+    this.draw(true);
+  }
+
   get chromeHeight(): number {
     if (this.chrome.kind !== "browser") return 0;
     return Math.round(this.width * 0.045);
@@ -87,8 +102,14 @@ export class ScreenSurface {
     const top = this.chromeHeight;
     const areaH = height - top;
     const mw = m.width, mh = m.height;
-    ctx.fillStyle = "#000";
+    ctx.fillStyle = this.bg.color;
     ctx.fillRect(0, top, width, areaH);
+    if (this.bg.image) {
+      const bi = this.bg.image;
+      const bs = Math.max(width / bi.naturalWidth, areaH / bi.naturalHeight);
+      const bw = bi.naturalWidth * bs, bh = bi.naturalHeight * bs;
+      ctx.drawImage(bi, (width - bw) / 2, top + (areaH - bh) / 2, bw, bh);
+    }
     let dw = width, dh = areaH, dx = 0, dy = top;
     if (this.fit === "cover") {
       const s = Math.max(width / mw, areaH / mh);
@@ -106,8 +127,58 @@ export class ScreenSurface {
     ctx.drawImage(el as CanvasImageSource, dx, dy, dw, dh);
     ctx.restore();
     this.drawChrome();
+    if (this.statusBar) this.drawStatusBar();
     this.texture.needsUpdate = true;
     return true;
+  }
+
+  /** iOS-style status bar (time, signal, Wi-Fi, battery); ink picks black or white from what is underneath. */
+  private drawStatusBar() {
+    const { ctx, width: W, height: H } = this;
+    const top = this.chromeHeight;
+    // sample the strip under the bar at a tiny resolution to choose the ink colour
+    if (!this.probe) { this.probe = document.createElement("canvas"); this.probe.width = 16; this.probe.height = 2; }
+    const pc = this.probe.getContext("2d", { willReadFrequently: true })!;
+    pc.drawImage(this.canvas, 0, top, W, Math.max(1, Math.round(H * 0.05)), 0, 0, 16, 2);
+    const d = pc.getImageData(0, 0, 16, 2).data;
+    let lum = 0;
+    for (let i = 0; i < d.length; i += 4) lum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    lum /= d.length / 4;
+    const ink = lum > 150 ? "#000000" : "#ffffff";
+    const y = top + H * 0.0245;
+    const size = W * 0.037;
+    ctx.save();
+    ctx.fillStyle = ink;
+    ctx.strokeStyle = ink;
+    ctx.font = `600 ${Math.round(size)}px -apple-system, "SF Pro Text", "Helvetica Neue", ui-sans-serif, system-ui`;
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    ctx.fillText("9:41", W * 0.083, y);
+    // battery
+    const bw = W * 0.034, bh = W * 0.016, bx = W * 0.915 - bw, br = bh * 0.3;
+    ctx.globalAlpha = 0.4;
+    ctx.lineWidth = Math.max(1, W * 0.0012);
+    roundRect(ctx, bx, y - bh / 2, bw, bh, br); ctx.stroke();
+    ctx.beginPath(); ctx.arc(bx + bw + W * 0.003, y, bh * 0.16, -Math.PI / 2, Math.PI / 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    const inset = W * 0.0025;
+    roundRect(ctx, bx + inset, y - bh / 2 + inset, (bw - inset * 2) * 0.82, bh - inset * 2, br * 0.6); ctx.fill();
+    // wifi: three arcs
+    const wx = bx - W * 0.026, wr = W * 0.014;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.lineWidth = Math.max(1, W * 0.0028);
+      ctx.arc(wx, y + wr * 0.55, wr * (0.34 + i * 0.33), Math.PI * 1.25, Math.PI * 1.75);
+      ctx.stroke();
+    }
+    ctx.beginPath(); ctx.arc(wx, y + wr * 0.55, W * 0.0022, 0, Math.PI * 2); ctx.fill();
+    // signal: four bars
+    const sx = wx - W * 0.03, gap = W * 0.0045, barW = W * 0.0035;
+    for (let i = 0; i < 4; i++) {
+      const h = W * (0.006 + i * 0.0032);
+      roundRect(ctx, sx + i * (barW + gap), y + W * 0.008 - h, barW, h, barW * 0.3); ctx.fill();
+    }
+    ctx.restore();
   }
 
   private drawChrome() {

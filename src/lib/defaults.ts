@@ -46,16 +46,30 @@ export function createProject(): Project {
       contactShadow: true,
       background: { type: "preset", color: "#f2f2f2", preset: "whisp", image: null, blur: 0.85 },
     },
-    mockup: { device: "iphone-17-pro-glb", finish: "model", reflection: 0.99, gloss: 1.4, borderRadius: 0.04, rotX: 0, rotY: 8, rotZ: 0 },
+    mockup: { device: "iphone-17-pro-glb", finish: "model", reflection: 0.99, gloss: 1.4, borderRadius: 0.04, rotX: 0, rotY: 8, rotZ: 0, lid: 110, notch: true, caseKeyboard: true, bandColor: null },
     camera: { x: -48, y: -24, z: 0, fov: 24, zoom: 1.58, panX: 0.073, panY: -0.207 },
     blur: { mode: "radial", strength: 6, focusSize: 0.42, falloff: 0.4, bokeh: true, focusX: 0.5, focusY: 0.4 },
-    screen: { brightness: 1 },
+    screen: { brightness: 1, bg: { type: "color", color: "#000000", image: null }, statusBar: false },
     effects: [],
     shots: [openingShot(), createShot("Shot 2", 3)],
     fps: 30,
     audio: null,
     fade: { in: 0, out: 0, color: "#000000" },
   };
+}
+
+/** Fill fields that older saved projects predate. */
+export function normalizeProject(p: Project): Project {
+  p.mockup.lid ??= 110;
+  p.mockup.notch ??= true;
+  p.mockup.caseKeyboard ??= true;
+  p.mockup.bandColor ??= null;
+  p.screen.bg ??= { type: "color", color: "#000000", image: null };
+  p.screen.statusBar ??= false;
+  p.audio ??= null;
+  p.fade ??= { in: 0, out: 0, color: "#000000" };
+  for (const s of p.shots) { s.kind ??= "media"; s.focusAreas ??= []; s.keyframes ??= {}; }
+  return p;
 }
 
 /** Shot 1 opens with the same gentle settle as Ultramock's starter project. */

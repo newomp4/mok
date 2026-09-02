@@ -145,6 +145,17 @@ export async function importBackgroundImage(file: File) {
   }
 }
 
+export async function importScreenBackground(file: File) {
+  const ui = useUI.getState();
+  try {
+    const ref = await importMedia(file);
+    if (ref.kind !== "image") { ui.showToast("Screen backgrounds must be images"); return; }
+    useEditor.getState().update((p) => { p.screen.bg = { type: "image", color: p.screen.bg?.color ?? "#000000", image: ref }; });
+  } catch (e) {
+    ui.showToast(`Could not import image: ${(e as Error).message}`);
+  }
+}
+
 /** Build camera keyframes that glide between the shot's focus areas. */
 export function composeAutoMotion(shotId: string, shuffleSeed = 0) {
   const ed = useEditor.getState();

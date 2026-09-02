@@ -12,6 +12,7 @@ import { MOD } from "@/lib/cn";
 import { exportProjectToFile, importProjectFromFile, saveCurrentProject } from "./hooks";
 import { newProject } from "@/lib/actions";
 import { REPO_URL } from "./Menus";
+import { CropModal } from "./CropModal";
 
 const SHORTCUTS: [string, string][] = [
   ["Space", "Play / pause"],
@@ -235,6 +236,7 @@ export function Modals() {
       <ProjectsModal />
       <PreferencesModal />
       <WhatsNewModal />
+      <CropModal />
     </>
   );
 }

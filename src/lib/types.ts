@@ -34,7 +34,7 @@ export interface Keyframe {
 
 export const ANIM_PROPS = [
   "camera.x", "camera.y", "camera.z", "camera.fov", "camera.zoom", "camera.panX", "camera.panY",
-  "mockup.rotX", "mockup.rotY", "mockup.rotZ",
+  "mockup.rotX", "mockup.rotY", "mockup.rotZ", "mockup.lid",
   "scene.lightRotX", "scene.lightRotY", "scene.lightIntensity",
   "blur.strength", "blur.focusSize", "blur.falloff", "blur.focusX", "blur.focusY",
   "screen.brightness",
@@ -44,7 +44,7 @@ export type AnimProp = (typeof ANIM_PROPS)[number];
 export const ANIM_LABELS: Record<AnimProp, string> = {
   "camera.x": "Camera X", "camera.y": "Camera Y", "camera.z": "Camera Roll", "camera.fov": "FOV",
   "camera.zoom": "Zoom", "camera.panX": "Pan X", "camera.panY": "Pan Y",
-  "mockup.rotX": "Rotate X", "mockup.rotY": "Rotate Y", "mockup.rotZ": "Rotate Z",
+  "mockup.rotX": "Rotate X", "mockup.rotY": "Rotate Y", "mockup.rotZ": "Rotate Z", "mockup.lid": "Lid angle",
   "scene.lightRotX": "Light Rot X", "scene.lightRotY": "Light Rot Y", "scene.lightIntensity": "Light Intensity",
   "blur.strength": "Blur Strength", "blur.focusSize": "Focus Size", "blur.falloff": "Falloff",
   "blur.focusX": "Focus X", "blur.focusY": "Focus Y", "screen.brightness": "Screen Brightness",
@@ -172,6 +172,14 @@ export interface Project {
     rotX: number;
     rotY: number;
     rotZ: number;
+    /** laptop lid opening angle in degrees (keyframeable) */
+    lid?: number;
+    /** show the Dynamic Island / notch on phones */
+    notch?: boolean;
+    /** tablets: keep the keyboard case on */
+    caseKeyboard?: boolean;
+    /** watches: tint the band */
+    bandColor?: string | null;
   };
   camera: {
     x: number;
@@ -195,6 +203,10 @@ export interface Project {
   };
   screen: {
     brightness: number;
+    /** what shows behind media that does not fill the screen (contain fit) */
+    bg?: { type: "color" | "image"; color: string; image: MediaRef | null };
+    /** paint an iOS-style status bar over the screen (phones) */
+    statusBar?: boolean;
   };
   effects: EffectInstance[];
   shots: Shot[];

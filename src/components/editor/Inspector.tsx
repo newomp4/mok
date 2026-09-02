@@ -12,8 +12,9 @@ import { Button, ColorRow, IconButton, NumberRow, Section, Segmented, SelectRow,
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/cn";
 import { useMedia, ACCEPTED_TYPES, ACCEPTED_IMAGES } from "@/lib/media";
+import { useModelBounds } from "@/three/registry";
 import { useActiveShot } from "@/three/Device";
-import { applyCameraPreset, importBackgroundImage, importFilesToShot, importLogo, resetBlur, resetCamera, setShotMedia } from "@/lib/actions";
+import { applyCameraPreset, importBackgroundImage, importFilesToShot, importLogo, importScreenBackground, resetBlur, resetCamera, setShotMedia } from "@/lib/actions";
 import { pickFiles } from "./hooks";
 import { defaultLogoStyle, defaultTextStyle, shotKind } from "@/lib/defaults";
 import { FONTS, cssFamily, ensureFont, getFont, nearestWeight } from "@/lib/fonts";
@@ -101,6 +102,7 @@ function MediaEditor({ shot }: { shot: Shot | null }) {
           <span className="label-sm text-white/70">{media.width} × {media.height}{isVideo && media.ref.duration ? ` · ${media.ref.duration.toFixed(1)}s` : ""}</span>
         </div>
         <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          {!isVideo && shot && <IconButton icon="crop" label="Crop" onClick={() => useUI.getState().setCropShot(shot.id)} className="h-6 w-6 bg-panel/90" />}
           <IconButton icon="upload" label="Replace" onClick={pick} className="h-6 w-6 bg-panel/90" />
           <IconButton icon="trash" label="Remove" onClick={() => setShotMedia(shot?.id ?? null, null)} className="h-6 w-6 bg-panel/90" />
         </div>
@@ -308,12 +310,14 @@ function isDark(hex: string) {
 /* ---------- Mockup ---------- */
 function MockupSection() {
   const mockup = useEditor((s) => s.project.mockup);
+  const screen = useEditor((s) => s.project.screen);
   const update = useEditor((s) => s.update);
   const picker = useUI((s) => s.picker);
   const setPicker = useUI((s) => s.setPicker);
   const [open, setOpen] = useState(true);
   const spec = getDevice(mockup.device);
   const finish = getFinish(spec, mockup.finish);
+  const features = useModelBounds((s) => s.bounds[mockup.device]?.features);
   if (picker === "device") return <DevicePicker />;
   return (
     <Section title="Mockup" open={open} onToggle={() => setOpen((o) => !o)}>
@@ -336,6 +340,35 @@ function MockupSection() {
       <AnimRow prop="mockup.rotY" label="Rotate Y" min={-180} max={180} step={1} />
       <AnimRow prop="mockup.rotX" label="Rotate X" min={-180} max={180} step={1} />
       <AnimRow prop="mockup.rotZ" label="Rotate Z" min={-180} max={180} step={1} />
+      {features?.lid && <AnimRow prop="mockup.lid" label="Lid angle" min={0} max={135} step={1} unit="°" />}
+      {features?.island && <ToggleRow label="Dynamic Island" checked={mockup.notch ?? true} onChange={(v) => update((p) => { p.mockup.notch = v; })} />}
+      {features?.caseParts && <ToggleRow label="Case + keyboard" checked={mockup.caseKeyboard ?? true} onChange={(v) => update((p) => { p.mockup.caseKeyboard = v; })} />}
+      {features?.band && (
+        <div className="flex h-8 items-center justify-between rounded-md bg-fill px-2.5">
+          <span className="label text-fg-2">Band colour</span>
+          <span className="flex items-center gap-2">
+            {mockup.bandColor && <button type="button" className="label-sm text-muted hover:text-fg" onClick={() => update((p) => { p.mockup.bandColor = null; })}>Reset</button>}
+            <label className="relative h-4 w-4 cursor-pointer overflow-hidden rounded border border-black/10" style={{ background: mockup.bandColor ?? "linear-gradient(135deg,#ddd,#888)" }}>
+              <input type="color" value={mockup.bandColor ?? "#2c2c2e"} onChange={(e) => update((p) => { p.mockup.bandColor = e.target.value; })} className="absolute inset-0 cursor-pointer opacity-0" />
+            </label>
+          </span>
+        </div>
+      )}
+      <div className="label-sm px-0.5 pt-2 text-muted">Screen</div>
+      {spec.family === "phone" && <ToggleRow label="Status bar" checked={!!screen.statusBar} onChange={(v) => update((p) => { p.screen.statusBar = v; })} hint="9:41" />}
+      <AnimRow prop="screen.brightness" label="Brightness" min={0} max={2} step={0.01} />
+      <SelectRow label="Screen BG" value={screen.bg?.type ?? "color"} onChange={(v) => update((p) => { p.screen.bg = { type: v, color: p.screen.bg?.color ?? "#000000", image: p.screen.bg?.image ?? null }; })} options={[{ value: "color", label: "Color" }, { value: "image", label: "Image" }]} />
+      {(screen.bg?.type ?? "color") === "color" ? (
+        <ColorRow label="BG color" value={screen.bg?.color ?? "#000000"} onChange={(v) => update((p) => { p.screen.bg = { type: "color", color: v, image: p.screen.bg?.image ?? null }; })} />
+      ) : (
+        <div className="flex h-8 items-center justify-between rounded-md bg-fill px-2.5">
+          <span className="label text-fg-2">BG image</span>
+          <span className="flex items-center gap-1.5">
+            <span className="label-sm max-w-24 truncate text-muted">{screen.bg?.image?.name ?? "None"}</span>
+            <Button variant="outline" size="sm" onClick={() => void pickFiles(ACCEPTED_IMAGES).then(([f]) => f && importScreenBackground(f))}>{screen.bg?.image ? "Replace" : "Upload"}</Button>
+          </span>
+        </div>
+      )}
     </Section>
   );
 }
