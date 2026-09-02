@@ -10,7 +10,10 @@ rendering and encoding happens locally with WebGL and WebCodecs.
 
 ## Features
 
-- **16 device models** built parametrically from real dimensions (no model downloads):
+- **10 photoreal device models** (CC-BY glTF from Sketchfab, credits in `CREDITS.md`): iPhone 17 Pro,
+  17 Pro Max, 16 Pro Max, iPad Pro 13" on Magic Keyboard, MacBook Pro 14" / 16", Apple Watch Ultra 2 /
+  Series 9, iMac 24", Pro Display XDR — screens are detected automatically and re-textured live
+- **16 built-in parametric models** as a zero-download fallback with colour finishes:
   iPhone 17 / 17 Pro / 17 Pro Max / Air, iPad Pro 13" / Air 11", MacBook Pro 14" / 16",
   MacBook Air 13" / 15", Apple Watch 46 mm / Ultra, Studio Display, iMac 24", flat card, browser window
 - **Finishes** per device (Cosmic Orange, Deep Blue, Lavender, Sage, Midnight, Starlight …)
@@ -52,25 +55,32 @@ Open http://localhost:3000. Production build: `pnpm build && pnpm start`. Deploy
 - **State** — a single undoable project document (zustand + zundo); the timeline evaluates keyframes
   into a shared per-frame object that scene components read imperatively, so playback never re-renders React.
 
-## Using real 3D models
+## Adding more 3D models
 
-The built-in devices are procedural (profile-swept bodies with real dimensions), so the repo stays
-tiny and loads instantly. If you want photographic-grade geometry, drop any glTF model in and mok
-will texture its screen and tint its finish:
+`public/models/` ships ten CC-BY glTF devices (see `CREDITS.md`). To add your own:
 
 1. Get a model you have rights to — e.g. CC-BY models on [Sketchfab](https://sketchfab.com/search?features=downloadable&licenses=322a749bcfa841b29dff1e8a1bb74b0b&q=iphone&type=models)
-   (credit the author), or a one-time purchase from CGTrader / TurboSquid (keep purchased models out
-   of a public repo — add `public/models/` to `.gitignore`).
-2. Optimise it: `scripts/optimize-model.sh input.glb public/models/iphone.glb` (meshopt + KTX2 textures,
-   the same pipeline commercial mockup tools use — a 60 MB export becomes ~4 MB).
-3. Add a spec with a `model` block in `src/lib/devices.ts` (there is a commented example) naming the
-   mesh that should show the screen and the materials that should take the finish colour.
+   (credit the author), or a one-time purchase (keep purchased models out of a public repo).
+   `SKETCHFAB_TOKEN=… node scripts/fetch-sketchfab.mjs <uid>=<name>` downloads, converts and credits
+   a Sketchfab model in one go.
+2. Or convert a file you already have: `scripts/optimize-model.sh input.glb public/models/name.glb`
+   (meshopt geometry + WebP textures; a 25 MB export becomes 1–8 MB).
+3. Add a spec with a `model` block in `src/lib/devices.ts`. `screenMesh` takes a mesh or material name
+   (comma-separated list allowed); leave it empty to let mok pick the largest thin, non-horizontal
+   surface. In the running app, `window.__mok.registry.glbInfo()` lists every mesh with its size,
+   textures and which one is currently the screen, which makes picking the right name quick.
+   `rotation` / `size` / `hideOverlays` fine-tune orientation, scale and cover-glass handling.
 
 ## Icons
 
-The UI uses an icon set drawn in the style of the Central Icon System (24 px grid, 1.5 px round
-strokes). To use the licensed `@central-icons-react` glyphs instead, replace the path map in
-`src/components/icons.tsx` — names match Central's.
+The UI uses the [Central Icon System](https://iconists.co/central) (round · outlined · radius 2 ·
+stroke 1.5) through the `@central-icons-react` package, which needs a Central license key to
+install. Without a key the editor falls back to a hand-drawn set in the same style:
+
+```bash
+CENTRAL_LICENSE_KEY=… node scripts/use-central-icons.mjs        # swap the real glyphs in
+node scripts/use-central-icons.mjs --revert                       # back to the built-in set
+```
 
 ## Development
 

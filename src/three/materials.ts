@@ -70,6 +70,7 @@ export function createScreenMaterial(texture: THREE.Texture): THREE.MeshPhysical
     clearcoat: 1,
     clearcoatRoughness: 0.04,
     envMapIntensity: 1,
+    side: THREE.DoubleSide,
   });
   return m;
 }
