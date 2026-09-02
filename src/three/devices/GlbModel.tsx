@@ -258,12 +258,16 @@ export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceS
     const scale = model.scale ?? target / Math.max(1e-6, Math.max(size.x, size.y, size.z));
     const holder = new THREE.Group();
     clone.position.sub(center);
-    holder.add(clone);
+    const yawGroup = new THREE.Group();
+    yawGroup.name = "autoYaw";
+    yawGroup.add(clone);
+    holder.add(yawGroup);
     holder.scale.setScalar(scale);
     return holder;
   }, [gltf.scene, model.scale, model.size, spec.body.h, spec.body.w]);
 
-  // publish the real footprint (after rotation) so floors, shadows and framing use it
+  // publish the real footprint (after rotation + auto-yaw) so floors, shadows and framing use it
+  const yawApplied = (root.getObjectByName("autoYaw") as THREE.Group | undefined)?.rotation.y ?? 0;
   useEffect(() => {
     const r = model.rotation ?? [0, 0, 0];
     const probe = new THREE.Group();
@@ -277,7 +281,7 @@ export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceS
     const sz = new THREE.Vector3();
     b.getSize(sz);
     useModelBounds.getState().set(spec.id, { minY: b.min.y, maxY: b.max.y, width: sz.x, height: sz.y });
-  }, [root, model.rotation, spec.id]);
+  }, [root, model.rotation, spec.id, yawApplied]);
 
   useEffect(() => {
     const finishNames = new Set(model.finishMaterials ?? []);
@@ -295,6 +299,17 @@ export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceS
       const screens = findScreenMeshes(root, model.screenMesh);
       root.userData.screens = screens;
       root.userData.screenMesh = screens[0] ?? null;
+      // align the screen's normal with the camera axis (+z) so content is never seen skewed at rotation 0
+      if (screens[0] && model.autoYaw !== false) {
+        const r = model.rotation ?? [0, 0, 0];
+        root.rotation.set(r[0], r[1], r[2]);
+        root.updateWorldMatrix(true, true);
+        const n = meshFrame(screens[0]).axes[2].clone();
+        if (n.z < 0) n.negate();
+        const yaw = Math.atan2(n.x, n.z);
+        const yawGroup = root.getObjectByName("autoYaw");
+        if (yawGroup && Math.abs(yaw) > 0.002) { yawGroup.rotation.y = -yaw; root.updateWorldMatrix(true, true); }
+      }
       for (const sm of screens) planarizeScreenUVs(sm, root, spec.screenPx[0] / spec.screenPx[1], model.screenInset);
       if (screens[0]?.userData.screenAspect) useModelBounds.getState().set(spec.id, { screenAspect: screens[0].userData.screenAspect as number });
       if (screens[0] && model.hideOverlays !== false) {

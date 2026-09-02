@@ -75,7 +75,7 @@ export type ScenePresetId = "custom" | "studio" | "concrete" | "darkroom" | "gal
 export type LightingId = "default" | "soft" | "bright" | "contrast" | "neon" | "cool";
 export type BlurMode = "off" | "radial" | "linear" | "depth";
 export type EffectId =
-  | "vignette" | "grain" | "bloom" | "chromatic" | "sharpen" | "pixel" | "fisheye" | "glassBorder" | "screenFade";
+  | "vignette" | "grain" | "bloom" | "chromatic" | "sharpen" | "pixel" | "fisheye" | "glassBorder" | "screenFade" | "ghost" | "liquidGlass";
 
 export interface EffectInstance {
   id: EffectId;

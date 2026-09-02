@@ -80,7 +80,7 @@ export function createScreenMaterial(texture: THREE.Texture): THREE.MeshPhysical
       "#include <emissivemap_fragment>",
       `#include <emissivemap_fragment>
       #ifdef USE_EMISSIVEMAP
-      { vec2 w = step(vec2(0.0), vEmissiveMapUv) * step(vEmissiveMapUv, vec2(1.0)); totalEmissiveRadiance *= w.x * w.y; }
+      { vec2 w = step(vec2(0.0), vEmissiveMapUv) * step(vEmissiveMapUv, vec2(1.0)); if (w.x * w.y < 0.5) discard; }
       #endif`,
     );
   };

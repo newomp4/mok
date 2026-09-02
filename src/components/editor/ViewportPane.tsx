@@ -13,6 +13,8 @@ import { useActiveShot } from "@/three/Device";
 import { AutoMotionOverlay } from "./AutoMotion";
 import { pickFiles } from "./hooks";
 import { anim } from "@/three/anim";
+import { locate, sampleTrack } from "@/lib/animation";
+import { useShallow } from "zustand/react/shallow";
 import { ACCEPTED_TYPES } from "@/lib/media";
 
 function Toast() {
@@ -113,6 +115,13 @@ export function ViewportPane() {
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0 && e.button !== 1 && e.button !== 2) return;
+    if (e.altKey && e.button === 0) {
+      // place the blur focal point
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const fx = clamp((e.clientX - r.left) / r.width, 0, 1), fy = clamp((e.clientY - r.top) / r.height, 0, 1);
+      useEditor.getState().setValues({ "blur.focusX": Math.round(fx * 1000) / 1000, "blur.focusY": Math.round(fy * 1000) / 1000 });
+      return;
+    }
     const ui = useUI.getState();
     const mode: "orbit" | "pan" = ui.spaceHeld || e.button === 1 || e.button === 2 || e.shiftKey ? "pan" : "orbit";
     if (ui.spaceHeld) useUI.setState({ spaceDragged: true });
@@ -190,6 +199,7 @@ export function ViewportPane() {
         onContextMenu={(e) => e.preventDefault()}
       >
         {frame.w > 0 && !no3d && <Viewport dpr={dpr} />}
+        <FocusMarker />
       </div>
       <LoadingPill />
       <UploadHint />
@@ -206,6 +216,23 @@ export function ViewportPane() {
       <div className="pointer-events-none absolute left-3 top-3 z-10 hidden gap-1 lg:flex">
         <Hint>Drag · orbit</Hint><Hint>Scroll · zoom</Hint><Hint>Space + drag · pan</Hint>
       </div>
+    </div>
+  );
+}
+
+/** Small ring at the blur focus point while a blur mode is active. */
+function FocusMarker() {
+  const mode = useEditor((s) => s.project.blur.mode);
+  const time = useUI((s) => s.time);
+  const pos = useEditor(useShallow((s) => {
+    const loc = locate(s.project, time);
+    const fx = loc.shot?.keyframes["blur.focusX"], fy = loc.shot?.keyframes["blur.focusY"];
+    return { x: fx?.length ? sampleTrack(fx, loc.localT) : s.project.blur.focusX, y: fy?.length ? sampleTrack(fy, loc.localT) : s.project.blur.focusY };
+  }));
+  if (mode === "off") return null;
+  return (
+    <div className="pointer-events-none absolute z-10 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.35)]" style={{ left: `${pos.x * 100}%`, top: `${pos.y * 100}%` }}>
+      <div className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" />
     </div>
   );
 }

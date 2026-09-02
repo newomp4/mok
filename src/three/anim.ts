@@ -20,4 +20,6 @@ export const anim = {
   exportTime: null as number | null,
   /** current camera distance (world units), for depth of field */
   camDist: 5,
+  /** smoothed distance to the depth-of-field focal point */
+  focusDist: 5,
 };

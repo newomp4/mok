@@ -260,6 +260,20 @@ export const EFFECT_DEFS: EffectDef[] = [
     { key: "width", label: "Width", min: 0, max: 0.2, step: 0.001, default: 0.04 },
     { key: "opacity", label: "Opacity", min: 0, max: 1, step: 0.01, default: 0.5 },
   ] },
+  { id: "ghost", name: "Ghost", icon: "layers", params: [
+    { key: "offset", label: "Offset", min: 0, max: 0.08, step: 0.001, default: 0.02 },
+    { key: "angle", label: "Angle", min: 0, max: 360, step: 1, default: 45 },
+    { key: "opacity", label: "Opacity", min: 0, max: 1, step: 0.01, default: 0.35 },
+  ] },
+  { id: "liquidGlass", name: "Liquid glass", icon: "glass", params: [
+    { key: "x", label: "X", min: 0, max: 1, step: 0.005, default: 0.5 },
+    { key: "y", label: "Y", min: 0, max: 1, step: 0.005, default: 0.5 },
+    { key: "width", label: "Width", min: 0.05, max: 1, step: 0.005, default: 0.42 },
+    { key: "height", label: "Height", min: 0.05, max: 1, step: 0.005, default: 0.26 },
+    { key: "radius", label: "Radius", min: 0, max: 0.5, step: 0.005, default: 0.12 },
+    { key: "refraction", label: "Refraction", min: 0, max: 1, step: 0.01, default: 0.5 },
+    { key: "tint", label: "Tint", min: 0, max: 1, step: 0.01, default: 0.12 },
+  ] },
   { id: "screenFade", name: "Screen fade", icon: "fade", params: [
     { key: "in", label: "Fade in (s)", min: 0, max: 3, step: 0.05, default: 0.6 },
     { key: "out", label: "Fade out (s)", min: 0, max: 3, step: 0.05, default: 0.6 },

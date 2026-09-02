@@ -39,6 +39,8 @@ export interface GlbModel {
   hideOverlays?: boolean;
   /** fraction of the screen mesh hidden under the bezel: [left, top, right, bottom] */
   screenInset?: [number, number, number, number];
+  /** rotate the model so its screen faces the camera exactly (default true) */
+  autoYaw?: boolean;
 }
 
 export interface DeviceSpec {
@@ -65,6 +67,8 @@ export interface DeviceSpec {
   finishes: Finish[];
   fitSize: number;
   free?: boolean;
+  /** kept as a code fallback but not offered in the picker */
+  hidden?: boolean;
   icon: string;
   /** default standing/lying placement in 3D scenes */
   placement: "stand" | "sit" | "float";
@@ -110,7 +114,7 @@ export const DEVICES: DeviceSpec[] = [
     screenPx: [3024, 1964], screenMm: [301, 195.5], screenRadius: 7,
     body: { w: 312.6, h: 221.2, d: 11.2, r: 11 },
     lid: { thickness: 4.3, angle: 100, screenTop: 7 },
-    model: { url: "/models/macbook-pro-14.glb", screenMesh: "abgVijaHVNRUvcc", size: 312.6, rotation: [0, -0.5, 0] },
+    model: { url: "/models/macbook-pro-14.glb", screenMesh: "abgVijaHVNRUvcc", size: 312.6 },
     finishes: [{ id: "space-gray", name: "Space Gray", color: "#7d7e80" }],
     fitSize: 3.4, icon: "laptop", placement: "sit",
   },
@@ -119,7 +123,7 @@ export const DEVICES: DeviceSpec[] = [
     screenPx: [3456, 2234], screenMm: [344, 222.5], screenRadius: 7,
     body: { w: 355.7, h: 248.1, d: 12.4, r: 11 },
     lid: { thickness: 4.4, angle: 100, screenTop: 7 },
-    model: { url: "/models/macbook-pro-16.glb", screenMesh: "Object_123", size: 355.7, rotation: [0, -0.5, 0] },
+    model: { url: "/models/macbook-pro-16.glb", screenMesh: "Object_123", size: 355.7 },
     finishes: [{ id: "space-black", name: "Space Black", color: "#2a2a2c" }],
     fitSize: 3.85, icon: "laptop", placement: "sit",
   },
@@ -192,6 +196,7 @@ export const DEVICES: DeviceSpec[] = [
   },
   {
     id: "iphone-17",
+    hidden: true,
     name: "iPhone 17",
     family: "phone",
     screenPx: [1206, 2622],
@@ -216,6 +221,7 @@ export const DEVICES: DeviceSpec[] = [
   },
   {
     id: "iphone-17-pro",
+    hidden: true,
     name: "iPhone 17 Pro",
     family: "phone",
     screenPx: [1206, 2622],
@@ -237,6 +243,7 @@ export const DEVICES: DeviceSpec[] = [
   },
   {
     id: "iphone-17-pro-max",
+    hidden: true,
     name: "iPhone 17 Pro Max",
     family: "phone",
     screenPx: [1320, 2868],
@@ -258,6 +265,7 @@ export const DEVICES: DeviceSpec[] = [
   },
   {
     id: "iphone-air",
+    hidden: true,
     name: "iPhone Air",
     family: "phone",
     screenPx: [1260, 2736],
@@ -280,6 +288,7 @@ export const DEVICES: DeviceSpec[] = [
   },
   {
     id: "ipad-pro-13",
+    hidden: true,
     name: "iPad Pro 13\"",
     family: "tablet",
     screenPx: [2064, 2752],
@@ -299,6 +308,7 @@ export const DEVICES: DeviceSpec[] = [
   },
   {
     id: "ipad-air-11",
+    hidden: true,
     name: "iPad Air 11\"",
     family: "tablet",
     screenPx: [1640, 2360],
@@ -320,6 +330,7 @@ export const DEVICES: DeviceSpec[] = [
   },
   {
     id: "macbook-pro-14",
+    hidden: true,
     name: "MacBook Pro 14\"",
     family: "laptop",
     screenPx: [3024, 1964],
@@ -338,6 +349,7 @@ export const DEVICES: DeviceSpec[] = [
   },
   {
     id: "macbook-pro-16",
+    hidden: true,
     name: "MacBook Pro 16\"",
     family: "laptop",
     screenPx: [3456, 2234],
@@ -356,6 +368,7 @@ export const DEVICES: DeviceSpec[] = [
   },
   {
     id: "macbook-air-13",
+    hidden: true,
     name: "MacBook Air 13\"",
     family: "laptop",
     screenPx: [2560, 1664],
@@ -376,6 +389,7 @@ export const DEVICES: DeviceSpec[] = [
   },
   {
     id: "macbook-air-15",
+    hidden: true,
     name: "MacBook Air 15\"",
     family: "laptop",
     screenPx: [2880, 1864],
@@ -396,6 +410,7 @@ export const DEVICES: DeviceSpec[] = [
   },
   {
     id: "apple-watch-46",
+    hidden: true,
     name: "Apple Watch 46mm",
     family: "watch",
     screenPx: [416, 496],
@@ -414,6 +429,7 @@ export const DEVICES: DeviceSpec[] = [
   },
   {
     id: "apple-watch-ultra",
+    hidden: true,
     name: "Apple Watch Ultra 49mm",
     family: "watch",
     screenPx: [410, 502],
@@ -430,6 +446,7 @@ export const DEVICES: DeviceSpec[] = [
   },
   {
     id: "studio-display",
+    hidden: true,
     name: "Studio Display",
     family: "desktop",
     screenPx: [5120, 2880],
@@ -443,6 +460,7 @@ export const DEVICES: DeviceSpec[] = [
   },
   {
     id: "imac-24",
+    hidden: true,
     name: "iMac 24\"",
     family: "desktop",
     screenPx: [4480, 2520],

@@ -231,7 +231,7 @@ function DevicePicker() {
   const setPicker = useUI((s) => s.setPicker);
   const families = useMemo(() => {
     const out = new Map<DeviceFamily, typeof DEVICES>();
-    for (const d of DEVICES) out.set(d.family, [...(out.get(d.family) ?? []), d]);
+    for (const d of DEVICES) if (!d.hidden) out.set(d.family, [...(out.get(d.family) ?? []), d]);
     return out;
   }, []);
   return (
@@ -289,7 +289,7 @@ function CameraSection() {
 }
 
 /* ---------- Blur ---------- */
-function FocusPicker() {
+function FocusPicker({ depth = false }: { depth?: boolean }) {
   const fx = useAnimRow("blur.focusX");
   const fy = useAnimRow("blur.focusY");
   const setValues = useEditor((s) => s.setValues);
@@ -302,7 +302,7 @@ function FocusPicker() {
   };
   return (
     <div className="flex flex-col gap-1">
-      <div className="label-sm px-0.5 pt-1 text-muted">Focus position</div>
+      <div className="label-sm flex items-center justify-between px-0.5 pt-1 text-muted"><span>{depth ? "Focal point" : "Focus position"}</span><span className="normal-case">⌥ click the viewport</span></div>
       <div
         className="relative h-24 cursor-crosshair overflow-hidden rounded-md border border-line bg-panel-2"
         onPointerDown={(e) => { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); dragging[1](true); beginInteraction(); set(e); }}
@@ -329,7 +329,7 @@ function BlurSection() {
       <AnimRow prop="blur.focusSize" label="Focus size" min={0} max={1.5} step={0.01} disabled={off} />
       <AnimRow prop="blur.falloff" label="Falloff" min={0} max={1} step={0.01} disabled={off} />
       <ToggleRow label="Bokeh" checked={blur.bokeh} onChange={(v) => update((p) => { p.blur.bokeh = v; })} disabled={off} />
-      {!off && blur.mode !== "depth" && <FocusPicker />}
+      {!off && <FocusPicker depth={blur.mode === "depth"} />}
     </Section>
   );
 }

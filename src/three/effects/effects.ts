@@ -137,3 +137,86 @@ export function createLensDistortion(): LensDistortionEffect {
     skew: 0,
   });
 }
+
+const ghostFrag = /* glsl */ `
+uniform vec2 offset;
+uniform float opacity;
+void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+  vec4 g = texture2D(inputBuffer, clamp(uv + offset, 0.0, 1.0));
+  outputColor = vec4(max(inputColor.rgb, g.rgb * opacity), inputColor.a);
+}`;
+
+/** Double-exposure echo of the frame, offset in a direction. */
+export class GhostEffect extends Effect {
+  constructor() {
+    super("GhostEffect", ghostFrag, {
+      uniforms: new Map<string, THREE.Uniform>([
+        ["offset", new THREE.Uniform(new THREE.Vector2(0.014, 0.014))],
+        ["opacity", new THREE.Uniform(0.35)],
+      ]),
+    });
+  }
+  set(offset: number, angleDeg: number, opacity: number) {
+    const a = (angleDeg * Math.PI) / 180;
+    (this.uniforms.get("offset")!.value as THREE.Vector2).set(Math.cos(a) * offset, Math.sin(a) * offset);
+    this.uniforms.get("opacity")!.value = opacity;
+  }
+}
+
+const liquidFrag = /* glsl */ `
+uniform vec2 center;    // 0..1
+uniform vec2 halfSize;  // 0..1 (of width / height)
+uniform float radius;   // fraction of the shorter side
+uniform float refraction;
+uniform float tint;
+uniform float uAspect;
+float sdRoundRect(vec2 p, vec2 b, float r) {
+  vec2 q = abs(p) - b + vec2(r);
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+  vec2 asp = vec2(uAspect, 1.0);
+  vec2 p = (uv - center) * asp;
+  vec2 b = halfSize * asp;
+  float r = radius * min(b.x, b.y) * 2.0;
+  float d = sdRoundRect(p, b, r);
+  if (d > 0.0) { outputColor = inputColor; return; }
+  // edge band refracts strongly, the centre only slightly (like a thick glass slab)
+  float edge = smoothstep(-0.12 * min(b.x, b.y) * 2.0, 0.0, d);
+  float e = 0.002;
+  vec2 grad = normalize(vec2(sdRoundRect(p + vec2(e, 0.0), b, r) - sdRoundRect(p - vec2(e, 0.0), b, r), sdRoundRect(p + vec2(0.0, e), b, r) - sdRoundRect(p - vec2(0.0, e), b, r)) + 1e-6);
+  vec2 shift = (grad * (0.35 * edge + 0.08) + p * 0.06) * refraction * 0.06 / asp;
+  vec3 col = texture2D(inputBuffer, clamp(uv - shift, 0.0, 1.0)).rgb;
+  // subtle brightening + a highlight along the top-left edge, shadow along bottom-right
+  float light = dot(grad, normalize(vec2(-0.6, 0.8)));
+  col = mix(col, col * (1.0 + 0.35 * tint) + vec3(0.06) * tint, 0.5);
+  col += vec3(0.28) * edge * max(light, 0.0) * (0.4 + tint);
+  col -= vec3(0.12) * edge * max(-light, 0.0);
+  float rim = 1.0 - smoothstep(0.0, 0.0035, -d);
+  col += vec3(0.35) * rim;
+  outputColor = vec4(col, inputColor.a);
+}`;
+
+/** A refractive rounded glass slab over the frame (Apple "liquid glass" look). */
+export class LiquidGlassEffect extends Effect {
+  constructor() {
+    super("LiquidGlassEffect", liquidFrag, {
+      uniforms: new Map<string, THREE.Uniform>([
+        ["center", new THREE.Uniform(new THREE.Vector2(0.5, 0.5))],
+        ["halfSize", new THREE.Uniform(new THREE.Vector2(0.21, 0.13))],
+        ["radius", new THREE.Uniform(0.12)],
+        ["refraction", new THREE.Uniform(0.5)],
+        ["tint", new THREE.Uniform(0.12)],
+        ["uAspect", new THREE.Uniform(1)],
+      ]),
+    });
+  }
+  set(x: number, y: number, w: number, h: number, radius: number, refraction: number, tint: number) {
+    (this.uniforms.get("center")!.value as THREE.Vector2).set(x, 1 - y);
+    (this.uniforms.get("halfSize")!.value as THREE.Vector2).set(w / 2, h / 2);
+    this.uniforms.get("radius")!.value = radius;
+    this.uniforms.get("refraction")!.value = refraction;
+    this.uniforms.get("tint")!.value = tint;
+  }
+  setSize(width: number, height: number) { this.uniforms.get("uAspect")!.value = width / Math.max(1, height); }
+}

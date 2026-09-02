@@ -117,7 +117,7 @@ export function Device({ layout }: { layout: DeviceLayout }) {
   // procedural laptops are modelled from the floor up; glTF models are already centred
   const yOffset = !spec.model && spec.family === "laptop" ? -layout.height / 2 : 0;
   return (
-    <group ref={group}>
+    <group ref={group} name="device">
       <group position={[0, yOffset, 0]}>{model}</group>
     </group>
   );

@@ -12,18 +12,20 @@ rendering and encoding happens locally with WebGL and WebCodecs.
 
 - **10 photoreal device models** (CC-BY glTF from Sketchfab, credits in `CREDITS.md`): iPhone 17 Pro,
   17 Pro Max, 16 Pro Max, iPad Pro 13" on Magic Keyboard, MacBook Pro 14" / 16", Apple Watch Ultra 2 /
-  Series 9, iMac 24", Pro Display XDR — screens are detected automatically and re-textured live
-- **16 built-in parametric models** as a zero-download fallback with colour finishes:
-  iPhone 17 / 17 Pro / 17 Pro Max / Air, iPad Pro 13" / Air 11", MacBook Pro 14" / 16",
-  MacBook Air 13" / 15", Apple Watch 46 mm / Ultra, Studio Display, iMac 24", flat card, browser window
+  Series 9, iMac 24", Pro Display XDR — the screen is detected automatically, mapped at the device's
+  true aspect and aligned to the camera, so a native screenshot fits exactly
+- **Flat card and browser window** for plain screenshots; parametric fallbacks for every device remain
+  in the code (hidden from the picker)
 - **Finishes** per device (Cosmic Orange, Deep Blue, Lavender, Sage, Midnight, Starlight …)
 - **Scenes**: custom (any background), Studio cyclorama, Concrete dark, Dark room, Gallery — with real
   shadow-mapped lighting on the 3D sets and contact shadows on the custom scene
 - **6 lighting rigs** from CC0 Poly Haven HDRIs, rotatable and keyframeable
 - **Backgrounds**: solid color, 12 mesh-gradient presets, your own image with blur, or transparent
 - **Camera**: orbit / zoom / pan directly in the viewport, six presets, FOV, roll
-- **Blur**: radial or linear focus blur with bokeh, or true depth of field
-- **Effects**: vignette, grain, bloom, chromatic aberration, sharpen, pixel grid, fisheye, glass border, screen fade
+- **Blur**: radial or linear focus blur with bokeh, or true depth of field with a placeable focal point
+  (drag the pad or ⌥-click the viewport; the focus distance is measured on the device surface)
+- **Effects**: vignette, grain, bloom, chromatic aberration, sharpen, pixel grid, fisheye, glass border,
+  screen fade, ghost, liquid glass
 - **Timeline**: multiple shots, keyframes on every camera / device / light / blur property, easing,
   motion presets (scan, zoom, orbit, flip …) and auto-motion that composes a camera move from focus areas you draw on the screen
 - **Export**: PNG / WebP / JPG up to 8K with transparent background; MP4 (H.264) or WebM (VP9, alpha)

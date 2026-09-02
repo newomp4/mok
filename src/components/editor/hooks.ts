@@ -11,7 +11,7 @@ import { viewport as registryViewport } from "@/three/registry";
 import { anim as animState } from "@/three/anim";
 import { totalDuration } from "@/lib/animation";
 import { captureImage } from "@/export/capture";
-import { getAspect, TEMPLATES } from "@/lib/presets";
+import { getAspect, TEMPLATES, EFFECT_DEFS } from "@/lib/presets";
 import { clamp } from "@/lib/cn";
 import { preferModel } from "@/lib/devices";
 
@@ -19,7 +19,7 @@ export function useBootstrap() {
   useEffect(() => {
     const ui = useUI.getState();
     // debug handle for QA / power users
-    (window as unknown as { __mok: unknown }).__mok = { useEditor, useUI, actions, capture, registry: registryViewport, templates: TEMPLATES, anim: animState };
+    (window as unknown as { __mok: unknown }).__mok = { useEditor, useUI, actions, capture, registry: registryViewport, templates: TEMPLATES, anim: animState, effectDefs: EFFECT_DEFS };
     ui.setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
     let cancelled = false;
     loadAutosave().then((p) => {
