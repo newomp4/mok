@@ -10,12 +10,21 @@ const browser = await chromium.launch({ args: ["--use-gl=angle", "--use-angle=sw
 const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
 await page.goto(base, { waitUntil: "networkidle" });
 await page.waitForTimeout(2500);
-const ids = await page.evaluate(() => __mok.templates.filter((t) => t.motion || t.sequence).map((t) => t.id));
+const only = process.argv.slice(2);
+const ids = (await page.evaluate(() => __mok.templates.filter((t) => t.motion || t.sequence).map((t) => t.id))).filter((id) => !only.length || only.includes(id));
 for (const id of ids) {
   const dataUrl = await page.evaluate(async (id) => {
     __mok.actions.applyTemplate(id);
-    // keep the clip short: the first shot only, capped at 3 s
-    __mok.useEditor.getState().update((p) => { p.shots = p.shots.slice(0, 1); p.shots[0].duration = Math.min(p.shots[0].duration, 3); p.shots[0].transitionOut = undefined; p.fade = { in: 0, out: 0, color: "#000" }; });
+    // keep the clip short: the first media shot only, capped at 3 s
+    __mok.useEditor.getState().update((p) => {
+      const idx = Math.max(0, p.shots.findIndex((s) => (s.kind ?? "media") === "media"));
+      p.shots = [p.shots[idx]];
+      p.shots[0].duration = Math.min(p.shots[0].duration, 3);
+      p.shots[0].transitionOut = undefined;
+      p.shots[0].enter = undefined; p.shots[0].exit = undefined;
+      p.fade = { in: 0, out: 0, color: "#000" };
+    });
+    __mok.useUI.getState().setTime(0);
     await new Promise((r) => setTimeout(r, 5000));
     const { blob } = await __mok.capture.exportVideo({ width: 480, height: 300, fps: 15, quality: "low", samples: 1, transparent: false, format: "webm" });
     return await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });

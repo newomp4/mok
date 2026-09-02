@@ -10,13 +10,19 @@ const browser = await chromium.launch({ args: ["--use-gl=angle", "--use-angle=sw
 const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
 await page.goto(base, { waitUntil: "networkidle" });
 await page.waitForTimeout(2500);
-const ids = await page.evaluate(() => __mok.templates.map((t) => t.id));
+const only = process.argv.slice(2);
+const ids = (await page.evaluate(() => __mok.templates.map((t) => t.id))).filter((id) => !only.length || only.includes(id));
 for (const id of ids) {
   const dataUrl = await page.evaluate(async (id) => {
     __mok.actions.applyTemplate(id);
     const tpl = __mok.templates.find((t) => t.id === id);
-    const first = __mok.useEditor.getState().project.shots[0];
-    __mok.useUI.getState().setTime(Math.max(0, Math.min(first.duration - 0.05, first.duration * (tpl?.thumbAt ?? 0.98))));
+    const p = __mok.useEditor.getState().project;
+    // sequences open on a title card: capture the first media shot instead, half-way through its move
+    const idx = tpl?.sequence ? Math.max(0, p.shots.findIndex((s) => (s.kind ?? "media") === "media")) : 0;
+    const shot = p.shots[idx];
+    const start = p.shots.slice(0, idx).reduce((a, s) => a + s.duration, 0);
+    const at = tpl?.thumbAt ?? (tpl?.sequence ? 0.5 : 0.98);
+    __mok.useUI.getState().setTime(start + Math.max(0, Math.min(shot.duration - 0.05, shot.duration * at)));
     await new Promise((r) => setTimeout(r, 5000));
     const blob = await __mok.capture.captureImage({ width: 640, height: 400, format: "webp", quality: 0.86, transparent: false });
     return await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });

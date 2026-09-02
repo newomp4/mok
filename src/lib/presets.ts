@@ -390,7 +390,7 @@ export const TEMPLATES: Template[] = [
   {
     id: "brutal-phone", name: "Brutal phone", description: "Square, grainy, high contrast", device: "iphone-16-pro-max-glb", finish: "model", scene: "custom",
     camera: { x: 0, y: 0, z: 0, fov: 30, zoom: 1.2, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 }, aspect: "1:1", motion: "push-in",
-    background: { type: "color", color: "#000000" }, effects: [fx("grain", { amount: 0.5 }), fx("vignette", { darkness: 0.7, offset: 0.25 }), fx("chromatic", { amount: 0.4 })], swatch: ["#000000", "#333333"],
+    background: { type: "color", color: "#000000" }, effects: [fx("grain", { amount: 0.5 }), fx("vignette", { darkness: 0.7, offset: 0.25 }), fx("chromatic", { amount: 0.4 })], swatch: ["#000000", "#333333"], thumbAt: 0.15,
   },
   {
     id: "hero-detail", name: "Hero detail", description: "Corner close-up with radial blur", device: "iphone-17-pro-glb", finish: "model", scene: "custom",
