@@ -76,11 +76,26 @@ export function Device({ layout }: { layout: DeviceLayout }) {
 
   const group = useRef<THREE.Group>(null);
   const standing = scenePreset !== "custom" && !spec.model && (spec.family === "phone" || spec.family === "tablet");
+  const smoothRot = useRef<[number, number, number] | null>(null);
 
-  useFrame(() => {
+  useFrame((state, delta) => {
     const v = anim.values;
     if (!v || !group.current) return;
-    group.current.rotation.set((v["mockup.rotX"] + (standing ? -layout.lean : 0)) * DEG, v["mockup.rotY"] * DEG, v["mockup.rotZ"] * DEG);
+    const target: [number, number, number] = [v["mockup.rotX"] + (standing ? -layout.lean : 0), v["mockup.rotY"], v["mockup.rotZ"]];
+    const exact = anim.exporting || useUI.getState().playing;
+    if (exact || !smoothRot.current) smoothRot.current = target;
+    else {
+      const k = 1 - Math.exp(-Math.min(delta, 0.05) * 18);
+      let moving = false;
+      const cur = smoothRot.current;
+      for (let i = 0; i < 3; i++) {
+        const d = target[i] - cur[i];
+        if (Math.abs(d) < 0.01) cur[i] = target[i]; else { cur[i] += d * k; moving = true; }
+      }
+      if (moving) state.invalidate();
+    }
+    const r = smoothRot.current;
+    group.current.rotation.set(r[0] * DEG, r[1] * DEG, r[2] * DEG);
     screenMat.emissiveIntensity = v["screen.brightness"] * anim.screenFade;
     if (media?.kind === "video") {
       const vid = media.element as HTMLVideoElement;

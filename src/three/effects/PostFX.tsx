@@ -13,6 +13,7 @@ import { getEffectDef } from "@/lib/presets";
 export function PostFX() {
   const blurMode = useEditor((s) => s.project.blur.mode);
   const bokeh = useEditor((s) => s.project.blur.bokeh);
+  const blurAngle = useEditor((s) => s.project.blur.angle ?? 0);
   const effects = useEditor((s) => s.project.effects);
   const composerRef = useRef<EffectComposerImpl>(null);
 
@@ -56,7 +57,7 @@ export function PostFX() {
   useFrame((state) => {
     const v = anim.values;
     if (!v) return;
-    focus.setParams(v["blur.focusX"], 1 - v["blur.focusY"], v["blur.focusSize"], v["blur.falloff"], blurMode === "linear" ? "linear" : "radial", v["blur.strength"], bokeh);
+    focus.setParams(v["blur.focusX"], 1 - v["blur.focusY"], v["blur.focusSize"], v["blur.falloff"], blurMode === "linear" ? "linear" : blurMode === "directional" ? "directional" : "radial", v["blur.strength"], bokeh, blurAngle);
     const dof = dofRef.current;
     if (dof) {
       // focal point: the surface under the focus position (autofocus), smoothed so it never pops
@@ -98,7 +99,7 @@ export function PostFX() {
     <EffectComposer ref={composerRef} multisampling={blurMode === "depth" ? 0 : 4} frameBufferType={THREE.HalfFloatType}>
       {blurMode === "depth" ? <SMAA /> : <></>}
       {blurMode === "depth" ? <DepthOfField ref={dofRef} worldFocusDistance={5} worldFocusRange={1} bokehScale={4} resolutionScale={0.75} /> : <></>}
-      {blurMode === "radial" || blurMode === "linear" ? <primitive object={focus} /> : <></>}
+      {blurMode === "radial" || blurMode === "linear" || blurMode === "directional" ? <primitive object={focus} /> : <></>}
       {bloomOn ? <Bloom mipmapBlur intensity={param("bloom", "intensity")} luminanceThreshold={param("bloom", "threshold")} radius={param("bloom", "radius")} levels={6} /> : <></>}
       {chromaOn ? <ChromaticAberration offset={new THREE.Vector2(chromaAmt, chromaAmt)} radialModulation modulationOffset={0.3} /> : <></>}
       {fisheyeOn ? <primitive object={lens} /> : <></>}

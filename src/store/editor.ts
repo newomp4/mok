@@ -4,7 +4,7 @@ import { subscribeWithSelector } from "zustand/middleware";
 import { temporal } from "zundo";
 import type { AnimProp, Project, Shot } from "@/lib/types";
 import { createProject, createShot } from "@/lib/defaults";
-import { getBase, hasKeyframeAt, locate, removeKeyframe, sampleTrack, setBase, upsertKeyframe } from "@/lib/animation";
+import { getBase, hasKeyframeAt, locate, removeKeyframe, sampleTrack, upsertKeyframe } from "@/lib/animation";
 import { useUI } from "./ui";
 import { getDevice } from "@/lib/devices";
 import { getScene } from "@/lib/presets";
@@ -31,6 +31,14 @@ function clone<T>(v: T): T {
   return structuredClone(v);
 }
 
+/** Immutable base-value write: copies only the group that changes. */
+function withBase(p: Project, prop: AnimProp, v: number): Project {
+  const [g, k] = prop.split(".") as [keyof Project, string];
+  const group = p[g] as unknown as Record<string, number>;
+  if (group[k] === v) return p;
+  return { ...p, [g]: { ...group, [k]: v } };
+}
+
 export function currentShot(p: Project): { shot: Shot | null; localT: number } {
   const loc = locate(p, useUI.getState().time);
   return { shot: loc.shot, localT: loc.localT };
@@ -50,20 +58,29 @@ export const useEditor = create<EditorState>()(
         },
         setValue: (prop, v) => get().setValues({ [prop]: v }),
         setValues: (values) => {
+          // structural sharing: only the touched groups / shot are copied, so timeline rows and
+          // unrelated inspector rows keep their references during drags
           const ui = useUI.getState();
-          const p = clone(get().project);
-          const { shot, localT } = currentShot(p);
+          const prev = get().project;
+          const { shot, localT } = currentShot(prev);
+          let p: Project = { ...prev, updatedAt: Date.now() };
+          let nextShot: Shot | null = shot ? { ...shot, keyframes: { ...shot.keyframes } } : null;
+          let shotTouched = false;
           for (const [prop, v] of Object.entries(values) as [AnimProp, number][]) {
             if (v === undefined || Number.isNaN(v)) continue;
-            const track = shot?.keyframes[prop];
-            if (shot && (ui.recording || (track && track.length > 0))) {
-              shot.keyframes[prop] = upsertKeyframe(track, localT, v);
-              if (!track || track.length === 0) setBase(p, prop, v);
+            const track = nextShot?.keyframes[prop];
+            if (nextShot && (ui.recording || (track && track.length > 0))) {
+              nextShot.keyframes[prop] = upsertKeyframe(track, localT, v);
+              shotTouched = true;
+              if (!track || track.length === 0) p = withBase(p, prop, v);
             } else {
-              setBase(p, prop, v);
+              p = withBase(p, prop, v);
             }
           }
-          p.updatedAt = Date.now();
+          if (shotTouched && nextShot) {
+            const id = nextShot.id;
+            p = { ...p, shots: p.shots.map((s) => (s.id === id ? nextShot! : s)) };
+          }
           set({ project: p });
         },
         toggleKeyframe: (prop) => {

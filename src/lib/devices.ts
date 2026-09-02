@@ -41,6 +41,8 @@ export interface GlbModel {
   screenInset?: [number, number, number, number];
   /** rotate the model so its screen faces the camera exactly (default true) */
   autoYaw?: boolean;
+  /** mesh names to hide (baked shadow catchers, props) */
+  hide?: string[];
 }
 
 export interface DeviceSpec {
@@ -114,7 +116,7 @@ export const DEVICES: DeviceSpec[] = [
     screenPx: [3024, 1964], screenMm: [301, 195.5], screenRadius: 7,
     body: { w: 312.6, h: 221.2, d: 11.2, r: 11 },
     lid: { thickness: 4.3, angle: 100, screenTop: 7 },
-    model: { url: "/models/macbook-pro-14.glb", screenMesh: "abgVijaHVNRUvcc", size: 312.6 },
+    model: { url: "/models/macbook-pro-14.glb", screenMesh: "abgVijaHVNRUvcc", size: 312.6, hide: ["NgmQYtxXWDmCavo"] },
     finishes: [{ id: "space-gray", name: "Space Gray", color: "#7d7e80" }],
     fitSize: 3.4, icon: "laptop", placement: "sit",
   },
@@ -123,7 +125,7 @@ export const DEVICES: DeviceSpec[] = [
     screenPx: [3456, 2234], screenMm: [344, 222.5], screenRadius: 7,
     body: { w: 355.7, h: 248.1, d: 12.4, r: 11 },
     lid: { thickness: 4.4, angle: 100, screenTop: 7 },
-    model: { url: "/models/macbook-pro-16.glb", screenMesh: "Object_123", size: 355.7 },
+    model: { url: "/models/macbook-pro-16.glb", screenMesh: "Object_123", size: 355.7, hide: ["Object_66"] },
     finishes: [{ id: "space-black", name: "Space Black", color: "#2a2a2c" }],
     fitSize: 3.85, icon: "laptop", placement: "sit",
   },

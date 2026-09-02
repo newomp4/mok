@@ -296,6 +296,22 @@ export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceS
         m.material = Array.isArray(m.material) ? fixed : fixed[0];
         m.userData.mirrored = true;
       });
+      // baked shadow catchers: large, flat, horizontal quads lying at the very bottom of the model
+      const whole = new THREE.Box3().setFromObject(root);
+      const wsz = new THREE.Vector3(); whole.getSize(wsz);
+      const explicitHide = new Set(model.hide ?? []);
+      root.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh) return;
+        if (explicitHide.has(m.name)) { m.visible = false; return; }
+        const b = new THREE.Box3().setFromObject(m);
+        const sz = new THREE.Vector3(); b.getSize(sz);
+        const tris = (m.geometry.index?.count ?? m.geometry.attributes.position.count) / 3;
+        const flat = sz.y < wsz.y * 0.004;
+        const atBottom = b.min.y < whole.min.y + wsz.y * 0.02;
+        const large = sz.x * sz.z > wsz.x * wsz.z * 0.2;
+        if (flat && atBottom && large && tris <= 12) m.visible = false;
+      });
       const screens = findScreenMeshes(root, model.screenMesh);
       root.userData.screens = screens;
       root.userData.screenMesh = screens[0] ?? null;
@@ -383,7 +399,7 @@ export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceS
       }
     });
     invalidate();
-  }, [root, model.screenMesh, model.screenInset, model.finishMaterials, finish.color, screen, invalidate, gloss, spec.id, spec.screenPx]);
+  }, [root, model.screenMesh, model.screenInset, model.finishMaterials, model.hide, finish.color, screen, invalidate, gloss, spec.id, spec.screenPx]);
 
   return <primitive object={root} rotation={model.rotation ?? [0, 0, 0]} position={model.position ?? [0, 0, 0]} />;
 }

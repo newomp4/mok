@@ -17,6 +17,14 @@ import { locate, sampleTrack } from "@/lib/animation";
 import { useShallow } from "zustand/react/shallow";
 import { ACCEPTED_TYPES } from "@/lib/media";
 
+let interactTimer: number | null = null;
+function markInteracting() {
+  const ui = useUI.getState();
+  if (!ui.interacting) useUI.setState({ interacting: true });
+  if (interactTimer) window.clearTimeout(interactTimer);
+  interactTimer = window.setTimeout(() => { useUI.setState({ interacting: false }); interactTimer = null; }, 250);
+}
+
 function Toast() {
   const toast = useUI((s) => s.toast);
   const clear = useUI((s) => s.clearToast);
@@ -72,7 +80,10 @@ export function ViewportPane() {
   const aspect = useEditor((s) => s.project.aspect);
   const bgType = useEditor((s) => s.project.scene.background.type);
   const scenePreset = useEditor((s) => s.project.scene.preset);
-  const dpr = useUI((s) => s.dpr);
+  const dprPref = useUI((s) => s.dpr);
+  const interacting = useUI((s) => s.interacting);
+  // ease the GPU while the user is dragging or zooming; full resolution settles back 250 ms later
+  const dpr = interacting && dprPref > 1.5 ? 1.5 : dprPref;
   const dragging = useUI((s) => s.dragging);
   const setDragging = useUI((s) => s.setDragging);
   const setViewport = useUI((s) => s.setViewport);
@@ -129,6 +140,7 @@ export function ViewportPane() {
     drag.current = { x: e.clientX, y: e.clientY, mode, start: { cx: c.cx, cy: c.cy, px: c.px, py: c.py } };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     beginInteraction();
+    markInteracting();
   };
   const onPointerMove = (e: React.PointerEvent) => {
     const d = drag.current;
@@ -139,7 +151,8 @@ export function ViewportPane() {
       const h = Math.max(1, frame.h);
       ed.setValues({ "camera.panX": d.start.px + dx / h, "camera.panY": d.start.py - dy / h });
     } else {
-      ed.setValues({ "camera.x": d.start.cx - dx * 0.35, "camera.y": clamp(d.start.cy + dy * 0.35, -89, 89) });
+      // Ultramock feel: half a degree per pixel; dragging down lowers the camera
+      ed.setValues({ "camera.x": d.start.cx - dx * 0.5, "camera.y": clamp(d.start.cy - dy * 0.5, -89, 89) });
     }
   };
   const onPointerUp = (e: React.PointerEvent) => {
@@ -147,6 +160,7 @@ export function ViewportPane() {
     drag.current = null;
     try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch {}
     endInteraction();
+    markInteracting();
   };
 
   // wheel / pinch zoom: non-passive so the browser never page-zooms, accumulated per gesture
@@ -160,10 +174,13 @@ export function ViewportPane() {
       const ed = useEditor.getState();
       if (timer === null) { beginInteraction(); zoom = current().zoom; }
       else window.clearTimeout(timer);
+      markInteracting();
       timer = window.setTimeout(() => { endInteraction(); timer = null; }, 250);
       const delta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
-      const factor = Math.exp(-delta * (e.ctrlKey ? 0.01 : 0.0015));
-      zoom = clamp(zoom * factor, 0.2, 8);
+      // linear in camera distance (like Ultramock): each 100 wheel units moves the camera by a quarter of the fit distance
+      const dist = 1 / zoom;
+      const next = clamp(dist + delta * (e.ctrlKey ? 0.006 : 0.0025), 0.12, 6);
+      zoom = 1 / next;
       ed.setValue("camera.zoom", Math.round(zoom * 1000) / 1000);
     };
     el.addEventListener("wheel", onWheel, { passive: false });

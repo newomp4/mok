@@ -21,7 +21,7 @@ const SHORTCUTS: [string, string][] = [
   ["R", "Toggle keyframe recording"],
   ["L", "Toggle loop"],
   ["T", "Toggle timeline"],
-  ["1 – 6", "Camera presets"],
+  ["1 – 9", "Camera presets"],
   [`${MOD} Z`, "Undo"],
   [`⇧ ${MOD} Z`, "Redo"],
   [`${MOD} S`, "Save project"],

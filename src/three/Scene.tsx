@@ -70,15 +70,35 @@ function Driver() {
   return null;
 }
 
+const CAM_KEYS = ["camera.x", "camera.y", "camera.z", "camera.fov", "camera.zoom", "camera.panX", "camera.panY"] as const;
+
 function CameraRig({ fitSize }: { fitSize: number }) {
   const yaw = useRef<THREE.Group>(null);
   const pitch = useRef<THREE.Group>(null);
   const roll = useRef<THREE.Group>(null);
   const cam = useRef<THREE.PerspectiveCamera>(null);
-  useFrame(() => {
-    const v = anim.values;
+  const smooth = useRef<Record<string, number> | null>(null);
+  useFrame((state, delta) => {
+    const raw = anim.values;
     const c = cam.current;
-    if (!v || !c || !yaw.current || !pitch.current || !roll.current) return;
+    if (!raw || !c || !yaw.current || !pitch.current || !roll.current) return;
+    // Interactive changes ease toward their target (critically damped feel); playback and export are exact.
+    const exact = anim.exporting || useUI.getState().playing;
+    let v: Record<string, number> = raw;
+    if (exact || !smooth.current) {
+      smooth.current = Object.fromEntries(CAM_KEYS.map((k) => [k, raw[k]]));
+    } else {
+      const k = 1 - Math.exp(-Math.min(delta, 0.05) * 18);
+      let moving = false;
+      for (const key of CAM_KEYS) {
+        const cur = smooth.current[key], target = raw[key];
+        const d = target - cur;
+        if (Math.abs(d) < (key === "camera.zoom" ? 0.0005 : key.startsWith("camera.pan") ? 0.0003 : 0.01)) smooth.current[key] = target;
+        else { smooth.current[key] = cur + d * k; moving = true; }
+      }
+      if (moving) state.invalidate();
+      v = smooth.current;
+    }
     yaw.current.rotation.y = v["camera.x"] * DEG;
     pitch.current.rotation.x = -v["camera.y"] * DEG;
     roll.current.rotation.z = v["camera.z"] * DEG;

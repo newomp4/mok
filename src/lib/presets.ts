@@ -42,13 +42,18 @@ export interface CameraPreset {
   camera: Project["camera"];
   rot?: { x: number; y: number; z: number };
 }
+// The five classic framings match Ultramock's numerically (45° lens, converted to this rig's units);
+// the rest are additions.
 export const CAMERA_PRESETS: CameraPreset[] = [
-  { id: "hero", name: "Hero", camera: { x: -18, y: 14, z: 0, fov: 24, zoom: 1, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 } },
-  { id: "angled", name: "Angled", camera: { x: -32, y: 22, z: -6, fov: 26, zoom: 1.05, panX: 0, panY: 0 }, rot: { x: 0, y: 8, z: 0 } },
-  { id: "flat", name: "Flat", camera: { x: 0, y: 0, z: 0, fov: 20, zoom: 1, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 } },
-  { id: "bottom", name: "Bottom", camera: { x: 10, y: -30, z: 0, fov: 30, zoom: 1.1, panX: 0, panY: 0.05 }, rot: { x: 0, y: 0, z: 0 } },
-  { id: "detail", name: "Detail", camera: { x: -24, y: 48, z: 0, fov: 24, zoom: 1.9, panX: 0.06, panY: -0.17 }, rot: { x: 0, y: 0, z: 0 } },
-  { id: "top", name: "Top", camera: { x: 0, y: 62, z: 0, fov: 24, zoom: 1, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 } },
+  { id: "hero", name: "Hero", camera: { x: 0, y: 0, z: 0, fov: 45, zoom: 1.215, panX: 0.351, panY: -0.36 }, rot: { x: 0, y: 0, z: 0 } },
+  { id: "angled", name: "Angled", camera: { x: -26, y: 28, z: 5, fov: 45, zoom: 1.031, panX: 0.333, panY: -0.135 }, rot: { x: 0, y: 0, z: 0 } },
+  { id: "flat", name: "Flat", camera: { x: 0, y: 0, z: 0, fov: 45, zoom: 0.82, panX: 0.0, panY: 0.0 }, rot: { x: 0, y: 0, z: 0 } },
+  { id: "bottom", name: "Bottom", camera: { x: -1, y: 50, z: 0, fov: 45, zoom: 1.093, panX: 0.0, panY: 0.0 }, rot: { x: 0, y: 0, z: 0 } },
+  { id: "detail", name: "Detail", camera: { x: 22, y: -26, z: 1, fov: 45, zoom: 2.05, panX: -0.27, panY: -0.36 }, rot: { x: 0, y: 0, z: 0 } },
+  { id: "top", name: "Top", camera: { x: -8, y: 68, z: 0, fov: 30, zoom: 1.05, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 } },
+  { id: "profile", name: "Profile", camera: { x: -70, y: 6, z: 0, fov: 35, zoom: 1.1, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 } },
+  { id: "dramatic", name: "Dramatic", camera: { x: 30, y: -12, z: 8, fov: 45, zoom: 1.25, panX: 0, panY: 0.02 }, rot: { x: 6, y: -22, z: 0 } },
+  { id: "float", name: "Float", camera: { x: -20, y: 24, z: 0, fov: 30, zoom: 0.95, panX: 0, panY: 0 }, rot: { x: -10, y: 20, z: -6 } },
 ];
 
 export interface MotionPreset {
@@ -109,6 +114,23 @@ export const MOTION_PRESETS: MotionPreset[] = [
     }),
   },
   {
+    id: "fold-up", name: "Fold up", duration: 4,
+    build: (d, c) => ({
+      "camera.y": [kf(0, 78, "easeInOut"), kf(d, c.y, "easeInOut")],
+      "camera.x": [kf(0, c.x - 10, "easeInOut"), kf(d, c.x, "easeInOut")],
+      "camera.zoom": [kf(0, c.zoom * 1.15, "easeInOut"), kf(d, c.zoom, "easeInOut")],
+    }),
+  },
+  {
+    id: "flat-truck", name: "Flat truck", duration: 4,
+    build: (d, c) => ({
+      "camera.x": [kf(0, 0), kf(d, 0)],
+      "camera.y": [kf(0, 0), kf(d, 0)],
+      "camera.panX": [kf(0, c.panX + 0.18, "easeInOut"), kf(d, c.panX - 0.18, "easeInOut")],
+      "camera.zoom": [kf(0, c.zoom * 1.3), kf(d, c.zoom * 1.3)],
+    }),
+  },
+  {
     id: "orbit", name: "Orbit", duration: 5,
     build: (d, c, r) => ({
       "mockup.rotY": [kf(0, r.y - 35, "easeInOut"), kf(d, r.y + 35, "easeInOut")],
@@ -149,11 +171,11 @@ export interface LightingPreset {
 }
 export const LIGHTINGS: LightingPreset[] = [
   { id: "default", name: "Default", file: "/hdri/brown_photostudio_04.hdr", intensity: 1, rotY: 263 },
-  { id: "soft", name: "Soft", file: "/hdri/studio_small_09.hdr", intensity: 0.9, rotY: 180 },
+  { id: "soft", name: "Studio soft", file: "/hdri/studio_small_09.hdr", intensity: 0.9, rotY: 180 },
+  { id: "neon", name: "Dark rim", file: "/hdri/neon_photostudio.hdr", intensity: 0.9, rotY: 40 },
+  { id: "cool", name: "Two tone", file: "/hdri/blue_photo_studio.hdr", intensity: 1, rotY: 300 },
+  { id: "contrast", name: "Warm glow", file: "/hdri/photo_studio_01.hdr", intensity: 1, rotY: 220 },
   { id: "bright", name: "Bright", file: "/hdri/studio_small_03.hdr", intensity: 1.15, rotY: 120 },
-  { id: "contrast", name: "Contrast", file: "/hdri/photo_studio_01.hdr", intensity: 1, rotY: 220 },
-  { id: "neon", name: "Neon", file: "/hdri/neon_photostudio.hdr", intensity: 1, rotY: 40 },
-  { id: "cool", name: "Cool", file: "/hdri/blue_photo_studio.hdr", intensity: 1, rotY: 300 },
 ];
 export function getLighting(id: LightingId): LightingPreset {
   return LIGHTINGS.find((l) => l.id === id) ?? LIGHTINGS[0];

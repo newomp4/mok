@@ -11,7 +11,8 @@ import { viewport as registryViewport } from "@/three/registry";
 import { anim as animState } from "@/three/anim";
 import { totalDuration } from "@/lib/animation";
 import { captureImage } from "@/export/capture";
-import { getAspect, TEMPLATES, EFFECT_DEFS } from "@/lib/presets";
+import { getAspect, TEMPLATES, EFFECT_DEFS, SCENES } from "@/lib/presets";
+import { DEVICES } from "@/lib/devices";
 import { clamp } from "@/lib/cn";
 import { preferModel } from "@/lib/devices";
 
@@ -19,7 +20,7 @@ export function useBootstrap() {
   useEffect(() => {
     const ui = useUI.getState();
     // debug handle for QA / power users
-    (window as unknown as { __mok: unknown }).__mok = { useEditor, useUI, actions, capture, registry: registryViewport, templates: TEMPLATES, anim: animState, effectDefs: EFFECT_DEFS };
+    (window as unknown as { __mok: unknown }).__mok = { useEditor, useUI, actions, capture, registry: registryViewport, templates: TEMPLATES, anim: animState, effectDefs: EFFECT_DEFS, devices: DEVICES, scenes: SCENES };
     ui.setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
     let cancelled = false;
     loadAutosave().then((p) => {
@@ -171,6 +172,9 @@ export function useShortcuts() {
         case "4": applyCameraPreset("bottom"); break;
         case "5": applyCameraPreset("detail"); break;
         case "6": applyCameraPreset("top"); break;
+        case "7": applyCameraPreset("profile"); break;
+        case "8": applyCameraPreset("dramatic"); break;
+        case "9": applyCameraPreset("float"); break;
         case "l": case "L": ui.toggleLoop(); break;
         case "d": case "D": if (!e.repeat) ui.toggleTheme(); break;
       }

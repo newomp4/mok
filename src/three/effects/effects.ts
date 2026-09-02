@@ -4,13 +4,22 @@ import * as THREE from "three";
 const focusFrag = /* glsl */ `
 uniform sampler2D map;
 uniform vec4 params;   // focusX, focusY, size, falloff
-uniform float mode;    // 0 = radial, 1 = linear
+uniform float mode;    // 0 = radial, 1 = linear (tilt shift), 2 = directional
 uniform float uAspect;
+uniform vec2 dir;      // directional blur vector (texel units × strength)
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
   vec2 p = (uv - params.xy) * vec2(uAspect, 1.0);
-  float d = mode < 0.5 ? length(p) : abs(p.y);
+  float d = mode < 0.5 ? length(p) : (mode < 1.5 ? abs(p.y) : length(p));
   float m = smoothstep(params.z, params.z + max(params.w, 0.001), d);
-  vec4 b = texture2D(map, uv);
+  vec4 b;
+  if (mode > 1.5) {
+    // 1-D blur along dir, masked by the focus like the other modes
+    vec4 acc = vec4(0.0);
+    for (int i = -8; i <= 8; i++) { acc += texture2D(inputBuffer, clamp(uv + dir * (float(i) / 8.0), 0.0, 1.0)); }
+    b = acc / 17.0;
+  } else {
+    b = texture2D(map, uv);
+  }
   outputColor = mix(inputColor, b, m);
 }`;
 
@@ -30,6 +39,7 @@ export class FocusBlurEffect extends Effect {
         ["params", new THREE.Uniform(new THREE.Vector4(0.5, 0.5, 0.4, 0.2))],
         ["mode", new THREE.Uniform(0)],
         ["uAspect", new THREE.Uniform(1)],
+        ["dir", new THREE.Uniform(new THREE.Vector2(0, 0))],
       ]),
     });
     this.renderTarget = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false });
@@ -40,10 +50,13 @@ export class FocusBlurEffect extends Effect {
     this.resolution.addEventListener("change", () => this.setSize(this.resolution.baseWidth, this.resolution.baseHeight));
   }
 
-  setParams(focusX: number, focusY: number, size: number, falloff: number, mode: "radial" | "linear", strength: number, bokeh: boolean) {
+  setParams(focusX: number, focusY: number, size: number, falloff: number, mode: "radial" | "linear" | "directional", strength: number, bokeh: boolean, angleDeg = 0) {
     const u = this.uniforms.get("params")!.value as THREE.Vector4;
     u.set(focusX, focusY, size, falloff);
-    this.uniforms.get("mode")!.value = mode === "linear" ? 1 : 0;
+    this.uniforms.get("mode")!.value = mode === "linear" ? 1 : mode === "directional" ? 2 : 0;
+    const a = (angleDeg * Math.PI) / 180;
+    const len = (strength / 20) * 0.06;
+    (this.uniforms.get("dir")!.value as THREE.Vector2).set(Math.cos(a) * len / Math.max(0.01, this.uniforms.get("uAspect")!.value as number), Math.sin(a) * len);
     const k = bokeh ? KernelSize.HUGE : KernelSize.LARGE;
     if (this.blurPass.kernelSize !== k) this.blurPass.kernelSize = k;
     this.blurPass.scale = Math.max(0.0001, (strength / 10) * (bokeh ? 1.2 : 1.6));

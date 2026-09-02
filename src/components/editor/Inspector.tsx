@@ -165,8 +165,10 @@ function ScenePicker() {
             onClick={() => { setScenePreset(s.id); setPicker(null); }}
             className={cn("flex flex-col overflow-hidden rounded-md border text-left transition-colors", s.id === current ? "border-accent" : "border-line hover:border-line-2")}
           >
-            <div className="flex h-16 items-center justify-center" style={{ background: `linear-gradient(160deg, ${s.swatch}, ${shade(s.swatch)})` }}>
-              <Icon name={s.id === "custom" ? "sliders" : "cube"} size={18} className={isDark(s.swatch) ? "text-white/70" : "text-black/55"} />
+            <div className="relative flex h-16 items-center justify-center overflow-hidden" style={{ background: `linear-gradient(160deg, ${s.swatch}, ${shade(s.swatch)})` }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={`/scenes/${s.id}.webp`} alt="" className="absolute inset-0 h-full w-full object-cover" draggable={false} onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+              <Icon name={s.id === "custom" ? "sliders" : "cube"} size={18} className={cn("relative", isDark(s.swatch) ? "text-white/70" : "text-black/55")} />
             </div>
             <div className="flex flex-col gap-0.5 px-2 py-1.5">
               <span className="label text-fg">{s.name}</span>
@@ -245,11 +247,15 @@ function DevicePicker() {
                 key={d.id}
                 type="button"
                 onClick={() => { setDevice(d.id); setPicker(null); }}
-                className={cn("flex flex-col items-center gap-1.5 rounded-md border bg-panel-2 px-2 py-3 transition-colors", d.id === current ? "border-accent" : "border-line hover:border-line-2")}
+                className={cn("flex flex-col items-center gap-1.5 rounded-md border bg-panel-2 px-2 pb-2.5 pt-2 transition-colors", d.id === current ? "border-accent" : "border-line hover:border-line-2")}
               >
-                <Icon name={d.icon} size={22} className="text-fg-2" strokeWidth={1.25} />
+                <div className="relative flex h-16 w-full items-center justify-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={`/devices/${d.id}.webp`} alt="" className="h-16 w-full object-contain" draggable={false} onError={(e) => { const el = e.currentTarget as HTMLImageElement; el.style.display = "none"; (el.nextElementSibling as HTMLElement | null)?.classList.remove("hidden"); }} />
+                  <span className="hidden text-fg-2"><Icon name={d.icon} size={22} strokeWidth={1.25} /></span>
+                </div>
                 <span className="label text-center text-fg">{d.name}</span>
-                <span className="label-sm text-muted">{d.model ? "3D model" : "built-in"} · {d.screenPx[0]} × {d.screenPx[1]}</span>
+                <span className="label-sm text-muted">{d.screenPx[0]} × {d.screenPx[1]}</span>
               </button>
             ))}
           </div>
@@ -278,7 +284,7 @@ function CameraSection() {
           <AnimRow prop="camera.panY" label="Pan Y" hint="Space drag" min={-1} max={1} step={0.01} />
         </>
       ) : (
-        <div className="grid grid-cols-2 gap-1.5">
+        <div className="grid grid-cols-3 gap-1.5">
           {CAMERA_PRESETS.map((c, i) => (
             <Button key={c.id} variant="soft" onClick={() => applyCameraPreset(c.id)} title={`Shortcut ${i + 1}`}>{c.name}</Button>
           ))}
@@ -324,7 +330,10 @@ function BlurSection() {
   const off = blur.mode === "off";
   return (
     <Section title="Blur" open={open} onToggle={() => setOpen((o) => !o)} right={<IconButton icon="rotate-ccw" size={12} label="Reset blur" onClick={resetBlur} className="h-6 w-6" />}>
-      <SelectRow label="Mode" value={blur.mode} onChange={(v: BlurMode) => update((p) => { p.blur.mode = v; })} options={[{ value: "off", label: "Off" }, { value: "radial", label: "Radial" }, { value: "linear", label: "Linear" }, { value: "depth", label: "Depth" }]} />
+      <SelectRow label="Mode" value={blur.mode} onChange={(v: BlurMode) => update((p) => { p.blur.mode = v; })} options={[{ value: "off", label: "None" }, { value: "radial", label: "Radial" }, { value: "directional", label: "Directional" }, { value: "linear", label: "Tilt shift" }, { value: "depth", label: "Lens" }]} />
+      {blur.mode === "directional" && (
+        <NumberRow label="Angle" value={blur.angle ?? 0} min={0} max={360} step={1} onChange={(v) => update((p) => { p.blur.angle = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+      )}
       <AnimRow prop="blur.strength" label="Strength" min={0} max={20} step={0.1} disabled={off} />
       <AnimRow prop="blur.focusSize" label="Focus size" min={0} max={1.5} step={0.01} disabled={off} />
       <AnimRow prop="blur.falloff" label="Falloff" min={0} max={1} step={0.01} disabled={off} />
