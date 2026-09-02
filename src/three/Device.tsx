@@ -112,7 +112,8 @@ export function Device({ layout }: { layout: DeviceLayout }) {
     default: model = <FlatModel spec={spec} mats={mats} screen={screenMat} size={layout.flat ?? { w: 192, h: 120 }} radius={borderRadius} finish={finish.id} />;
   }
 
-  const yOffset = spec.family === "laptop" ? -layout.height / 2 : 0;
+  // procedural laptops are modelled from the floor up; glTF models are already centred
+  const yOffset = !spec.model && spec.family === "laptop" ? -layout.height / 2 : 0;
   return (
     <group ref={group}>
       <group position={[0, yOffset, 0]}>{model}</group>
