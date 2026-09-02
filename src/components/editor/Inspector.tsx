@@ -246,7 +246,7 @@ function DevicePicker() {
               >
                 <Icon name={d.icon} size={22} className="text-fg-2" strokeWidth={1.25} />
                 <span className="label text-center text-fg">{d.name}</span>
-                <span className="label-sm text-muted">{d.screenPx[0]} × {d.screenPx[1]}</span>
+                <span className="label-sm text-muted">{d.model ? "3D model" : "built-in"} · {d.screenPx[0]} × {d.screenPx[1]}</span>
               </button>
             ))}
           </div>

@@ -479,6 +479,30 @@ export const DEVICES: DeviceSpec[] = [
  *   pnpm dlx @gltf-transform/cli optimize in.glb public/models/out.glb --compress meshopt --texture-compress ktx2
  */
 export const DEVICE_MAP = new Map(DEVICES.map((d) => [d.id, d]));
+
+/** Photoreal glTF counterpart for each procedural device (used for defaults, templates and migration). */
+export const PREFERRED_MODEL: Record<string, string> = {
+  "iphone-17": "iphone-17-pro-glb",
+  "iphone-17-pro": "iphone-17-pro-glb",
+  "iphone-17-pro-max": "iphone-17-pro-max-glb",
+  "iphone-air": "iphone-17-pro-glb",
+  "ipad-pro-13": "ipad-pro-13-glb",
+  "ipad-air-11": "ipad-pro-13-glb",
+  "macbook-pro-14": "macbook-pro-14-glb",
+  "macbook-pro-16": "macbook-pro-16-glb",
+  "macbook-air-13": "macbook-pro-14-glb",
+  "macbook-air-15": "macbook-pro-16-glb",
+  "apple-watch-46": "apple-watch-9-glb",
+  "apple-watch-ultra": "apple-watch-ultra-glb",
+  "studio-display": "pro-display-xdr-glb",
+  "imac-24": "imac-24-glb",
+};
+
+/** Swap a procedural device id for its glTF counterpart when one exists. */
+export function preferModel(id: string): string {
+  const target = PREFERRED_MODEL[id];
+  return target && DEVICE_MAP.has(target) ? target : id;
+}
 export function getDevice(id: string): DeviceSpec {
   return DEVICE_MAP.get(id) ?? DEVICES[2];
 }

@@ -12,6 +12,7 @@ import { totalDuration } from "@/lib/animation";
 import { captureImage } from "@/export/capture";
 import { getAspect } from "@/lib/presets";
 import { clamp } from "@/lib/cn";
+import { preferModel } from "@/lib/devices";
 
 export function useBootstrap() {
   useEffect(() => {
@@ -22,6 +23,13 @@ export function useBootstrap() {
     let cancelled = false;
     loadAutosave().then((p) => {
       if (cancelled || !p) return;
+      // one-time upgrade: projects saved before the photoreal models existed keep working but switch to them
+      try {
+        if (!localStorage.getItem("mok:migrated-glb")) {
+          p.mockup.device = preferModel(p.mockup.device);
+          localStorage.setItem("mok:migrated-glb", "1");
+        }
+      } catch {}
       useEditor.getState().replaceProject(p);
       useEditor.temporal.getState().clear();
       useUI.getState().setActiveShot(p.shots[0]?.id ?? null);
