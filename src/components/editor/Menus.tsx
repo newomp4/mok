@@ -41,12 +41,13 @@ export function AspectMenu() {
 
 export function TemplatesMenu() {
   const [open, setOpen] = useState(false);
+  const [hover, setHover] = useState<string | null>(null);
   const ref = useRef<HTMLButtonElement>(null);
   return (
     <>
       <BarButton ref={ref} iconRight="chevron-down" active={open} onClick={() => setOpen((o) => !o)}>Templates</BarButton>
-      <Popover open={open} onClose={() => setOpen(false)} anchor={ref} className="w-[420px] p-2">
-        <div className="label px-1 pb-2 pt-1 text-muted">Starter templates</div>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={ref} className="w-[460px] p-2">
+        <div className="label px-1 pb-2 pt-1 text-muted">Starter templates · hover to preview</div>
         <div className="scroll grid max-h-[60vh] grid-cols-2 gap-2 overflow-auto pr-1">
           {TEMPLATES.map((t) => {
             const spec = getDevice(t.device);
@@ -55,16 +56,22 @@ export function TemplatesMenu() {
                 key={t.id}
                 type="button"
                 onClick={() => { applyTemplate(t.id); setOpen(false); }}
+                onMouseEnter={() => setHover(t.id)}
+                onMouseLeave={() => setHover((h) => (h === t.id ? null : h))}
                 className="group flex flex-col overflow-hidden rounded-lg border border-line bg-panel-2 text-left transition-colors hover:border-line-2"
               >
                 <div className="relative aspect-[8/5] overflow-hidden" style={{ background: `linear-gradient(135deg, ${t.swatch[0]}, ${t.swatch[1]})` }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={`/templates/${t.id}.webp`} alt="" className="h-full w-full object-cover transition-transform group-hover:scale-[1.03]" draggable={false} onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
-                  {t.motion && <span className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white"><Icon name="play" size={9} /></span>}
+                  {hover === t.id && (t.motion || t.sequence) && (
+                    <video src={`/templates/${t.id}.webm`} autoPlay muted loop playsInline className="absolute inset-0 h-full w-full object-cover" onError={(e) => { (e.currentTarget as HTMLVideoElement).style.display = "none"; }} />
+                  )}
+                  {(t.motion || t.sequence) && <span className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white"><Icon name="play" size={9} /></span>}
+                  {t.sequence && <span className="label-sm absolute left-2 top-2 rounded-full bg-black/60 px-1.5 py-0.5 text-white">{t.sequence.length} shots</span>}
                 </div>
-                <div className="flex items-center justify-between px-2.5 py-2">
-                  <span className="label text-fg">{t.name}</span>
-                  <span className="label-sm text-muted">{spec.name}</span>
+                <div className="flex items-center justify-between gap-2 px-2.5 py-2">
+                  <span className="flex min-w-0 flex-col"><span className="label truncate text-fg">{t.name}</span>{t.description && <span className="label-sm truncate text-muted">{t.description}</span>}</span>
+                  <span className="label-sm shrink-0 text-muted">{spec.name}</span>
                 </div>
               </button>
             );
@@ -120,7 +127,9 @@ export function HelpMenu() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const setModal = useUI((s) => s.setModal);
+  const setTourStep = useUI((s) => s.setTourStep);
   const items: MenuItem[] = [
+    { label: "Take the tour", icon: "play-circle", onSelect: () => setTourStep(0) },
     { label: "Keyboard shortcuts", icon: "keyboard", shortcut: "?", onSelect: () => setModal("shortcuts") },
     { label: "How it works", icon: "help-circle", onSelect: () => setModal("info") },
     { label: "What's new", icon: "sparkles", onSelect: () => setModal("whatsnew") },

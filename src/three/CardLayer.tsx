@@ -137,13 +137,16 @@ function drawLogo(ctx: CanvasRenderingContext2D, W: number, H: number, st: LogoS
   ctx.clearRect(0, 0, W, H);
   const m = st.media ? getMedia(st.media.id) : null;
   if (!m || m.kind !== "image") {
-    // placeholder mark
+    // placeholder mark, inked for contrast against the card colour
     const s = H * st.scale;
-    ctx.fillStyle = "rgba(0,0,0,0.12)";
+    const n = parseInt(st.background.replace("#", ""), 16);
+    const lum = Number.isNaN(n) ? 255 : 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
+    const ink = lum > 140 ? "0,0,0" : "255,255,255";
+    ctx.fillStyle = `rgba(${ink},0.12)`;
     ctx.beginPath();
     ctx.roundRect(W / 2 - s / 2, H / 2 - s / 2, s, s, s * 0.22);
     ctx.fill();
-    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    ctx.fillStyle = `rgba(${ink},0.5)`;
     ctx.font = `700 ${s * 0.42}px ${cssFamily("Geist")}`;
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText("LOGO", W / 2, H / 2 + s * 0.02);

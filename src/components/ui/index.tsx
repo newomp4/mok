@@ -424,11 +424,11 @@ export function ColorRow({ label, value, onChange }: { label: ReactNode; value: 
 }
 
 /* ---------- Section ---------- */
-export function Section({ title, children, right, open = true, onToggle, className, sub }: {
-  title: ReactNode; children?: ReactNode; right?: ReactNode; open?: boolean; onToggle?: () => void; className?: string; sub?: ReactNode;
+export function Section({ title, children, right, open = true, onToggle, className, sub, tour }: {
+  title: ReactNode; children?: ReactNode; right?: ReactNode; open?: boolean; onToggle?: () => void; className?: string; sub?: ReactNode; tour?: string;
 }) {
   return (
-    <div className={cn("border-b border-line", className)}>
+    <div className={cn("border-b border-line", className)} data-tour={tour}>
       <div className="flex h-9 items-center justify-between px-3">
         <button type="button" onClick={onToggle} className="label flex items-center gap-2 text-fg">
           {title}

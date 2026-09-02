@@ -415,7 +415,8 @@ export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceS
   }, -25);
 
   useEffect(() => {
-    const finishNames = new Set(model.finishMaterials ?? []);
+    // "model" keeps the authored colour; any other finish tints the listed materials
+    const finishNames = new Set(finish.id === "model" ? [] : model.finishMaterials ?? []);
     if (!root.userData.screens) {
       root.updateWorldMatrix(true, true);
       // mirrored nodes (negative scale) render inside-out; draw both faces for those

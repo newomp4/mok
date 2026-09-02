@@ -8,6 +8,7 @@ import { Modals } from "./Modals";
 import { useAutosave, useBootstrap, usePasteImport, useShortcuts } from "./hooks";
 import { Modal, ProgressBar, Button } from "@/components/ui";
 import { useAudioPlayback } from "@/lib/audio";
+import { Tour } from "./Tour";
 
 function ExportProgress() {
   const exporting = useUI((s) => s.exporting);
@@ -50,6 +51,7 @@ export default function Editor() {
       </div>
       <Modals />
       <ExportProgress />
+      <Tour />
     </div>
   );
 }

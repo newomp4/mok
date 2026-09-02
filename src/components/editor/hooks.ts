@@ -38,10 +38,11 @@ export function useBootstrap() {
       useEditor.temporal.getState().clear();
       useUI.getState().setActiveShot(p.shots[0]?.id ?? null);
     });
-    // what's new, once per version
+    // first visit: the tour; later versions: what's new
     try {
       const seen = localStorage.getItem("mok:seen-version");
-      if (seen && seen !== APP_VERSION) window.setTimeout(() => useUI.getState().setModal("whatsnew"), 1200);
+      if (!seen && !localStorage.getItem("mok:toured")) window.setTimeout(() => useUI.getState().setTourStep(0), 1500);
+      else if (seen && seen !== APP_VERSION) window.setTimeout(() => useUI.getState().setModal("whatsnew"), 1200);
       localStorage.setItem("mok:seen-version", APP_VERSION);
     } catch {}
     return () => { cancelled = true; };

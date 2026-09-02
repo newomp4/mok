@@ -65,7 +65,7 @@ function ShotSection() {
   const kind = shotKind(shot);
   const title = kind === "text" ? "Text" : kind === "logo" ? "Logo" : "Source";
   return (
-    <Section title={title} sub={shot?.name} open={open} onToggle={() => setOpen((o) => !o)}>
+    <Section title={title} sub={shot?.name} open={open} onToggle={() => setOpen((o) => !o)} tour="source">
       {shot && kind === "text" && <TextEditor shot={shot} />}
       {shot && kind === "logo" && <LogoEditor shot={shot} />}
       {(!shot || kind === "media") && <MediaEditor shot={shot} />}
@@ -223,7 +223,7 @@ function SceneSection() {
   const bg = scene.background;
   if (picker === "scene") return <ScenePicker />;
   return (
-    <Section title="Scene" open={open} onToggle={() => setOpen((o) => !o)}>
+    <Section title="Scene" open={open} onToggle={() => setOpen((o) => !o)} tour="scene">
       <div className="flex items-center gap-2.5 rounded-md border border-line bg-panel-2 p-2">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md" style={{ background: preset.swatch }}>
           <Icon name={custom ? "sliders" : "cube"} size={14} className={preset.id === "darkroom" || preset.id === "concrete" ? "text-white/80" : "text-black/60"} />
@@ -320,7 +320,7 @@ function MockupSection() {
   const features = useModelBounds((s) => s.bounds[mockup.device]?.features);
   if (picker === "device") return <DevicePicker />;
   return (
-    <Section title="Mockup" open={open} onToggle={() => setOpen((o) => !o)}>
+    <Section title="Mockup" open={open} onToggle={() => setOpen((o) => !o)} tour="mockup">
       <div className="flex items-center gap-2.5 rounded-md border border-line bg-panel-2 p-2">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-fill text-fg-2">
           <Icon name={spec.icon} size={16} />
@@ -417,7 +417,7 @@ function CameraSection() {
   const tab = useUI((s) => s.cameraTab);
   const setTab = useUI((s) => s.setCameraTab);
   return (
-    <Section title="Camera" open={open} onToggle={() => setOpen((o) => !o)} right={<IconButton icon="rotate-ccw" size={12} label="Reset camera" onClick={resetCamera} className="h-6 w-6" />}>
+    <Section title="Camera" open={open} onToggle={() => setOpen((o) => !o)} tour="camera" right={<IconButton icon="rotate-ccw" size={12} label="Reset camera" onClick={resetCamera} className="h-6 w-6" />}>
       <Segmented value={tab} onChange={setTab} options={[{ value: "manual", label: "Manual" }, { value: "presets", label: "Presets" }]} />
       {tab === "manual" ? (
         <>
@@ -475,7 +475,7 @@ function BlurSection() {
   const [open, setOpen] = useState(true);
   const off = blur.mode === "off";
   return (
-    <Section title="Blur" open={open} onToggle={() => setOpen((o) => !o)} right={<IconButton icon="rotate-ccw" size={12} label="Reset blur" onClick={resetBlur} className="h-6 w-6" />}>
+    <Section title="Blur" open={open} onToggle={() => setOpen((o) => !o)} tour="blur" right={<IconButton icon="rotate-ccw" size={12} label="Reset blur" onClick={resetBlur} className="h-6 w-6" />}>
       <SelectRow label="Mode" value={blur.mode} onChange={(v: BlurMode) => update((p) => { p.blur.mode = v; })} options={[{ value: "off", label: "None" }, { value: "radial", label: "Radial" }, { value: "directional", label: "Directional" }, { value: "linear", label: "Tilt shift" }, { value: "depth", label: "Lens" }]} />
       {blur.mode === "directional" && (
         <NumberRow label="Angle" value={blur.angle ?? 0} min={0} max={360} step={1} onChange={(v) => update((p) => { p.blur.angle = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />

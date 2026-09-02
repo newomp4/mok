@@ -83,8 +83,12 @@ export const DEVICES: DeviceSpec[] = [
     id: "iphone-17-pro-glb", name: "iPhone 17 Pro", family: "phone",
     screenPx: [1206, 2622], screenMm: [64.9, 141.1], screenRadius: 12.5,
     body: { w: 71.9, h: 150, d: 8.75, r: 14 },
-    model: { url: "/models/iphone-17-pro.glb", screenMesh: "OLED", size: 150, rotation: [0, Math.PI, 0] },
-    finishes: [{ id: "model", name: "Model colour", color: "#dcdde0" }],
+    model: { url: "/models/iphone-17-pro.glb", screenMesh: "OLED", size: 150, rotation: [0, Math.PI, 0], finishMaterials: ["Anodized_aluminum", "Frosted_glass"] },
+    finishes: [
+      { id: "model", name: "Silver", color: "#dcdde0" },
+      { id: "orange", name: "Cosmic Orange", color: "#e9782a" },
+      { id: "blue", name: "Deep Blue", color: "#2f4472" },
+    ],
     fitSize: 1.55, icon: "phone", placement: "stand", free: true,
   },
   {

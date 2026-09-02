@@ -204,6 +204,7 @@ export function ViewportPane() {
     <div
       ref={containerRef}
       className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-xl border border-line bg-panel-2"
+      data-tour="viewport"
       onDragOver={(e) => { e.preventDefault(); if (!dragging) setDragging(true); }}
       onDragLeave={(e) => { if (e.currentTarget === e.target) setDragging(false); }}
       onDrop={onDrop}

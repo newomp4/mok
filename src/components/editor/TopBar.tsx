@@ -54,7 +54,7 @@ export function TopBar() {
       <MainMenu />
       <Logo />
       <BarButton onClick={() => setModal("info")}>Info</BarButton>
-      <TemplatesMenu />
+      <span data-tour="templates"><TemplatesMenu /></span>
       <HelpMenu />
       <div className="mx-1.5 h-4 w-px bg-line" />
       <ProjectName />
@@ -70,7 +70,7 @@ export function TopBar() {
       <BarButton onClick={() => void saveCurrentProject()}>Save project</BarButton>
       <IconButton icon="history" label="Projects" onClick={() => setModal("projects")} />
       <CaptureButton />
-      <ExportButton />
+      <span data-tour="export"><ExportButton /></span>
     </div>
   );
 }

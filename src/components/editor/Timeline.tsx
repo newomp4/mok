@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useEditor, beginInteraction, endInteraction, hasShotClipboard } from "@/store/editor";
 import { useUI } from "@/store/ui";
 import { ANIM_LABELS, type AnimProp, type Shot, type Transition, type AudioTrack } from "@/lib/types";
-import { formatTime, shotStart, totalDuration } from "@/lib/animation";
+import { EASES, formatTime, shotStart, totalDuration } from "@/lib/animation";
 import { MOTION_PRESETS } from "@/lib/presets";
 import { Button, IconButton, Popover, Segmented, MenuList, ContextMenu, NumberRow, ColorRow, type MenuItem } from "@/components/ui";
 import { Icon } from "@/components/icons";
@@ -59,6 +59,7 @@ export function Timeline() {
   const [addOpen, setAddOpen] = useState(false);
   const addRef = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState<{ at: { x: number; y: number }; shotId: string } | null>(null);
+  const [keyMenu, setKeyMenu] = useState<{ at: { x: number; y: number }; shotId: string; prop: AnimProp; t: number } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [transitionFor, setTransitionFor] = useState<string | null>(null);
   const advanced = ui.timelineMode === "advanced";
@@ -158,7 +159,7 @@ export function Timeline() {
   const heightDrag = useRef<{ y: number; h: number } | null>(null);
 
   return (
-    <div className="relative flex shrink-0 flex-col overflow-hidden rounded-lg border border-line bg-panel" style={{ height: ui.timelineHeight }}>
+    <div className="relative flex shrink-0 flex-col overflow-hidden rounded-lg border border-line bg-panel" style={{ height: ui.timelineHeight }} data-tour="timeline">
       <div
         className="absolute inset-x-0 top-0 z-30 h-1.5 cursor-ns-resize"
         onPointerDown={(e) => { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); heightDrag.current = { y: e.clientY, h: ui.timelineHeight }; }}
@@ -198,7 +199,7 @@ export function Timeline() {
         <IconButton icon="repeat" label="Loop (L)" onClick={ui.toggleLoop} active={ui.loop} className={cn("h-6 w-6", ui.loop && "text-accent")} />
         <IconButton icon="target" label="Centre guides" onClick={() => ui.setGuides(!ui.guides)} active={ui.guides} className={cn("h-6 w-6", ui.guides && "text-accent")} />
         <div className="flex-1" />
-        <Button ref={addRef} variant="outline" size="sm" icon="plus" onClick={() => setAddOpen((o) => !o)}>Add</Button>
+        <Button ref={addRef} variant="outline" size="sm" icon="plus" onClick={() => setAddOpen((o) => !o)} data-tour="add">Add</Button>
         <Popover open={addOpen} onClose={() => setAddOpen(false)} anchor={addRef} side="top" align="end" className="w-64">
           <div className="label-sm px-2 pb-1 pt-1.5 text-muted">Add to timeline</div>
           <MenuList
@@ -303,6 +304,7 @@ export function Timeline() {
                             key={k.t}
                             x={8 + (start + k.t) * pps}
                             selected={isSel}
+                            onContextMenu={(at) => { setSelected([{ shotId: shot.id, prop, t: k.t }]); setKeyMenu({ at, shotId: shot.id, prop, t: k.t }); }}
                             onSelect={(additive) => {
                               const key = { shotId: shot.id, prop, t: k.t };
                               setSelected(additive ? (isSel ? selected.filter((s) => !(s.shotId === shot.id && s.prop === prop && Math.abs(s.t - k.t) < 0.0005)) : [...selected, key]) : [key]);
@@ -339,6 +341,18 @@ export function Timeline() {
         </div>
       </div>
       <ContextMenu at={menu?.at ?? null} items={menu ? menuItems(menu.shotId) : []} onClose={() => setMenu(null)} />
+      <ContextMenu
+        at={keyMenu?.at ?? null}
+        onClose={() => setKeyMenu(null)}
+        items={keyMenu ? [
+          { label: "Easing", disabled: true },
+          ...EASES.map((e) => ({ label: e.label, checked: project.shots.find((s) => s.id === keyMenu.shotId)?.keyframes[keyMenu.prop]?.find((k) => Math.abs(k.t - keyMenu.t) < 0.0005)?.ease === e.id, onSelect: () => update((p) => { const s = p.shots.find((x) => x.id === keyMenu.shotId); const k = s?.keyframes[keyMenu.prop]?.find((kk) => Math.abs(kk.t - keyMenu.t) < 0.0005); if (k) k.ease = e.id; }) })),
+          { divider: true, label: "" },
+          { label: "Apply easing to whole track", icon: "diamond", onSelect: () => update((p) => { const s = p.shots.find((x) => x.id === keyMenu.shotId); const list = s?.keyframes[keyMenu.prop]; const cur = list?.find((kk) => Math.abs(kk.t - keyMenu.t) < 0.0005)?.ease; if (list && cur) for (const kk of list) kk.ease = cur; }) },
+          { label: "Copy keyframe", icon: "clipboard", shortcut: "⌘C", onSelect: () => useEditor.getState().copyKeyframes([{ shotId: keyMenu.shotId, prop: keyMenu.prop, t: keyMenu.t }]) },
+          { label: "Delete keyframe", icon: "trash", danger: true, onSelect: () => update((p) => { const s = p.shots.find((x) => x.id === keyMenu.shotId); if (!s) return; const list = (s.keyframes[keyMenu.prop] ?? []).filter((kk) => Math.abs(kk.t - keyMenu.t) > 0.0005); if (list.length) s.keyframes[keyMenu.prop] = list; else delete s.keyframes[keyMenu.prop]; }) },
+        ] : []}
+      />
     </div>
   );
 }
@@ -565,13 +579,14 @@ function Waveform({ loaded }: { loaded: ReturnType<typeof useMedia> }) {
   );
 }
 
-function KeyframeDiamond({ x, selected, onSelect, onMove, pps }: { x: number; selected: boolean; onSelect: (additive: boolean) => void; onMove: (dt: number) => void; pps: number }) {
+function KeyframeDiamond({ x, selected, onSelect, onMove, pps, onContextMenu }: { x: number; selected: boolean; onSelect: (additive: boolean) => void; onMove: (dt: number) => void; pps: number; onContextMenu?: (at: { x: number; y: number }) => void }) {
   const drag = useRef<{ x: number; moved: boolean } | null>(null);
   return (
     <button
       type="button"
       className={cn("absolute top-1/2 flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-sm", selected ? "text-fg" : "text-accent")}
       style={{ left: x }}
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu?.({ x: e.clientX, y: e.clientY }); }}
       onPointerDown={(e) => { e.stopPropagation(); (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); drag.current = { x: e.clientX, moved: false }; onSelect(e.shiftKey); }}
       onPointerMove={(e) => { if (!drag.current) return; if (Math.abs(e.clientX - drag.current.x) > 3) drag.current.moved = true; }}
       onPointerUp={(e) => {

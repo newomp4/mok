@@ -51,6 +51,9 @@ interface UIState {
   /** shot whose image is being cropped */
   cropShot: string | null;
   setCropShot: (id: string | null) => void;
+  /** onboarding tour step (null = not running) */
+  tourStep: number | null;
+  setTourStep: (s: number | null) => void;
   setGuides: (g: boolean) => void;
   setSnapCenter: (s: boolean) => void;
   setSounds: (s: boolean) => void;
@@ -112,6 +115,8 @@ export const useUI = create<UIState>()(subscribeWithSelector((set, get) => ({
   setSelectedKeys: (selectedKeys) => set({ selectedKeys }),
   cropShot: null,
   setCropShot: (cropShot) => set({ cropShot }),
+  tourStep: null,
+  setTourStep: (tourStep) => set({ tourStep }),
   setGuides: (guides) => set({ guides }),
   setSnapCenter: (snapCenter) => { set({ snapCenter }); savePref("snapCenter", snapCenter); },
   setSounds: (sounds) => { set({ sounds }); savePref("sounds", sounds); },

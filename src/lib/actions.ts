@@ -6,7 +6,7 @@ import type { AnimProp, Keyframe, MediaRef, Project, Shot } from "./types";
 import { importMedia } from "./media";
 import { getDevice } from "./devices";
 import { shotStart } from "./animation";
-import { createProject, defaultLogoStyle, shotKind } from "./defaults";
+import { createLogoShot, createProject, createShot, createTextShot, defaultLogoStyle, shotKind } from "./defaults";
 import { deviceLayout } from "@/three/devices/layout";
 import { S } from "@/three/geometry";
 
@@ -71,9 +71,40 @@ export function applyTemplate(id: string) {
     p.camera = { ...t.camera };
     if (t.aspect) p.aspect = t.aspect;
     p.blur = { ...p.blur, mode: "off", ...(t.blur ?? {}) };
-    for (const shot of p.shots) shot.keyframes = {};
+    p.effects = t.effects ? t.effects.map((e) => ({ ...e, params: { ...e.params } })) : [];
+    p.fade = t.fade ? { ...t.fade } : { in: 0, out: 0, color: "#000000" };
+    if (t.sequence) {
+      // keep whatever media and logo the user already has
+      const media = p.shots.find((sh) => shotKind(sh) === "media" && sh.media)?.media ?? null;
+      const logoMedia = p.shots.find((sh) => shotKind(sh) === "logo" && sh.logo?.media)?.logo?.media ?? null;
+      const rot = { x: p.mockup.rotX, y: p.mockup.rotY, z: p.mockup.rotZ };
+      p.shots = t.sequence.map((ts, i) => {
+        const name = ts.name ?? `${ts.kind === "media" ? "Shot" : ts.kind === "text" ? "Text" : "Logo"} ${i + 1}`;
+        const shot = ts.kind === "text" ? createTextShot(name, ts.duration) : ts.kind === "logo" ? createLogoShot(name, ts.duration) : createShot(name, ts.duration);
+        if (ts.kind === "media") shot.media = media;
+        if (ts.kind === "text" && ts.text) shot.text = { ...shot.text!, ...ts.text };
+        if (ts.kind === "logo") shot.logo = { ...shot.logo!, ...(ts.logo ?? {}), media: ts.logo?.media ?? logoMedia };
+        if (ts.enter) shot.enter = { ...ts.enter };
+        if (ts.exit) shot.exit = { ...ts.exit };
+        if (ts.transitionOut) shot.transitionOut = { ...ts.transitionOut };
+        if (ts.motion) {
+          const m = MOTION_PRESETS.find((x) => x.id === ts.motion);
+          if (m) for (const [prop, list] of Object.entries(m.build(ts.duration, p.camera, rot)) as [AnimProp, Keyframe[]][]) shot.keyframes[prop] = list;
+        }
+        if (ts.camera) for (const [k, v] of Object.entries(ts.camera)) if (v !== undefined) shot.keyframes[`camera.${k}` as AnimProp] = [{ t: 0, v, ease: "smooth" }];
+        if (ts.keyframes) for (const [prop, list] of Object.entries(ts.keyframes) as [AnimProp, Keyframe[]][]) shot.keyframes[prop] = list.map((k) => ({ ...k }));
+        return shot;
+      });
+    } else {
+      // plain templates work on media shots only; card shots from a previous template are dropped
+      p.shots = p.shots.filter((sh) => shotKind(sh) === "media");
+      if (!p.shots.length) p.shots = [createShot("Shot 1", 3), createShot("Shot 2", 3)];
+      for (const shot of p.shots) { shot.keyframes = {}; shot.transitionOut = undefined; }
+    }
   });
-  if (t.motion) applyMotionPreset(t.motion, useEditor.getState().project.shots[0]?.id);
+  const first = useEditor.getState().project.shots[0]?.id ?? null;
+  if (t.motion && !t.sequence) applyMotionPreset(t.motion, first ?? undefined);
+  useUI.getState().setActiveShot(first);
   useUI.getState().setTime(0);
 }
 
@@ -117,6 +148,7 @@ export async function importFilesToShot(files: File[], shotId?: string | null): 
   if (target && shotKind(target) === "text") { ui.showToast("Text shots have no media. Select a media shot or add one with +."); return null; }
   try {
     const ref = await importMedia(files[0]);
+    const previous = target?.media ?? null;
     setShotMedia(shotId ?? ui.activeShotId, ref);
     if (ref.kind === "video") {
       useEditor.getState().update((p) => {
@@ -124,7 +156,19 @@ export async function importFilesToShot(files: File[], shotId?: string | null): 
         if (shot && ref.duration && ref.duration > 0.5) shot.duration = Math.min(30, Math.round(ref.duration * 10) / 10);
       });
     }
-    ui.showToast(`${ref.kind === "video" ? "Video" : "Image"} added · ${ref.width} × ${ref.height}`);
+    const label = `${ref.kind === "video" ? "Video" : "Image"} added · ${ref.width} × ${ref.height}`;
+    if (previous && target) {
+      // the shot already had media: offer to keep it and put the new file on a new shot instead
+      ui.showToast(`${label} · replaced ${previous.name}`, {
+        label: "Add as new shot instead",
+        onClick: () => {
+          const ed = useEditor.getState();
+          ed.updateShot(target.id, (s) => { s.media = previous; });
+          const id = ed.addShot("media", target.id);
+          ed.updateShot(id, (s) => { s.media = ref; if (ref.kind === "video" && ref.duration && ref.duration > 0.5) s.duration = Math.min(30, Math.round(ref.duration * 10) / 10); });
+        },
+      });
+    } else ui.showToast(label);
     return ref;
   } catch (e) {
     ui.showToast(`Could not import file: ${(e as Error).message}`);
