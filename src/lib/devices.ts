@@ -30,10 +30,13 @@ export interface GlbModel {
   screenMesh: string;
   /** material names that should take the finish colour */
   finishMaterials?: string[];
-  /** explicit scale; by default the model is scaled so its height matches body.h */
+  /** explicit scale; by default the model's largest dimension is scaled to `size` mm (or max(body.w, body.h)) */
   scale?: number;
+  size?: number;
   rotation?: [number, number, number];
   position?: [number, number, number];
+  /** hide transparent glass meshes covering the screen (default true) */
+  hideOverlays?: boolean;
 }
 
 export interface DeviceSpec {
@@ -68,6 +71,88 @@ export interface DeviceSpec {
 const ALU = { metalness: 0.95, roughness: 0.38 };
 
 export const DEVICES: DeviceSpec[] = [
+  {
+    id: "iphone-17-pro-glb", name: "iPhone 17 Pro", family: "phone",
+    screenPx: [1206, 2622], screenMm: [64.9, 141.1], screenRadius: 12.5,
+    body: { w: 71.9, h: 150, d: 8.75, r: 14 },
+    model: { url: "/models/iphone-17-pro.glb", screenMesh: "OLED", size: 150, rotation: [0, Math.PI, 0] },
+    finishes: [{ id: "model", name: "Model colour", color: "#dcdde0" }],
+    fitSize: 1.55, icon: "phone", placement: "stand", free: true,
+  },
+  {
+    id: "iphone-17-pro-max-glb", name: "iPhone 17 Pro Max", family: "phone",
+    screenPx: [1320, 2868], screenMm: [70.5, 153.3], screenRadius: 13.5,
+    body: { w: 78, h: 163.4, d: 8.75, r: 15 },
+    model: { url: "/models/iphone-17-pro-max.glb", screenMesh: "screen.001", size: 163.4, rotation: [0, Math.PI / 2, 0] },
+    finishes: [{ id: "model", name: "Model colour", color: "#dcdde0" }],
+    fitSize: 1.68, icon: "phone", placement: "stand",
+  },
+  {
+    id: "iphone-16-pro-max-glb", name: "iPhone 16 Pro Max", family: "phone",
+    screenPx: [1320, 2868], screenMm: [70.5, 153.3], screenRadius: 13.5,
+    body: { w: 77.6, h: 163, d: 8.25, r: 15 },
+    model: { url: "/models/iphone-16-pro-max.glb", screenMesh: "screen.001", size: 163, rotation: [0, Math.PI / 2, 0] },
+    finishes: [{ id: "model", name: "Model colour", color: "#dcdde0" }],
+    fitSize: 1.68, icon: "phone", placement: "stand",
+  },
+  {
+    id: "ipad-pro-13-glb", name: "iPad Pro 13\"", family: "tablet",
+    screenPx: [2064, 2752], screenMm: [196.9, 262.5], screenRadius: 18,
+    body: { w: 215.5, h: 281.6, d: 5.1, r: 20 },
+    model: { url: "/models/ipad-pro-13.glb", screenMesh: "", size: 300, rotation: [0, Math.PI, 0] },
+    finishes: [{ id: "silver", name: "Silver", color: "#dfe0e2" }],
+    fitSize: 2.9, icon: "tablet", placement: "stand",
+  },
+  {
+    id: "macbook-pro-14-glb", name: "MacBook Pro 14\"", family: "laptop",
+    screenPx: [3024, 1964], screenMm: [301, 195.5], screenRadius: 7,
+    body: { w: 312.6, h: 221.2, d: 11.2, r: 11 },
+    lid: { thickness: 4.3, angle: 100, screenTop: 7 },
+    model: { url: "/models/macbook-pro-14.glb", screenMesh: "", size: 312.6 },
+    finishes: [{ id: "space-gray", name: "Space Gray", color: "#7d7e80" }],
+    fitSize: 3.4, icon: "laptop", placement: "sit",
+  },
+  {
+    id: "macbook-pro-16-glb", name: "MacBook Pro 16\"", family: "laptop",
+    screenPx: [3456, 2234], screenMm: [344, 222.5], screenRadius: 7,
+    body: { w: 355.7, h: 248.1, d: 12.4, r: 11 },
+    lid: { thickness: 4.4, angle: 100, screenTop: 7 },
+    model: { url: "/models/macbook-pro-16.glb", screenMesh: "", size: 355.7 },
+    finishes: [{ id: "space-black", name: "Space Black", color: "#2a2a2c" }],
+    fitSize: 3.85, icon: "laptop", placement: "sit",
+  },
+  {
+    id: "apple-watch-ultra-glb", name: "Apple Watch Ultra 2", family: "watch",
+    screenPx: [410, 502], screenMm: [36, 44], screenRadius: 12,
+    body: { w: 44, h: 49, d: 14.4, r: 13 },
+    model: { url: "/models/watch-ultra-2.glb", screenMesh: "dEKwzvajmGpjRpl", size: 130 },
+    finishes: [{ id: "natural", name: "Natural Titanium", color: "#c9c5bd" }],
+    fitSize: 1.15, icon: "watch", placement: "float",
+  },
+  {
+    id: "apple-watch-9-glb", name: "Apple Watch Series 9", family: "watch",
+    screenPx: [396, 484], screenMm: [34, 40.5], screenRadius: 13,
+    body: { w: 39, h: 45, d: 10.7, r: 15 },
+    model: { url: "/models/watch-series-9.glb", screenMesh: "uBMkHzJfTETpPSo", size: 130 },
+    finishes: [{ id: "midnight", name: "Midnight", color: "#2b3140" }],
+    fitSize: 1.05, icon: "watch", placement: "float",
+  },
+  {
+    id: "imac-24-glb", name: "iMac 24\"", family: "desktop",
+    screenPx: [4480, 2520], screenMm: [527, 296.5], screenRadius: 2,
+    body: { w: 547, h: 461, d: 11.5, r: 8 }, chin: 88,
+    model: { url: "/models/imac-24.glb", screenMesh: "vray_screen", size: 547 },
+    finishes: [{ id: "green", name: "Green", color: "#7fa48e" }],
+    fitSize: 6.2, icon: "monitor", placement: "sit",
+  },
+  {
+    id: "pro-display-xdr-glb", name: "Pro Display XDR", family: "desktop",
+    screenPx: [6016, 3384], screenMm: [697, 392], screenRadius: 2,
+    body: { w: 717, h: 412, d: 27, r: 6 },
+    model: { url: "/models/pro-display-xdr.glb", screenMesh: "", size: 717 },
+    finishes: [{ id: "silver", name: "Silver", color: "#d9dadc" }],
+    fitSize: 7.6, icon: "monitor", placement: "sit",
+  },
   {
     id: "flat",
     name: "Flat",

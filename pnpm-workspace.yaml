@@ -1,3 +1,7 @@
 allowBuilds:
+  '@central-icons-react/round-outlined-radius-2-stroke-1.5': true
   sharp: false
   unrs-resolver: false
+
+minimumReleaseAgeExclude:
+  - '@central-icons-react/round-outlined-radius-2-stroke-1.5'

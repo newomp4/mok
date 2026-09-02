@@ -7,6 +7,7 @@ import { extractFiles } from "@/lib/media";
 import { importFilesToShot, applyCameraPreset } from "@/lib/actions";
 import * as actions from "@/lib/actions";
 import * as capture from "@/export/capture";
+import { viewport as registryViewport } from "@/three/registry";
 import { totalDuration } from "@/lib/animation";
 import { captureImage } from "@/export/capture";
 import { getAspect } from "@/lib/presets";
@@ -16,7 +17,7 @@ export function useBootstrap() {
   useEffect(() => {
     const ui = useUI.getState();
     // debug handle for QA / power users
-    (window as unknown as { __mok: unknown }).__mok = { useEditor, useUI, actions, capture };
+    (window as unknown as { __mok: unknown }).__mok = { useEditor, useUI, actions, capture, registry: registryViewport };
     ui.setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
     let cancelled = false;
     loadAutosave().then((p) => {

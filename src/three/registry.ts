@@ -7,6 +7,8 @@ import type { EffectComposer } from "postprocessing";
 export const viewport = {
   state: null as RootState | null,
   composer: null as EffectComposer | null,
+  /** debug: mesh inventory of the currently loaded glTF device */
+  glbInfo: null as null | (() => unknown),
 };
 
 interface RenderFlags {

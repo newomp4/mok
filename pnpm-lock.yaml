@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@central-icons-react/round-outlined-radius-2-stroke-1.5':
+        specifier: 1.1.317
+        version: 1.1.317(react@19.2.8)
       '@react-three/drei':
         specifier: 10.7.8
         version: 10.7.8(@react-three/fiber@9.7.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(three@0.185.1))(@types/react@19.2.18)(@types/three@0.185.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(three@0.185.1)
@@ -155,6 +158,11 @@ packages:
   '@babel/types@7.29.8':
     resolution: {integrity: sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg==}
     engines: {node: '>=6.9.0'}
+
+  '@central-icons-react/round-outlined-radius-2-stroke-1.5@1.1.317':
+    resolution: {integrity: sha512-PJRWJ0F2P4xW/FHbieFJpIy2CIr5yjEeidHZESDcJMtBJLgJikw4k2C+PsFF412NwmnUH9ousMJdRI00iaJKuw==}
+    peerDependencies:
+      react: '>=14.0.0 <= 19'
 
   '@dimforge/rapier3d-compat@0.12.0':
     resolution: {integrity: sha512-uekIGetywIgopfD97oDL5PfeezkFpNhwlzlaEYNOA0N6ghdsOvh/HYjSMek5Q2O1PYvRSDFcqFVJl4r4ZBwOow==}
@@ -2451,6 +2459,10 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
+
+  '@central-icons-react/round-outlined-radius-2-stroke-1.5@1.1.317(react@19.2.8)':
+    dependencies:
+      react: 19.2.8
 
   '@dimforge/rapier3d-compat@0.12.0': {}
 
