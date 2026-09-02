@@ -1,0 +1,176 @@
+"use client";
+import { useEffect, useRef } from "react";
+import { useEditor, redo, undo } from "@/store/editor";
+import { useUI } from "@/store/ui";
+import { loadAutosave, saveAutosave, saveProject, exportProjectFile, importProjectFile, downloadBlob } from "@/lib/persistence";
+import { extractFiles } from "@/lib/media";
+import { importFilesToShot, applyCameraPreset } from "@/lib/actions";
+import * as actions from "@/lib/actions";
+import { totalDuration } from "@/lib/animation";
+import { captureImage } from "@/export/capture";
+import { getAspect } from "@/lib/presets";
+import { clamp } from "@/lib/cn";
+
+export function useBootstrap() {
+  useEffect(() => {
+    const ui = useUI.getState();
+    // debug handle for QA / power users
+    (window as unknown as { __mok: unknown }).__mok = { useEditor, useUI, actions };
+    ui.setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
+    let cancelled = false;
+    loadAutosave().then((p) => {
+      if (cancelled || !p) return;
+      useEditor.getState().replaceProject(p);
+      useEditor.temporal.getState().clear();
+      useUI.getState().setActiveShot(p.shots[0]?.id ?? null);
+    });
+    return () => { cancelled = true; };
+  }, []);
+}
+
+export function useAutosave() {
+  useEffect(() => {
+    let timer: number | null = null;
+    const unsub = useEditor.subscribe((s) => s.project, (p) => {
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(() => { void saveAutosave(p); }, 800);
+    });
+    return () => { unsub(); if (timer) window.clearTimeout(timer); };
+  }, []);
+}
+
+export function usePasteImport() {
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      const files = extractFiles(e.clipboardData);
+      if (files.length) { e.preventDefault(); void importFilesToShot(files); }
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, []);
+}
+
+export function exportSizeFor(aspectId: ReturnType<typeof useEditor.getState>["project"]["aspect"], long: number, viewport: { w: number; h: number }, orientation?: "landscape" | "square" | "portrait"): [number, number] {
+  const a = getAspect(aspectId);
+  let ratio = a.ratio ?? viewport.w / Math.max(1, viewport.h);
+  if (a.px) return a.px;
+  if (a.ratio === null && orientation) ratio = orientation === "square" ? 1 : orientation === "portrait" ? 1 / ratio : ratio;
+  if (ratio >= 1) return [long, Math.round(long / ratio / 2) * 2];
+  return [Math.round((long * ratio) / 2) * 2, long];
+}
+
+export async function quickCapture() {
+  const ui = useUI.getState();
+  const p = useEditor.getState().project;
+  if (ui.exporting) return;
+  const [w, h] = exportSizeFor(p.aspect, 2560, ui.viewport);
+  ui.setExporting({ label: "Capturing…", progress: 0.3 });
+  try {
+    const blob = await captureImage({ width: w, height: h, format: "png", transparent: p.scene.background.type === "transparent" });
+    downloadBlob(blob, `${slug(p.name)}-${w}x${h}.png`);
+    ui.showToast(`Captured ${w} × ${h} PNG`);
+  } catch (e) {
+    ui.showToast(`Capture failed: ${(e as Error).message}`);
+  } finally {
+    ui.setExporting(null);
+  }
+}
+
+export function slug(s: string): string {
+  return (s || "mok").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "mok";
+}
+
+export async function saveCurrentProject(toastIt = true) {
+  const p = useEditor.getState().project;
+  await saveProject(p);
+  if (toastIt) useUI.getState().showToast(`Saved “${p.name}”`);
+}
+
+export async function exportProjectToFile() {
+  const p = useEditor.getState().project;
+  const blob = await exportProjectFile(p);
+  downloadBlob(blob, `${slug(p.name)}.mok.json`);
+}
+
+export function pickFiles(accept: string, multiple = false): Promise<File[]> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = accept;
+    input.multiple = multiple;
+    input.onchange = () => resolve(Array.from(input.files ?? []));
+    input.click();
+  });
+}
+
+export async function importProjectFromFile() {
+  const [file] = await pickFiles("application/json,.json,.mok");
+  if (!file) return;
+  try {
+    const p = await importProjectFile(file);
+    useEditor.getState().replaceProject(p);
+    useEditor.temporal.getState().clear();
+    useUI.getState().setTime(0);
+    useUI.getState().setActiveShot(p.shots[0]?.id ?? null);
+    useUI.getState().showToast(`Imported “${p.name}”`);
+  } catch (e) {
+    useUI.getState().showToast(`Import failed: ${(e as Error).message}`);
+  }
+}
+
+export function useShortcuts() {
+  const spaceDown = useRef(false);
+  useEffect(() => {
+    const isTyping = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      const ui = useUI.getState();
+      const mod = e.metaKey || e.ctrlKey;
+      if (e.key === "Escape") {
+        if (ui.modal) ui.setModal(null);
+        else if (ui.autoMotion) ui.setAutoMotion(false);
+        else if (ui.picker) ui.setPicker(null);
+        return;
+      }
+      if (isTyping(e)) return;
+      if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+      if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); void saveCurrentProject(); return; }
+      if (mod && e.key.toLowerCase() === "e") { e.preventDefault(); void quickCapture(); return; }
+      if (mod) return;
+      const p = useEditor.getState().project;
+      switch (e.key) {
+        case " ": e.preventDefault(); if (!e.repeat) ui.setPlaying(!ui.playing); break;
+        case "t": case "T": ui.setTimelineOpen(!ui.timelineOpen); break;
+        case "r": case "R": ui.setRecording(!ui.recording); break;
+        case "?": ui.setModal(ui.modal === "shortcuts" ? null : "shortcuts"); break;
+        case "ArrowLeft": { e.preventDefault(); const step = e.shiftKey ? 1 : 1 / p.fps; ui.setTime(clamp(ui.time - step, 0, totalDuration(p))); break; }
+        case "ArrowRight": { e.preventDefault(); const step = e.shiftKey ? 1 : 1 / p.fps; ui.setTime(clamp(ui.time + step, 0, totalDuration(p))); break; }
+        case "Home": ui.setTime(0); break;
+        case "End": ui.setTime(totalDuration(p)); break;
+        case "1": applyCameraPreset("hero"); break;
+        case "2": applyCameraPreset("angled"); break;
+        case "3": applyCameraPreset("flat"); break;
+        case "4": applyCameraPreset("bottom"); break;
+        case "5": applyCameraPreset("detail"); break;
+        case "6": applyCameraPreset("top"); break;
+        case "l": case "L": ui.toggleLoop(); break;
+        case "d": case "D": if (!e.repeat) ui.toggleTheme(); break;
+      }
+    };
+    const onKeyDownSpace = (e: KeyboardEvent) => { if (e.code === "Space" && !isTyping(e)) spaceDown.current = true; };
+    const onKeyUpSpace = (e: KeyboardEvent) => { if (e.code === "Space") spaceDown.current = false; };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKeyDownSpace, true);
+    document.addEventListener("keyup", onKeyUpSpace, true);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", onKeyDownSpace, true);
+      document.removeEventListener("keyup", onKeyUpSpace, true);
+    };
+  }, []);
+  return spaceDown;
+}
