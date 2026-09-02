@@ -24,18 +24,27 @@ function SoftFloor({ size, center, edge }: { size: number; center: string; edge:
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
       <planeGeometry args={[size, size]} />
-      <meshStandardMaterial map={tex} roughness={0.96} metalness={0} />
+      <meshStandardMaterial map={tex} roughness={0.96} metalness={0} envMapIntensity={0.35} />
     </mesh>
   );
 }
 
+/**
+ * Fog plus a fog-coloured dome beyond the fog distance: the horizon, the floor and the sky then
+ * all go through the same tone mapping, so there is no visible seam.
+ */
 function SceneFog({ color, near, far }: { color: string; near: number; far: number }) {
   const scene = useThree((s) => s.scene);
   useEffect(() => {
     scene.fog = new THREE.Fog(color, near, far);
     return () => { scene.fog = null; };
   }, [scene, color, near, far]);
-  return null;
+  return (
+    <mesh>
+      <sphereGeometry args={[far * 1.6, 32, 16]} />
+      <meshBasicMaterial color={color} side={THREE.BackSide} />
+    </mesh>
+  );
 }
 
 function ConcreteFloor({ size }: { size: number }) {
@@ -67,7 +76,7 @@ export function EnvScene({ preset, floorY, fitSize }: { preset: ScenePresetId; f
       {preset === "studio" && (
         <>
           <SoftFloor size={f * 40} center="#e4e4e4" edge="#c9c9c9" />
-          <SceneFog color="#dedede" near={f * 4} far={f * 18} />
+          <SceneFog color="#dedede" near={f * 1.2} far={f * 7} />
           <directionalLight position={[f * 2.5, f * 4, f * 3]} intensity={2.2} castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004} shadow-normalBias={0.02} shadow-radius={8}>
             <orthographicCamera attach="shadow-camera" args={[shadowCam.left, shadowCam.right, shadowCam.top, shadowCam.bottom, shadowCam.near, shadowCam.far]} />
           </directionalLight>
@@ -77,7 +86,7 @@ export function EnvScene({ preset, floorY, fitSize }: { preset: ScenePresetId; f
       {preset === "gallery" && (
         <>
           <SoftFloor size={f * 40} center="#f7f7f7" edge="#e2e2e2" />
-          <SceneFog color="#f4f4f4" near={f * 4} far={f * 18} />
+          <SceneFog color="#f4f4f4" near={f * 1.2} far={f * 7} />
           <directionalLight position={[-f * 2, f * 4.5, f * 2.5]} intensity={1.9} castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004} shadow-normalBias={0.02} shadow-radius={8}>
             <orthographicCamera attach="shadow-camera" args={[shadowCam.left, shadowCam.right, shadowCam.top, shadowCam.bottom, shadowCam.near, shadowCam.far]} />
           </directionalLight>

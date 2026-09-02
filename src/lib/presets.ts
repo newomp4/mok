@@ -217,7 +217,7 @@ export const SCENES: ScenePreset[] = [
   },
   {
     id: "gallery", name: "Bright studio", description: "High-key white floor, soft shadows", swatch: "#f6f6f6",
-    lighting: "bright", lightRotY: 90, lightIntensity: 1.05, contactShadow: true,
+    lighting: "soft", lightRotY: 120, lightIntensity: 1.1, contactShadow: true,
     background: { type: "color", color: "#f4f4f4", preset: "paper", image: null, blur: 0 },
   },
 ];

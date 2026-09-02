@@ -14,7 +14,8 @@ const ids = await page.evaluate(() => __mok.templates.map((t) => t.id));
 for (const id of ids) {
   const dataUrl = await page.evaluate(async (id) => {
     __mok.actions.applyTemplate(id);
-    __mok.useUI.getState().setTime(0.6);
+    const first = __mok.useEditor.getState().project.shots[0];
+    __mok.useUI.getState().setTime(first.duration * 0.6);
     await new Promise((r) => setTimeout(r, 5000));
     const blob = await __mok.capture.captureImage({ width: 640, height: 400, format: "webp", quality: 0.86, transparent: false });
     return await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
