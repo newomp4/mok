@@ -161,6 +161,38 @@ export function MenuList({ items, onClose, className }: { items: MenuItem[]; onC
   );
 }
 
+/* ---------- Context menu ---------- */
+export function ContextMenu({ at, items, onClose }: { at: { x: number; y: number } | null; items: MenuItem[]; onClose: () => void }) {
+  const panel = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<CSSProperties>({ visibility: "hidden" });
+  useClickOutside([panel], onClose, !!at);
+  useLayoutEffect(() => {
+    if (!at) return;
+    const pw = panel.current?.offsetWidth ?? 180, ph = panel.current?.offsetHeight ?? 200;
+    setPos({ left: clamp(at.x, 8, window.innerWidth - pw - 8), top: clamp(at.y, 8, window.innerHeight - ph - 8), visibility: "visible" });
+  }, [at]);
+  if (!at) return null;
+  return createPortal(
+    <div ref={panel} data-popover-layer="" style={{ position: "fixed", zIndex: 70, ...pos }} className="fade-in rounded-lg border border-line bg-panel p-1 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.35)]" onContextMenu={(e) => e.preventDefault()}>
+      <MenuList items={items} onClose={onClose} />
+    </div>,
+    document.body,
+  );
+}
+
+/* ---------- Text area ---------- */
+export function TextAreaRow({ value, onChange, placeholder, rows = 3 }: { value: string; onChange: (v: string) => void; placeholder?: string; rows?: number }) {
+  return (
+    <textarea
+      value={value}
+      rows={rows}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-full resize-y rounded-md bg-fill px-2.5 py-2 text-[12px] leading-snug text-fg outline-none placeholder:text-muted focus:ring-1 focus:ring-accent"
+    />
+  );
+}
+
 /* ---------- Select row ---------- */
 export interface SelectOption<T extends string = string> {
   value: T;

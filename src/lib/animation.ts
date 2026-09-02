@@ -129,6 +129,46 @@ export function hasKeyframeAt(kfs: Keyframe[] | undefined, t: number): boolean {
   return !!kfs && kfs.some((k) => Math.abs(k.t - t) < 0.0005);
 }
 
+/** Full-frame fade alpha + colour at time t: project fade in/out plus dip-to-colour transitions between shots. */
+export function fadeAt(p: Project, t: number): { alpha: number; color: string } {
+  let alpha = 0;
+  let color = p.fade?.color ?? "#000000";
+  const total = totalDuration(p);
+  const fi = p.fade?.in ?? 0, fo = p.fade?.out ?? 0;
+  if (fi > 0 && t < fi) alpha = Math.max(alpha, 1 - t / fi);
+  if (fo > 0 && t > total - fo) alpha = Math.max(alpha, (t - (total - fo)) / fo);
+  let start = 0;
+  for (let i = 0; i < p.shots.length - 1; i++) {
+    const s = p.shots[i];
+    const end = start + s.duration;
+    const tr = s.transitionOut;
+    if (tr && tr.type === "fade" && tr.duration > 0) {
+      const h = tr.duration / 2;
+      if (t >= end - h && t <= end + h) {
+        const a = 1 - Math.abs(t - end) / h;
+        if (a > alpha) { alpha = a; color = tr.color; }
+      }
+    }
+    start = end;
+  }
+  return { alpha: Math.min(1, Math.max(0, alpha)), color };
+}
+
+/** Mirror a track in time so the motion plays backwards. */
+export function reverseTrack(kfs: Keyframe[], duration: number): Keyframe[] {
+  return kfs.map((k) => ({ ...k, t: Math.round((duration - k.t) * 1000) / 1000 })).sort((a, b) => a.t - b.t);
+}
+
+/** Split a track at time t: everything before stays (ending on the sampled value), the rest restarts at 0. */
+export function splitTrack(kfs: Keyframe[], t: number): [Keyframe[], Keyframe[]] {
+  const v = sampleTrack(kfs, t);
+  const a = kfs.filter((k) => k.t < t - 0.0005);
+  a.push({ t: Math.round(t * 1000) / 1000, v, ease: "smooth" });
+  const b: Keyframe[] = [{ t: 0, v, ease: kfs.find((k) => k.t <= t)?.ease ?? "smooth" }];
+  for (const k of kfs) if (k.t > t + 0.0005) b.push({ ...k, t: Math.round((k.t - t) * 1000) / 1000 });
+  return [a, b];
+}
+
 export function formatTime(t: number): string {
   const m = Math.floor(t / 60);
   const s = t - m * 60;

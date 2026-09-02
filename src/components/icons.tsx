@@ -1,6 +1,19 @@
 "use client";
 import type { ComponentType, CSSProperties, SVGProps } from "react";
 import { LEGACY_PATHS } from "./icons.legacy";
+import { IconAudio } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconAudio";
+import { IconMagnet } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconMagnet";
+import { IconClipboard } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconClipboard";
+import { IconSplit } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconSplit";
+import { IconRewind } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconRewind";
+import { IconBold } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconBold";
+import { IconAlignmentLeft } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconAlignmentLeft";
+import { IconAlignmentCenter } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconAlignmentCenter";
+import { IconAlignmentRight } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconAlignmentRight";
+import { IconSpeaker } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconSpeaker";
+import { IconLetterASquare } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconLetterASquare";
+import { IconArrowSplitRight } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconArrowSplitRight";
+import { IconFontStyle } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconFontStyle";
 import { IconArrowDown } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconArrowDown";
 import { IconArrowInbox } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconArrowInbox";
 import { IconArrowLeft } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconArrowLeft";
@@ -203,6 +216,19 @@ const CENTRAL: Record<string, CentralIcon> = {
   "shot": IconVideoClip,
   "dot": IconCircle,
   "github": IconGithub,
+  "audio": IconAudio,
+  "magnet": IconMagnet,
+  "clipboard": IconClipboard,
+  "split": IconSplit,
+  "rewind": IconRewind,
+  "bold": IconBold,
+  "align-left": IconAlignmentLeft,
+  "align-center": IconAlignmentCenter,
+  "align-right": IconAlignmentRight,
+  "speaker": IconSpeaker,
+  "logo": IconLetterASquare,
+  "transition": IconArrowSplitRight,
+  "font": IconFontStyle,
 };
 
 /** icons that reuse a Central glyph mirrored horizontally */

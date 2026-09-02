@@ -13,7 +13,7 @@ export interface AspectDef {
   sub?: string;
 }
 
-export type MediaKind = "image" | "video";
+export type MediaKind = "image" | "video" | "audio";
 export interface MediaRef {
   id: string;
   kind: MediaKind;
@@ -60,6 +60,40 @@ export interface FocusArea {
   h: number;
 }
 
+export type ShotKind = "media" | "text" | "logo";
+export type EnterExitEffect = "none" | "fade" | "slideUp" | "slideDown" | "slideLeft" | "slideRight" | "scale" | "blur";
+export interface EnterExit {
+  effect: EnterExitEffect;
+  duration: number;
+}
+export interface TextStyle {
+  text: string;
+  font: string;
+  weight: number;
+  /** font size as a fraction of the frame height */
+  size: number;
+  color: string;
+  align: "left" | "center" | "right";
+  background: string;
+  lineHeight: number;
+  /** em units */
+  letterSpacing: number;
+}
+export type LogoEffect = "none" | "liquidMetal" | "gemSmoke" | "heatmap";
+export interface LogoStyle {
+  media: MediaRef | null;
+  /** logo height as a fraction of the frame height */
+  scale: number;
+  background: string;
+  effect: LogoEffect;
+}
+export type TransitionType = "cut" | "fade";
+export interface Transition {
+  type: TransitionType;
+  duration: number;
+  color: string;
+}
+
 export interface Shot {
   id: string;
   name: string;
@@ -68,6 +102,29 @@ export interface Shot {
   fit: FitMode;
   keyframes: Partial<Record<AnimProp, Keyframe[]>>;
   focusAreas: FocusArea[];
+  /** media (default), text card or logo card */
+  kind?: ShotKind;
+  text?: TextStyle;
+  logo?: LogoStyle;
+  enter?: EnterExit;
+  exit?: EnterExit;
+  /** video playback speed (0.25 – 4) */
+  speed?: number;
+  /** seconds into the video where the shot starts */
+  trimStart?: number;
+  /** how this shot hands over to the next one */
+  transitionOut?: Transition;
+}
+
+export interface AudioTrack {
+  media: MediaRef;
+  /** timeline second where the clip starts */
+  start: number;
+  /** seconds trimmed from the clip's head */
+  trimStart: number;
+  volume: number;
+  fadeIn: number;
+  fadeOut: number;
 }
 
 export type BackgroundType = "color" | "preset" | "image" | "transparent";
@@ -142,6 +199,9 @@ export interface Project {
   effects: EffectInstance[];
   shots: Shot[];
   fps: number;
+  audio?: AudioTrack | null;
+  /** fade the whole video in from / out to a colour */
+  fade?: { in: number; out: number; color: string };
 }
 
 export interface ProjectMeta {

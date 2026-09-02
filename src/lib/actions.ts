@@ -6,7 +6,7 @@ import type { AnimProp, Keyframe, MediaRef, Project, Shot } from "./types";
 import { importMedia } from "./media";
 import { getDevice } from "./devices";
 import { shotStart } from "./animation";
-import { createProject } from "./defaults";
+import { createProject, defaultLogoStyle, shotKind } from "./defaults";
 import { deviceLayout } from "@/three/devices/layout";
 import { S } from "@/three/geometry";
 
@@ -84,9 +84,37 @@ export function setShotMedia(shotId: string | null, media: MediaRef | null) {
   });
 }
 
+export async function addAudioFile(file: File) {
+  const ui = useUI.getState();
+  try {
+    const ref = await importMedia(file);
+    if (ref.kind !== "audio") { ui.showToast("That file is not an audio file"); return; }
+    useEditor.getState().setAudio({ media: ref, start: 0, trimStart: 0, volume: 1, fadeIn: 0, fadeOut: 0 });
+    ui.showToast(`Audio added · ${ref.name}`);
+  } catch (e) {
+    ui.showToast(`Could not import audio: ${(e as Error).message}`);
+  }
+}
+
+export async function importLogo(file: File, shotId: string) {
+  const ui = useUI.getState();
+  try {
+    const ref = await importMedia(file);
+    if (ref.kind !== "image") { ui.showToast("Logos must be images (PNG or SVG)"); return; }
+    useEditor.getState().updateShot(shotId, (s) => { if (!s.logo) s.logo = defaultLogoStyle(); s.logo.media = ref; });
+  } catch (e) {
+    ui.showToast(`Could not import logo: ${(e as Error).message}`);
+  }
+}
+
 export async function importFilesToShot(files: File[], shotId?: string | null): Promise<MediaRef | null> {
   if (!files.length) return null;
   const ui = useUI.getState();
+  if (files[0].type.startsWith("audio/")) { await addAudioFile(files[0]); return null; }
+  const targetId = shotId ?? ui.activeShotId;
+  const target = useEditor.getState().project.shots.find((s) => s.id === targetId);
+  if (target && shotKind(target) === "logo") { await importLogo(files[0], target.id); return null; }
+  if (target && shotKind(target) === "text") { ui.showToast("Text shots have no media. Select a media shot or add one with +."); return null; }
   try {
     const ref = await importMedia(files[0]);
     setShotMedia(shotId ?? ui.activeShotId, ref);

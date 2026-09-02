@@ -1,5 +1,6 @@
 "use client";
-import { Output, Mp4OutputFormat, WebMOutputFormat, BufferTarget, CanvasSource, QUALITY_LOW, QUALITY_MEDIUM, QUALITY_HIGH, QUALITY_VERY_HIGH, getFirstEncodableVideoCodec, type VideoCodec } from "mediabunny";
+import { Output, Mp4OutputFormat, WebMOutputFormat, BufferTarget, CanvasSource, AudioBufferSource, QUALITY_LOW, QUALITY_MEDIUM, QUALITY_HIGH, QUALITY_VERY_HIGH, getFirstEncodableVideoCodec, getFirstEncodableAudioCodec, type VideoCodec, type AudioCodec } from "mediabunny";
+import { renderAudioMix } from "@/lib/audio";
 import { anim } from "@/three/anim";
 import { nextFrame, useRenderFlags, viewport } from "@/three/registry";
 import { useEditor } from "@/store/editor";
@@ -27,7 +28,7 @@ async function seekVideoForTime(t: number) {
   if (!lm) return;
   const v = lm.element as HTMLVideoElement;
   if (!v.paused) v.pause();
-  const target = loc.localT % (v.duration || 1);
+  const target = ((loc.shot?.trimStart ?? 0) + loc.localT * (loc.shot?.speed ?? 1)) % (v.duration || 1);
   if (Math.abs(v.currentTime - target) < 0.0005) return;
   await new Promise<void>((resolve) => {
     let done = false;
@@ -142,7 +143,25 @@ export async function exportVideo(opts: VideoExportOptions): Promise<{ blob: Blo
       alpha: opts.transparent ? "keep" : "discard",
     });
     output.addVideoTrack(source, { frameRate: opts.fps });
+    // music / voiceover lane
+    let audioSource: AudioBufferSource | null = null;
+    let mix: AudioBuffer | null = null;
+    if (project.audio) {
+      opts.onProgress?.(0, "Mixing audio…");
+      try {
+        mix = await renderAudioMix(total);
+        const prefs: AudioCodec[] = useWebm ? ["opus", "vorbis"] : ["aac", "opus"];
+        const acodec = mix ? await getFirstEncodableAudioCodec(prefs, { numberOfChannels: 2, sampleRate: mix.sampleRate }) : null;
+        if (mix && acodec) {
+          audioSource = new AudioBufferSource({ codec: acodec, bitrate: 160_000 });
+          output.addAudioTrack(audioSource);
+        }
+      } catch (e) {
+        console.warn("audio mix failed", e);
+      }
+    }
     await output.start();
+    if (audioSource && mix) { await audioSource.add(mix); audioSource.close(); }
 
     const shutter = 0.5; // 180° shutter
     const samples = Math.max(1, Math.round(opts.samples));

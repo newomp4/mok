@@ -82,6 +82,10 @@ export function MainMenu() {
   const setModal = useUI((s) => s.setModal);
   const timelineOpen = useUI((s) => s.timelineOpen);
   const setTimelineOpen = useUI((s) => s.setTimelineOpen);
+  const snapCenter = useUI((s) => s.snapCenter);
+  const setSnapCenter = useUI((s) => s.setSnapCenter);
+  const guides = useUI((s) => s.guides);
+  const setGuides = useUI((s) => s.setGuides);
   const items: MenuItem[] = [
     { label: "New project", icon: "plus", onSelect: () => { newProject(); showToast("New project"); } },
     { label: "Open project…", icon: "folder", onSelect: () => setModal("projects") },
@@ -93,6 +97,8 @@ export function MainMenu() {
     { label: "Undo", icon: "undo", shortcut: `${MOD}Z`, onSelect: undo },
     { label: "Redo", icon: "redo", shortcut: `⇧${MOD}Z`, onSelect: redo },
     { label: "Toggle timeline", icon: "film", shortcut: "T", onSelect: () => setTimelineOpen(!timelineOpen) },
+    { label: "Snap to centre", icon: "magnet", checked: snapCenter, onSelect: () => setSnapCenter(!snapCenter) },
+    { label: "Centre guides", icon: "target", shortcut: "G", checked: guides, onSelect: () => setGuides(!guides) },
     { label: "Preferences", icon: "settings", onSelect: () => setModal("preferences") },
     { divider: true, label: "" },
     { label: "Info", icon: "info", onSelect: () => setModal("info") },
@@ -117,6 +123,8 @@ export function HelpMenu() {
   const items: MenuItem[] = [
     { label: "Keyboard shortcuts", icon: "keyboard", shortcut: "?", onSelect: () => setModal("shortcuts") },
     { label: "How it works", icon: "help-circle", onSelect: () => setModal("info") },
+    { label: "What's new", icon: "sparkles", onSelect: () => setModal("whatsnew") },
+    { label: "Changelog", icon: "history", onSelect: () => setModal("changelog") },
     { divider: true, label: "" },
     { label: "Source on GitHub", icon: "code", onSelect: () => window.open(REPO_URL, "_blank") },
     { label: "Report an issue", icon: "external-link", onSelect: () => window.open(`${REPO_URL}/issues`, "_blank") },

@@ -133,3 +133,17 @@ input[type="number"]::-webkit-outer-spin-button {
 
 @keyframes spin { to { transform: rotate(360deg) } }
 .spin { animation: spin 0.9s linear infinite; }
+
+/* animation-preset thumbnails (timeline presets popover) */
+@keyframes mok-scan-lr { from { transform: translate(-50%, -50%) rotateY(-18deg) translateX(-14px) scale(1.25); } to { transform: translate(-50%, -50%) rotateY(18deg) translateX(14px) scale(1.25); } }
+@keyframes mok-scan-tb { from { transform: translate(-50%, -50%) rotateY(-22deg) rotateX(8deg) translateY(10px) scale(1.5); } to { transform: translate(-50%, -50%) rotateY(-16deg) rotateX(-4deg) translateY(-10px) scale(1.5); } }
+@keyframes mok-pan-up { from { transform: translate(-50%, -50%) rotateX(28deg) rotateY(12deg) scale(1.2); } to { transform: translate(-50%, -50%) rotateX(-8deg) rotateY(-6deg) scale(1.05); } }
+@keyframes mok-zoom-out { from { transform: translate(-50%, -50%) rotateY(-6deg) scale(1.7); } to { transform: translate(-50%, -50%) rotateY(6deg) scale(1); } }
+@keyframes mok-overhead { from { transform: translate(-50%, -50%) rotateX(52deg) rotateY(-18deg) scale(1.2); } to { transform: translate(-50%, -50%) rotateX(38deg) rotateY(10deg) scale(1.2); } }
+@keyframes mok-out-back { 0% { transform: translate(-50%, -50%) rotateY(-10deg) scale(1.5); } 50% { transform: translate(-50%, -50%) rotateY(0deg) scale(0.95); } 100% { transform: translate(-50%, -50%) rotateY(10deg) scale(1.5); } }
+@keyframes mok-fold { from { transform: translate(-50%, -50%) rotateX(70deg) scale(1.15); } to { transform: translate(-50%, -50%) rotateX(0deg) scale(1); } }
+@keyframes mok-truck { from { transform: translate(-50%, -50%) translateX(18px) scale(1.3); } to { transform: translate(-50%, -50%) translateX(-18px) scale(1.3); } }
+@keyframes mok-orbit { from { transform: translate(-50%, -50%) rotateY(-35deg); } to { transform: translate(-50%, -50%) rotateY(35deg); } }
+@keyframes mok-flip { from { transform: translate(-50%, -50%) rotateY(-180deg) scale(0.85); } to { transform: translate(-50%, -50%) rotateY(0deg) scale(1); } }
+@keyframes mok-drift { from { transform: translate(-50%, -50%) rotateY(-5deg) rotateX(3deg); } to { transform: translate(-50%, -50%) rotateY(5deg) rotateX(-3deg); } }
+@keyframes mok-push { from { transform: translate(-50%, -50%) scale(1); } to { transform: translate(-50%, -50%) scale(2.2) translateY(6px); } }

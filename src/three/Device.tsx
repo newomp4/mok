@@ -5,7 +5,8 @@ import * as THREE from "three";
 import { useEditor } from "@/store/editor";
 import { useUI } from "@/store/ui";
 import { getDevice, getFinish } from "@/lib/devices";
-import { useMedia } from "@/lib/media";
+import { getMedia, useMedia, type LoadedMedia } from "@/lib/media";
+import { shotKind } from "@/lib/defaults";
 import { ScreenSurface } from "@/three/screen";
 import { createFinishMaterials, createScreenMaterial, disposeMaterials } from "@/three/materials";
 import { anim } from "@/three/anim";
@@ -45,6 +46,7 @@ export function Device({ layout }: { layout: DeviceLayout }) {
 
   const surface = useMemo(() => new ScreenSurface(maxAniso), [maxAniso]);
   useEffect(() => () => surface.dispose(), [surface]);
+  const applied = useRef<{ media: LoadedMedia | null; fit: string } | null>(null);
   const screenMat = useMemo(() => createScreenMaterial(surface.texture), [surface]);
   useEffect(() => () => screenMat.dispose(), [screenMat]);
 
@@ -57,6 +59,7 @@ export function Device({ layout }: { layout: DeviceLayout }) {
 
   useEffect(() => {
     surface.setMedia(media, shot?.fit ?? "cover", { kind: spec.id === "browser" ? "browser" : "none", dark: finish.id === "dark" });
+    applied.current = { media, fit: shot?.fit ?? "cover" };
     invalidate();
     const el = media?.element;
     if (el && media.kind === "video") {
@@ -81,28 +84,42 @@ export function Device({ layout }: { layout: DeviceLayout }) {
   useFrame((state, delta) => {
     const v = anim.values;
     if (!v || !group.current) return;
+    // the shot under the playhead decides what the screen shows (exports step through shots without React)
+    const cur = anim.shot;
+    group.current.visible = !anim.card;
+    if (cur && shotKind(cur) === "media") {
+      const m = cur.media ? getMedia(cur.media.id) : null;
+      const fit = cur.fit ?? "cover";
+      if (!applied.current || applied.current.media !== m || applied.current.fit !== fit) {
+        applied.current = { media: m, fit };
+        surface.setMedia(m, fit, { kind: spec.id === "browser" ? "browser" : "none", dark: finish.id === "dark" });
+      }
+    }
+    const shotMedia = cur && shotKind(cur) === "media" && cur.media ? getMedia(cur.media.id) : media;
     const target: [number, number, number] = [v["mockup.rotX"] + (standing ? -layout.lean : 0), v["mockup.rotY"], v["mockup.rotZ"]];
     const exact = anim.exporting || useUI.getState().playing;
     if (exact || !smoothRot.current) smoothRot.current = target;
     else {
       const k = 1 - Math.exp(-Math.min(delta, 0.05) * 18);
       let moving = false;
-      const cur = smoothRot.current;
+      const rot = smoothRot.current;
       for (let i = 0; i < 3; i++) {
-        const d = target[i] - cur[i];
-        if (Math.abs(d) < 0.01) cur[i] = target[i]; else { cur[i] += d * k; moving = true; }
+        const d = target[i] - rot[i];
+        if (Math.abs(d) < 0.01) rot[i] = target[i]; else { rot[i] += d * k; moving = true; }
       }
       if (moving) state.invalidate();
     }
     const r = smoothRot.current;
     group.current.rotation.set(r[0] * DEG, r[1] * DEG, r[2] * DEG);
     screenMat.emissiveIntensity = v["screen.brightness"] * anim.screenFade;
-    if (media?.kind === "video") {
-      const vid = media.element as HTMLVideoElement;
+    if (shotMedia?.kind === "video") {
+      const vid = shotMedia.element as HTMLVideoElement;
       const dur = vid.duration || 1;
-      const t = anim.localT % dur;
+      const speed = cur?.speed ?? 1;
+      const t = ((cur?.trimStart ?? 0) + anim.localT * speed) % dur;
       const playing = useUI.getState().playing && !anim.exporting;
       if (playing) {
+        if (vid.playbackRate !== speed) vid.playbackRate = speed;
         if (vid.paused) vid.play().catch(() => {});
         if (Math.abs(vid.currentTime - t) > 0.35) vid.currentTime = t;
       } else {

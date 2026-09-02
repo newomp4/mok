@@ -2,9 +2,10 @@
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import { temporal } from "zundo";
-import type { AnimProp, Project, Shot } from "@/lib/types";
-import { createProject, createShot } from "@/lib/defaults";
-import { getBase, hasKeyframeAt, locate, removeKeyframe, sampleTrack, upsertKeyframe } from "@/lib/animation";
+import type { AnimProp, AudioTrack, Keyframe, Project, Shot, ShotKind, Transition } from "@/lib/types";
+import { createLogoShot, createProject, createShot, createTextShot } from "@/lib/defaults";
+import { getBase, hasKeyframeAt, locate, removeKeyframe, reverseTrack, sampleTrack, splitTrack, upsertKeyframe, shotStart } from "@/lib/animation";
+import { uid } from "@/lib/ids";
 import { useUI } from "./ui";
 import { getDevice } from "@/lib/devices";
 import { getScene } from "@/lib/presets";
@@ -21,11 +22,29 @@ interface EditorState {
   clearTrack: (prop: AnimProp, shotId?: string) => void;
   setDevice: (id: string) => void;
   setScenePreset: (id: Project["scene"]["preset"]) => void;
-  addShot: () => void;
+  /** append (or insert after `afterId`) a media, text or logo shot */
+  addShot: (kind?: ShotKind, afterId?: string) => string;
   removeShot: (id: string) => void;
   duplicateShot: (id: string) => void;
   moveShot: (id: string, dir: -1 | 1) => void;
+  reorderShot: (id: string, toIndex: number) => void;
+  updateShot: (id: string, mut: (s: Shot) => void) => void;
+  splitShot: (id: string, localT: number) => void;
+  reverseShot: (id: string) => void;
+  copyShot: (id: string) => void;
+  pasteShot: (afterId?: string) => void;
+  setTransition: (id: string, tr: Transition | null) => void;
+  setAudio: (track: AudioTrack | null) => void;
+  /** write keyframes for these props at the playhead with their current values */
+  stampKeyframes: (props: AnimProp[]) => void;
+  copyKeyframes: (keys: { shotId: string; prop: AnimProp; t: number }[]) => void;
+  pasteKeyframes: () => void;
 }
+
+let shotClipboard: Shot | null = null;
+let keyClipboard: { prop: AnimProp; k: Keyframe }[] = [];
+export const hasShotClipboard = () => shotClipboard !== null;
+export const hasKeyClipboard = () => keyClipboard.length > 0;
 
 function clone<T>(v: T): T {
   return structuredClone(v);
@@ -64,7 +83,7 @@ export const useEditor = create<EditorState>()(
           const prev = get().project;
           const { shot, localT } = currentShot(prev);
           let p: Project = { ...prev, updatedAt: Date.now() };
-          let nextShot: Shot | null = shot ? { ...shot, keyframes: { ...shot.keyframes } } : null;
+          const nextShot: Shot | null = shot ? { ...shot, keyframes: { ...shot.keyframes } } : null;
           let shotTouched = false;
           for (const [prop, v] of Object.entries(values) as [AnimProp, number][]) {
             if (v === undefined || Number.isNaN(v)) continue;
@@ -124,14 +143,129 @@ export const useEditor = create<EditorState>()(
           if (id !== "custom") p.scene.background = { ...s.background };
           set({ project: p });
         },
-        addShot: () => {
+        addShot: (kind = "media", afterId) => {
           const p = clone(get().project);
-          const shot = createShot(`Shot ${p.shots.length + 1}`, 3);
-          const last = p.shots[p.shots.length - 1];
-          if (last?.media) shot.media = last.media;
-          p.shots.push(shot);
+          const n = p.shots.filter((s) => (s.kind ?? "media") === kind).length + 1;
+          const shot = kind === "text" ? createTextShot(`Text ${n}`) : kind === "logo" ? createLogoShot(`Logo ${n}`) : createShot(`Shot ${n}`, 3);
+          if (kind === "media") {
+            const last = [...p.shots].reverse().find((s) => s.media && (s.kind ?? "media") === "media");
+            if (last?.media) shot.media = last.media;
+          }
+          const idx = afterId ? p.shots.findIndex((s) => s.id === afterId) : -1;
+          if (idx >= 0) p.shots.splice(idx + 1, 0, shot); else p.shots.push(shot);
           set({ project: p });
-          useUI.getState().setActiveShot(shot.id);
+          const ui = useUI.getState();
+          ui.setActiveShot(shot.id);
+          ui.setTime(shotStart(p, shot.id) + 0.0001);
+          return shot.id;
+        },
+        reorderShot: (id, toIndex) => {
+          const p = clone(get().project);
+          const idx = p.shots.findIndex((s) => s.id === id);
+          const j = Math.max(0, Math.min(p.shots.length - 1, toIndex));
+          if (idx < 0 || j === idx) return;
+          const [s] = p.shots.splice(idx, 1);
+          p.shots.splice(j, 0, s);
+          set({ project: p });
+        },
+        updateShot: (id, mut) => {
+          const p = clone(get().project);
+          const s = p.shots.find((x) => x.id === id);
+          if (!s) return;
+          mut(s);
+          p.updatedAt = Date.now();
+          set({ project: p });
+        },
+        splitShot: (id, localT) => {
+          const p = clone(get().project);
+          const idx = p.shots.findIndex((x) => x.id === id);
+          if (idx < 0) return;
+          const a = p.shots[idx];
+          const t = Math.round(localT * 100) / 100;
+          if (t < 0.2 || t > a.duration - 0.2) return;
+          const b = clone(a);
+          b.id = uid();
+          b.name = `${a.name} b`;
+          b.duration = Math.round((a.duration - t) * 100) / 100;
+          a.duration = t;
+          b.trimStart = (a.trimStart ?? 0) + t * (a.speed ?? 1);
+          b.transitionOut = a.transitionOut;
+          a.transitionOut = undefined;
+          b.enter = undefined;
+          a.exit = undefined;
+          for (const prop of Object.keys(a.keyframes) as AnimProp[]) {
+            const kfs = a.keyframes[prop];
+            if (!kfs || !kfs.length) continue;
+            const [ka, kb] = splitTrack(kfs, t);
+            a.keyframes[prop] = ka;
+            b.keyframes[prop] = kb;
+          }
+          p.shots.splice(idx + 1, 0, b);
+          set({ project: p });
+        },
+        reverseShot: (id) => {
+          const p = clone(get().project);
+          const s = p.shots.find((x) => x.id === id);
+          if (!s) return;
+          for (const prop of Object.keys(s.keyframes) as AnimProp[]) {
+            const kfs = s.keyframes[prop];
+            if (kfs && kfs.length) s.keyframes[prop] = reverseTrack(kfs, s.duration);
+          }
+          set({ project: p });
+        },
+        copyShot: (id) => {
+          const s = get().project.shots.find((x) => x.id === id);
+          if (s) shotClipboard = clone(s);
+        },
+        pasteShot: (afterId) => {
+          if (!shotClipboard) return;
+          const p = clone(get().project);
+          const copy = clone(shotClipboard);
+          copy.id = uid();
+          const idx = afterId ? p.shots.findIndex((s) => s.id === afterId) : -1;
+          if (idx >= 0) p.shots.splice(idx + 1, 0, copy); else p.shots.push(copy);
+          set({ project: p });
+          useUI.getState().setActiveShot(copy.id);
+        },
+        setTransition: (id, tr) => {
+          const p = clone(get().project);
+          const s = p.shots.find((x) => x.id === id);
+          if (!s) return;
+          s.transitionOut = tr ?? undefined;
+          set({ project: p });
+        },
+        setAudio: (track) => {
+          const p = clone(get().project);
+          p.audio = track;
+          set({ project: p });
+        },
+        stampKeyframes: (props) => {
+          const p = clone(get().project);
+          const { shot, localT } = currentShot(p);
+          if (!shot) return;
+          for (const prop of props) {
+            const track = shot.keyframes[prop];
+            const v = track && track.length ? sampleTrack(track, localT) : getBase(p, prop);
+            shot.keyframes[prop] = upsertKeyframe(track, localT, v);
+          }
+          set({ project: p });
+        },
+        copyKeyframes: (keys) => {
+          const p = get().project;
+          keyClipboard = [];
+          for (const key of keys) {
+            const s = p.shots.find((x) => x.id === key.shotId);
+            const k = s?.keyframes[key.prop]?.find((kk) => Math.abs(kk.t - key.t) < 0.0005);
+            if (k) keyClipboard.push({ prop: key.prop, k: { ...k } });
+          }
+        },
+        pasteKeyframes: () => {
+          if (!keyClipboard.length) return;
+          const p = clone(get().project);
+          const { shot, localT } = currentShot(p);
+          if (!shot) return;
+          for (const { prop, k } of keyClipboard) shot.keyframes[prop] = upsertKeyframe(shot.keyframes[prop], localT, k.v, k.ease);
+          set({ project: p });
         },
         removeShot: (id) => {
           const p = clone(get().project);

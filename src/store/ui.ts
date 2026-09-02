@@ -1,6 +1,7 @@
 "use client";
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
+import type { AnimProp } from "@/lib/types";
 
 export type Picker = null | "device" | "scene";
 export type Theme = "light" | "dark";
@@ -26,7 +27,7 @@ interface UIState {
   autoMotion: boolean;
   toast: { id: number; text: string; action?: { label: string; onClick: () => void } } | null;
   exporting: ExportProgress | null;
-  modal: null | "info" | "shortcuts" | "projects" | "preferences" | "changelog";
+  modal: null | "info" | "shortcuts" | "projects" | "preferences" | "changelog" | "whatsnew";
   dragging: boolean;
   viewport: { w: number; h: number };
   hasInteracted: boolean;
@@ -37,6 +38,20 @@ interface UIState {
   spaceDragged: boolean;
   /** pointer/wheel interaction in progress (render at a lighter pixel ratio) */
   interacting: boolean;
+  /** centre guides drawn over the viewport */
+  guides: boolean;
+  /** pan snaps back to centre when close */
+  snapCenter: boolean;
+  /** interface sounds (export chime, invalid-action blip) */
+  sounds: boolean;
+  timelineHeight: number;
+  /** selected keyframe diamonds on the timeline */
+  selectedKeys: { shotId: string; prop: AnimProp; t: number }[];
+  setSelectedKeys: (k: { shotId: string; prop: AnimProp; t: number }[]) => void;
+  setGuides: (g: boolean) => void;
+  setSnapCenter: (s: boolean) => void;
+  setSounds: (s: boolean) => void;
+  setTimelineHeight: (h: number) => void;
 
   setTime: (t: number) => void;
   setPlaying: (p: boolean) => void;
@@ -60,6 +75,8 @@ interface UIState {
 }
 
 let toastId = 0;
+const pref = (key: string, fallback: boolean) => { try { const v = localStorage.getItem(`mok:${key}`); return v === null ? fallback : v === "1"; } catch { return fallback; } };
+const savePref = (key: string, v: boolean) => { try { localStorage.setItem(`mok:${key}`, v ? "1" : "0"); } catch {} };
 
 export const useUI = create<UIState>()(subscribeWithSelector((set, get) => ({
   time: 0,
@@ -84,6 +101,16 @@ export const useUI = create<UIState>()(subscribeWithSelector((set, get) => ({
   spaceHeld: false,
   spaceDragged: false,
   interacting: false,
+  guides: false,
+  snapCenter: pref("snapCenter", true),
+  sounds: pref("sounds", true),
+  timelineHeight: (() => { try { return Number(localStorage.getItem("mok:timelineHeight")) || 216; } catch { return 216; } })(),
+  selectedKeys: [],
+  setSelectedKeys: (selectedKeys) => set({ selectedKeys }),
+  setGuides: (guides) => set({ guides }),
+  setSnapCenter: (snapCenter) => { set({ snapCenter }); savePref("snapCenter", snapCenter); },
+  setSounds: (sounds) => { set({ sounds }); savePref("sounds", sounds); },
+  setTimelineHeight: (timelineHeight) => { set({ timelineHeight }); try { localStorage.setItem("mok:timelineHeight", String(timelineHeight)); } catch {} },
   setDpr: (dpr) => { set({ dpr }); try { localStorage.setItem("mok:dpr", String(dpr)); } catch {} },
 
   setTime: (time) => set({ time }),

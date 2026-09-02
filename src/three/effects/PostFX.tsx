@@ -9,6 +9,7 @@ import { anim } from "@/three/anim";
 import { viewport } from "@/three/registry";
 import { FocusBlurEffect, GhostEffect, GlassBorderEffect, LiquidGlassEffect, SharpenEffect, createLensDistortion } from "./effects";
 import { getEffectDef } from "@/lib/presets";
+import { CARD_Z } from "@/three/CardLayer";
 
 export function PostFX() {
   const blurMode = useEditor((s) => s.project.blur.mode);
@@ -77,8 +78,14 @@ export function PostFX() {
       // the CoC pass caches camera near/far; refresh it since the rig adapts them per frame
       dof.cocMaterial.adoptCameraSettings(cam);
       (viewport as unknown as { dof: unknown }).dof = dof; // debug handle for QA
-      dof.cocMaterial.worldFocusDistance = anim.focusDist;
-      dof.cocMaterial.worldFocusRange = Math.max(0.02, v["blur.focusSize"] * anim.camDist * 0.5);
+      if (anim.card) {
+        // text / logo cards sit right in front of the lens: keep them sharp
+        dof.cocMaterial.worldFocusDistance = CARD_Z;
+        dof.cocMaterial.worldFocusRange = 10;
+      } else {
+        dof.cocMaterial.worldFocusDistance = anim.focusDist;
+        dof.cocMaterial.worldFocusRange = Math.max(0.02, v["blur.focusSize"] * anim.camDist * 0.5);
+      }
       dof.bokehScale = v["blur.strength"] * 0.35;
     }
   }, -5);

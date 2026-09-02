@@ -2,16 +2,18 @@
 import { useMemo, useRef, useState } from "react";
 import { useEditor } from "@/store/editor";
 import { useUI } from "@/store/ui";
-import { Button, IconButton, Popover, Segmented, SelectRow, ToggleRow } from "@/components/ui";
+import { Button, IconButton, NumberRow, Popover, Segmented, SelectRow, ToggleRow } from "@/components/ui";
 import { EXPORT_SIZES, getAspect } from "@/lib/presets";
 import { captureImage, estimateBitrate, exportVideo, type ImageFormat, type VideoQuality } from "@/export/capture";
 import { downloadBlob } from "@/lib/persistence";
 import { totalDuration } from "@/lib/animation";
 import { exportSizeFor, quickCapture, slug } from "./hooks";
+import { chime } from "@/lib/sounds";
 
 type Orientation = "landscape" | "square" | "portrait";
-const imageState = { format: "png" as ImageFormat, transparent: false, size: "1080", orientation: "landscape" as Orientation };
-const videoState = { size: "1080", quality: "high" as VideoQuality, fps: 30, blur: "off" as "off" | "low" | "med" | "high", transparent: false, format: "mp4" as "mp4" | "webm", orientation: "landscape" as Orientation };
+const imageState = { format: "png" as ImageFormat, transparent: false, size: "1080", orientation: "landscape" as Orientation, customW: 1920, customH: 1080 };
+const videoState = { size: "1080", quality: "high" as VideoQuality, fps: 30, blur: "off" as "off" | "low" | "med" | "high", transparent: false, format: "mp4" as "mp4" | "webm", orientation: "landscape" as Orientation, customW: 1920, customH: 1080 };
+const even = (n: number, max: number) => Math.max(16, Math.min(max, Math.round(n / 2) * 2));
 const BLUR_SAMPLES = { off: 1, low: 4, med: 8, high: 16 };
 
 export function CaptureButton() {
@@ -35,16 +37,18 @@ export function ExportButton() {
   const fixed = aspect.ratio !== null;
   const fixedOrientation: Orientation = !aspect.ratio ? "landscape" : aspect.ratio > 1.05 ? "landscape" : aspect.ratio < 0.95 ? "portrait" : "square";
 
-  const imgDims = useMemo(() => {
+  const imgDims = useMemo((): [number, number] => {
+    if (imageState.size === "custom") return [even(imageState.customW, 7680), even(imageState.customH, 7680)];
     const long = EXPORT_SIZES.find((s) => s.id === imageState.size)?.long ?? 1920;
     return exportSizeFor(project.aspect, long, ui.viewport, fixed ? undefined : imageState.orientation);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.aspect, ui.viewport, imageState.size, imageState.orientation, fixed]);
-  const vidDims = useMemo(() => {
+  }, [project.aspect, ui.viewport, imageState.size, imageState.orientation, imageState.customW, imageState.customH, fixed]);
+  const vidDims = useMemo((): [number, number] => {
+    if (videoState.size === "custom") return [even(videoState.customW, 3840), even(videoState.customH, 3840)];
     const long = EXPORT_SIZES.find((s) => s.id === videoState.size)?.long ?? 1920;
     return exportSizeFor(project.aspect, long, ui.viewport, fixed ? undefined : videoState.orientation);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.aspect, ui.viewport, videoState.size, videoState.orientation, fixed]);
+  }, [project.aspect, ui.viewport, videoState.size, videoState.orientation, videoState.customW, videoState.customH, fixed]);
 
   const runImage = async () => {
     setOpen(false);
@@ -53,6 +57,7 @@ export function ExportButton() {
       const blob = await captureImage({ width: imgDims[0], height: imgDims[1], format: imageState.format, transparent: imageState.transparent, quality: 0.92 });
       downloadBlob(blob, `${slug(project.name)}-${imgDims[0]}x${imgDims[1]}.${imageState.format}`);
       ui.showToast(`Exported ${imgDims[0]} × ${imgDims[1]} ${imageState.format.toUpperCase()}`);
+      chime();
     } catch (e) {
       ui.showToast(`Export failed: ${(e as Error).message}`);
     } finally {
@@ -73,6 +78,7 @@ export function ExportButton() {
       });
       downloadBlob(blob, `${slug(project.name)}-${vidDims[0]}x${vidDims[1]}-${videoState.fps}fps.${ext}`);
       ui.showToast(`Exported ${vidDims[0]} × ${vidDims[1]} ${ext.toUpperCase()}`);
+      chime();
     } catch (e) {
       if ((e as Error).name === "AbortError") ui.showToast("Export cancelled");
       else ui.showToast(`Export failed: ${(e as Error).message}`);
@@ -107,7 +113,13 @@ export function ExportButton() {
             <Label>Orientation</Label>
             <Segmented size="sm" value={fixed ? fixedOrientation : imageState.orientation} onChange={(v) => { imageState.orientation = v; rerender(); }} options={orientationOptions.map((o) => ({ ...o, disabled: fixed && o.value !== fixedOrientation }))} />
             <Label>Size</Label>
-            <SelectRow label="Size" value={imageState.size} onChange={(v) => { imageState.size = v; rerender(); }} options={EXPORT_SIZES.map((s) => ({ value: s.id, label: s.label, sub: `${exportSizeFor(project.aspect, s.long, ui.viewport, fixed ? undefined : imageState.orientation).join(" × ")}` }))} />
+            <SelectRow label="Size" value={imageState.size} onChange={(v) => { imageState.size = v; rerender(); }} options={[...EXPORT_SIZES.map((s) => ({ value: s.id, label: s.label, sub: `${exportSizeFor(project.aspect, s.long, ui.viewport, fixed ? undefined : imageState.orientation).join(" × ")}` })), { value: "custom", label: "Custom…", sub: "up to 7680" }]} />
+            {imageState.size === "custom" && (
+              <div className="grid grid-cols-2 gap-1.5">
+                <NumberRow label="W" value={imageState.customW} min={16} max={7680} step={2} onChange={(v) => { imageState.customW = v; rerender(); }} />
+                <NumberRow label="H" value={imageState.customH} min={16} max={7680} step={2} onChange={(v) => { imageState.customH = v; rerender(); }} />
+              </div>
+            )}
             <Summary title={`${imgDims[0]} × ${imgDims[1]}`} tag={imageState.format.toUpperCase()} sub={imageState.transparent ? "Transparent background." : "Opaque background."} />
             <Button variant="solid" size="lg" onClick={() => void runImage()} className="mt-1 w-full">Export image</Button>
           </div>
@@ -116,7 +128,13 @@ export function ExportButton() {
             <Label>Orientation</Label>
             <Segmented size="sm" value={fixed ? fixedOrientation : videoState.orientation} onChange={(v) => { videoState.orientation = v; rerender(); }} options={orientationOptions.map((o) => ({ ...o, disabled: fixed && o.value !== fixedOrientation }))} />
             <Label>Size</Label>
-            <SelectRow label="Size" value={videoState.size} onChange={(v) => { videoState.size = v; rerender(); }} options={EXPORT_SIZES.filter((s) => s.id !== "4320").map((s) => ({ value: s.id, label: s.label, sub: `${exportSizeFor(project.aspect, s.long, ui.viewport, fixed ? undefined : videoState.orientation).join(" × ")}` }))} />
+            <SelectRow label="Size" value={videoState.size} onChange={(v) => { videoState.size = v; rerender(); }} options={[...EXPORT_SIZES.filter((s) => s.id !== "4320").map((s) => ({ value: s.id, label: s.label, sub: `${exportSizeFor(project.aspect, s.long, ui.viewport, fixed ? undefined : videoState.orientation).join(" × ")}` })), { value: "custom", label: "Custom…", sub: "up to 3840" }]} />
+            {videoState.size === "custom" && (
+              <div className="grid grid-cols-2 gap-1.5">
+                <NumberRow label="W" value={videoState.customW} min={16} max={3840} step={2} onChange={(v) => { videoState.customW = v; rerender(); }} />
+                <NumberRow label="H" value={videoState.customH} min={16} max={3840} step={2} onChange={(v) => { videoState.customH = v; rerender(); }} />
+              </div>
+            )}
             <Label>Quality</Label>
             <Segmented size="sm" value={videoState.quality} onChange={(v) => { videoState.quality = v; rerender(); }} options={[{ value: "low", label: "Low" }, { value: "med", label: "Med" }, { value: "high", label: "High" }, { value: "ultra", label: "Ultra" }]} />
             <Label>Frame rate</Label>
@@ -126,7 +144,7 @@ export function ExportButton() {
             <Label>Container</Label>
             <Segmented size="sm" value={videoState.transparent ? "webm" : videoState.format} onChange={(v) => { videoState.format = v; rerender(); }} options={[{ value: "mp4", label: "MP4 · H.264", disabled: videoState.transparent }, { value: "webm", label: "WebM · VP9" }]} />
             <ToggleRow label="Transparent background" checked={videoState.transparent} onChange={(v) => { videoState.transparent = v; rerender(); }} hint="WebM" />
-            <Summary title={`${vidDims[0]} × ${vidDims[1]}`} tag={`${videoState.fps} fps · ~${mbps.toFixed(0)} Mbps`} sub={`${duration.toFixed(1)}s · ${project.shots.length} shot${project.shots.length === 1 ? "" : "s"} back to back${videoState.blur !== "off" ? ` · ${BLUR_SAMPLES[videoState.blur]}× motion blur` : ""}`} />
+            <Summary title={`${vidDims[0]} × ${vidDims[1]}`} tag={`${videoState.fps} fps · ~${mbps.toFixed(0)} Mbps`} sub={`${duration.toFixed(1)}s · ${project.shots.length} shot${project.shots.length === 1 ? "" : "s"} back to back${project.audio ? " · audio" : ""}${videoState.blur !== "off" ? ` · ${BLUR_SAMPLES[videoState.blur]}× motion blur` : ""}`} />
             <Button variant="solid" size="lg" onClick={() => void runVideo()} className="mt-1 w-full">Export video</Button>
             <p className="px-0.5 pt-1 text-[10px] leading-relaxed text-muted">Frames are rendered one by one and encoded with WebCodecs, so the export is deterministic at any frame rate.</p>
           </div>

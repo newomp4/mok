@@ -22,4 +22,9 @@ export const anim = {
   camDist: 5,
   /** smoothed distance to the depth-of-field focal point */
   focusDist: 5,
+  /** full-frame fade overlay (project fade in/out, fade transitions) */
+  fade: 0,
+  fadeColor: "#000000",
+  /** true while a text / logo card shot is on screen (device hidden) */
+  card: false,
 };

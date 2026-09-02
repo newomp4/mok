@@ -1,20 +1,22 @@
 "use client";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { useEditor, redo, undo, beginInteraction, endInteraction } from "@/store/editor";
 import { useUI } from "@/store/ui";
-import { ANIM_LABELS, type AnimProp, type BlurMode, type EffectId, type FitMode } from "@/lib/types";
+import { ANIM_LABELS, type AnimProp, type BlurMode, type EffectId, type EnterExit, type EnterExitEffect, type FitMode, type LogoEffect, type Shot, type TextStyle } from "@/lib/types";
 import { hasKeyframeAt, locate, sampleTrack } from "@/lib/animation";
 import { DEVICES, FAMILY_LABELS, getDevice, getFinish, type DeviceFamily } from "@/lib/devices";
 import { BG_PRESETS, CAMERA_PRESETS, EFFECT_DEFS, LIGHTINGS, SCENES, getEffectDef, getScene } from "@/lib/presets";
-import { Button, ColorRow, IconButton, NumberRow, Section, Segmented, SelectRow, ToggleRow, type KeyState } from "@/components/ui";
+import { Button, ColorRow, IconButton, NumberRow, Section, Segmented, SelectRow, TextAreaRow, ToggleRow, type KeyState } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/cn";
-import { useMedia, ACCEPTED_TYPES } from "@/lib/media";
+import { useMedia, ACCEPTED_TYPES, ACCEPTED_IMAGES } from "@/lib/media";
 import { useActiveShot } from "@/three/Device";
-import { applyCameraPreset, importBackgroundImage, importFilesToShot, resetBlur, resetCamera, setShotMedia } from "@/lib/actions";
+import { applyCameraPreset, importBackgroundImage, importFilesToShot, importLogo, resetBlur, resetCamera, setShotMedia } from "@/lib/actions";
 import { pickFiles } from "./hooks";
+import { defaultLogoStyle, defaultTextStyle, shotKind } from "@/lib/defaults";
+import { FONTS, cssFamily, ensureFont, getFont, nearestWeight } from "@/lib/fonts";
 
 /* ---------- animated value helpers ---------- */
 function useAnimRow(prop: AnimProp) {
@@ -55,44 +57,155 @@ function AnimRow({ prop, label, min, max, step, hint, unit, disabled, sensitivit
   );
 }
 
-/* ---------- Source ---------- */
-function SourceSection() {
+/* ---------- Shot (source) ---------- */
+function ShotSection() {
   const shot = useActiveShot();
+  const [open, setOpen] = useState(true);
+  const kind = shotKind(shot);
+  const title = kind === "text" ? "Text" : kind === "logo" ? "Logo" : "Source";
+  return (
+    <Section title={title} sub={shot?.name} open={open} onToggle={() => setOpen((o) => !o)}>
+      {shot && kind === "text" && <TextEditor shot={shot} />}
+      {shot && kind === "logo" && <LogoEditor shot={shot} />}
+      {(!shot || kind === "media") && <MediaEditor shot={shot} />}
+    </Section>
+  );
+}
+
+function MediaEditor({ shot }: { shot: Shot | null }) {
   const media = useMedia(shot?.media);
   const update = useEditor((s) => s.update);
-  const [open, setOpen] = useState(true);
+  const updateShot = useEditor((s) => s.updateShot);
   const pick = () => void pickFiles(ACCEPTED_TYPES).then((f) => importFilesToShot(f, shot?.id));
+  if (!media) {
+    return (
+      <button type="button" onClick={pick} className="flex h-28 w-full flex-col items-center justify-center gap-1.5 rounded-md border border-dashed border-line-2 bg-panel-2 text-fg-2 transition-colors hover:border-fg-2 hover:text-fg">
+        <Icon name="upload" size={16} />
+        <span className="label">Click to upload</span>
+        <span className="label-sm text-muted">Drag & drop or paste</span>
+      </button>
+    );
+  }
+  const isVideo = media.kind === "video";
   return (
-    <Section title="Source" sub={shot?.name} open={open} onToggle={() => setOpen((o) => !o)}>
+    <div className="flex flex-col gap-1.5">
+      <div className="group relative overflow-hidden rounded-md border border-line bg-panel-2">
+        {isVideo ? (
+          <video src={media.url} muted className="h-28 w-full object-contain" />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={media.url} alt="" className="h-28 w-full object-contain" draggable={false} />
+        )}
+        <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/70 to-transparent px-2 py-1.5">
+          <span className="label-sm truncate text-white/90">{media.ref.name}</span>
+          <span className="label-sm text-white/70">{media.width} × {media.height}{isVideo && media.ref.duration ? ` · ${media.ref.duration.toFixed(1)}s` : ""}</span>
+        </div>
+        <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          <IconButton icon="upload" label="Replace" onClick={pick} className="h-6 w-6 bg-panel/90" />
+          <IconButton icon="trash" label="Remove" onClick={() => setShotMedia(shot?.id ?? null, null)} className="h-6 w-6 bg-panel/90" />
+        </div>
+      </div>
+      <Segmented size="sm" value={shot?.fit ?? "cover"} onChange={(v: FitMode) => update((p) => { const s = p.shots.find((x) => x.id === shot?.id); if (s) s.fit = v; })} options={[{ value: "cover", label: "Cover" }, { value: "contain", label: "Contain" }, { value: "stretch", label: "Stretch" }]} />
+      {isVideo && shot && (
+        <>
+          <NumberRow label="Speed" value={shot.speed ?? 1} min={0.25} max={4} step={0.05} unit="×" onChange={(v) => updateShot(shot.id, (s) => { s.speed = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+          <NumberRow label="Trim start" value={shot.trimStart ?? 0} min={0} max={Math.max(0, (media.ref.duration ?? 0) - 0.5)} step={0.1} unit="s" onChange={(v) => updateShot(shot.id, (s) => { s.trimStart = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+        </>
+      )}
+      <Button variant="ghost" size="sm" icon="copy" onClick={() => update((p) => { for (const s of p.shots) if (shotKind(s) === "media") s.media = shot?.media ?? null; })} className="justify-start text-muted">Use for all shots</Button>
+    </div>
+  );
+}
+
+const WEIGHT_NAMES: Record<number, string> = { 300: "Light", 400: "Regular", 500: "Medium", 600: "Semibold", 700: "Bold", 800: "Extrabold", 900: "Black" };
+const ENTER_EXIT: { value: EnterExitEffect; label: string }[] = [
+  { value: "none", label: "None" }, { value: "fade", label: "Fade" }, { value: "slideUp", label: "Slide up" }, { value: "slideDown", label: "Slide down" },
+  { value: "slideLeft", label: "Slide left" }, { value: "slideRight", label: "Slide right" }, { value: "scale", label: "Scale" }, { value: "blur", label: "Soft" },
+];
+
+function EnterExitRows({ shot }: { shot: Shot }) {
+  const updateShot = useEditor((s) => s.updateShot);
+  const row = (key: "enter" | "exit", label: string) => {
+    const fx: EnterExit = shot[key] ?? { effect: "none", duration: 0.4 };
+    const set = (mut: (f: EnterExit) => void) => updateShot(shot.id, (s) => { const f = s[key] ?? { effect: "fade", duration: 0.4 }; mut(f); s[key] = f; });
+    return (
+      <>
+        <div className="label-sm px-0.5 pt-2 text-muted">{label}</div>
+        <SelectRow label="Effect" value={fx.effect} onChange={(v) => set((f) => { f.effect = v; })} options={ENTER_EXIT} />
+        <NumberRow label="Duration" value={fx.duration} min={0} max={Math.max(0.1, shot.duration / 2)} step={0.05} unit="s" disabled={fx.effect === "none"} onChange={(v) => set((f) => { f.duration = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+      </>
+    );
+  };
+  return <>{row("enter", "Enter")}{row("exit", "Exit")}</>;
+}
+
+function TextEditor({ shot }: { shot: Shot }) {
+  const updateShot = useEditor((s) => s.updateShot);
+  const st = shot.text ?? defaultTextStyle();
+  const set = (mut: (t: TextStyle) => void) => updateShot(shot.id, (s) => { if (!s.text) s.text = defaultTextStyle(); mut(s.text); });
+  // warm the picker so each family previews in its own face
+  useEffect(() => { for (const f of FONTS) void ensureFont(f.family, 500); }, []);
+  const font = getFont(st.font);
+  return (
+    <div className="flex flex-col gap-1">
+      <TextAreaRow value={st.text} onChange={(v) => set((t) => { t.text = v; })} placeholder="Type your text" />
+      <SelectRow label="Font" value={st.font} onChange={(v) => set((t) => { t.font = v; t.weight = nearestWeight(v, t.weight); })} options={FONTS.map((f) => ({ value: f.family, label: <span style={{ fontFamily: cssFamily(f.family) }}>{f.family}</span>, sub: f.category }))} />
+      <SelectRow label="Weight" value={String(nearestWeight(st.font, st.weight))} onChange={(v) => set((t) => { t.weight = Number(v); })} options={font.weights.map((w) => ({ value: String(w), label: WEIGHT_NAMES[w] ?? String(w) }))} />
+      <NumberRow label="Size" value={st.size} min={0.02} max={0.3} step={0.005} onChange={(v) => set((t) => { t.size = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+      <Segmented size="sm" value={st.align} onChange={(v) => set((t) => { t.align = v; })} options={[{ value: "left", label: "", icon: "align-left" }, { value: "center", label: "", icon: "align-center" }, { value: "right", label: "", icon: "align-right" }]} />
+      <ColorRow label="Text colour" value={st.color} onChange={(v) => set((t) => { t.color = v; })} />
+      <ColorRow label="Background" value={st.background} onChange={(v) => set((t) => { t.background = v; })} />
+      <NumberRow label="Line height" value={st.lineHeight} min={0.8} max={2} step={0.05} onChange={(v) => set((t) => { t.lineHeight = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+      <NumberRow label="Letter spacing" value={st.letterSpacing} min={-0.1} max={0.3} step={0.005} unit="em" onChange={(v) => set((t) => { t.letterSpacing = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+      <EnterExitRows shot={shot} />
+    </div>
+  );
+}
+
+const LOGO_EFFECTS: { value: LogoEffect; label: string; preview: string }[] = [
+  { value: "none", label: "None", preview: "linear-gradient(135deg, #e9e9ea, #cfcfd2)" },
+  { value: "liquidMetal", label: "Liquid metal", preview: "linear-gradient(120deg, #2a2a2e 0%, #f4f4f6 35%, #8d8f96 55%, #ffffff 75%, #3a3a40 100%)" },
+  { value: "gemSmoke", label: "Gem smoke", preview: "linear-gradient(135deg, #7333f2, #19d9f2 50%, #fa66bf)" },
+  { value: "heatmap", label: "Heatmap", preview: "linear-gradient(135deg, #0a0a33, #4d0099 30%, #f2331a 60%, #ffd91a 85%, #ffffff)" },
+];
+
+function LogoEditor({ shot }: { shot: Shot }) {
+  const updateShot = useEditor((s) => s.updateShot);
+  const st = shot.logo ?? defaultLogoStyle();
+  const media = useMedia(st.media);
+  const set = (mut: (l: NonNullable<Shot["logo"]>) => void) => updateShot(shot.id, (s) => { if (!s.logo) s.logo = defaultLogoStyle(); mut(s.logo); });
+  const pick = () => void pickFiles(ACCEPTED_IMAGES).then(([f]) => f && importLogo(f, shot.id));
+  return (
+    <div className="flex flex-col gap-1">
       {media ? (
-        <div className="flex flex-col gap-1.5">
-          <div className="group relative overflow-hidden rounded-md border border-line bg-panel-2">
-            {media.kind === "video" ? (
-              <video src={media.url} muted className="h-28 w-full object-cover" />
-            ) : (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={media.url} alt="" className="h-28 w-full object-cover" draggable={false} />
-            )}
-            <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/70 to-transparent px-2 py-1.5">
-              <span className="label-sm truncate text-white/90">{media.ref.name}</span>
-              <span className="label-sm text-white/70">{media.width} × {media.height}</span>
-            </div>
-            <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-              <IconButton icon="upload" label="Replace" onClick={pick} className="h-6 w-6 bg-panel/90" />
-              <IconButton icon="trash" label="Remove" onClick={() => setShotMedia(shot?.id ?? null, null)} className="h-6 w-6 bg-panel/90" />
-            </div>
+        <div className="group relative flex h-24 items-center justify-center overflow-hidden rounded-md border border-line" style={{ background: st.background }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={media.url} alt="" className="max-h-16 max-w-[80%] object-contain" draggable={false} />
+          <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+            <IconButton icon="upload" label="Replace" onClick={pick} className="h-6 w-6 bg-panel/90" />
+            <IconButton icon="trash" label="Remove" onClick={() => set((l) => { l.media = null; })} className="h-6 w-6 bg-panel/90" />
           </div>
-          <Segmented size="sm" value={shot?.fit ?? "cover"} onChange={(v: FitMode) => update((p) => { const s = p.shots.find((x) => x.id === shot?.id); if (s) s.fit = v; })} options={[{ value: "cover", label: "Cover" }, { value: "contain", label: "Contain" }, { value: "stretch", label: "Stretch" }]} />
-          <Button variant="ghost" size="sm" icon="copy" onClick={() => update((p) => { for (const s of p.shots) s.media = shot?.media ?? null; })} className="justify-start text-muted">Use for all shots</Button>
         </div>
       ) : (
-        <button type="button" onClick={pick} className="flex h-28 w-full flex-col items-center justify-center gap-1.5 rounded-md border border-dashed border-line-2 bg-panel-2 text-fg-2 transition-colors hover:border-fg-2 hover:text-fg">
-          <Icon name="upload" size={16} />
-          <span className="label">Click to upload</span>
-          <span className="label-sm text-muted">Drag & drop or paste</span>
+        <button type="button" onClick={pick} className="flex h-24 w-full flex-col items-center justify-center gap-1.5 rounded-md border border-dashed border-line-2 bg-panel-2 text-fg-2 transition-colors hover:border-fg-2 hover:text-fg">
+          <Icon name="logo" size={16} />
+          <span className="label">Upload your logo</span>
+          <span className="label-sm text-muted">PNG with transparency or SVG</span>
         </button>
       )}
-    </Section>
+      <div className="label-sm px-0.5 pt-1 text-muted">Effect</div>
+      <div className="grid grid-cols-2 gap-1.5">
+        {LOGO_EFFECTS.map((e) => (
+          <button key={e.value} type="button" onClick={() => set((l) => { l.effect = e.value; })} className={cn("flex flex-col gap-1 rounded-md border p-1 text-left transition-colors", st.effect === e.value ? "border-accent" : "border-line hover:border-line-2")}>
+            <div className="h-9 rounded" style={{ background: e.preview }} />
+            <span className="label px-0.5 text-fg">{e.label}</span>
+          </button>
+        ))}
+      </div>
+      <NumberRow label="Scale" value={st.scale} min={0.05} max={1} step={0.01} onChange={(v) => set((l) => { l.scale = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+      <ColorRow label="Background" value={st.background} onChange={(v) => set((l) => { l.background = v; })} />
+      <EnterExitRows shot={shot} />
+    </div>
   );
 }
 
@@ -278,7 +391,7 @@ function CameraSection() {
           <AnimRow prop="camera.x" label="X axis" hint="Drag" min={-180} max={180} step={1} />
           <AnimRow prop="camera.y" label="Y axis" hint="Drag" min={-89} max={89} step={1} />
           <AnimRow prop="camera.z" label="Z axis" min={-180} max={180} step={1} />
-          <AnimRow prop="camera.fov" label="FOV" min={8} max={90} step={1} />
+          <AnimRow prop="camera.fov" label="FOV" min={8} max={100} step={1} />
           <AnimRow prop="camera.zoom" label="Zoom" hint="Scroll" min={0.2} max={6} step={0.01} />
           <AnimRow prop="camera.panX" label="Pan X" hint="Space drag" min={-1} max={1} step={0.01} />
           <AnimRow prop="camera.panY" label="Pan Y" hint="Space drag" min={-1} max={1} step={0.01} />
@@ -335,7 +448,7 @@ function BlurSection() {
         <NumberRow label="Angle" value={blur.angle ?? 0} min={0} max={360} step={1} onChange={(v) => update((p) => { p.blur.angle = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
       )}
       <AnimRow prop="blur.strength" label="Strength" min={0} max={20} step={0.1} disabled={off} />
-      <AnimRow prop="blur.focusSize" label="Focus size" min={0} max={1.5} step={0.01} disabled={off} />
+      <AnimRow prop="blur.focusSize" label={blur.mode === "depth" ? "Focus range" : "Focus size"} min={0} max={1.5} step={0.01} disabled={off} />
       <AnimRow prop="blur.falloff" label="Falloff" min={0} max={1} step={0.01} disabled={off} />
       <ToggleRow label="Bokeh" checked={blur.bokeh} onChange={(v) => update((p) => { p.blur.bokeh = v; })} disabled={off} />
       {!off && <FocusPicker depth={blur.mode === "depth"} />}
@@ -405,12 +518,29 @@ function EffectsSection() {
   );
 }
 
+/* ---------- Video (whole-sequence) ---------- */
+function VideoSection() {
+  const fade = useEditor((s) => s.project.fade ?? { in: 0, out: 0, color: "#000000" });
+  const update = useEditor((s) => s.update);
+  const [open, setOpen] = useState(false);
+  const set = (mut: (f: { in: number; out: number; color: string }) => void) => update((p) => { const f = p.fade ?? { in: 0, out: 0, color: "#000000" }; mut(f); p.fade = f; });
+  return (
+    <Section title="Video" sub="Fade in / out" open={open} onToggle={() => setOpen((o) => !o)}>
+      <NumberRow label="Fade in" value={fade.in} min={0} max={3} step={0.05} unit="s" onChange={(v) => set((f) => { f.in = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+      <NumberRow label="Fade out" value={fade.out} min={0} max={3} step={0.05} unit="s" onChange={(v) => set((f) => { f.out = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+      <ColorRow label="Colour" value={fade.color} onChange={(v) => set((f) => { f.color = v; })} />
+    </Section>
+  );
+}
+
 /* ---------- Inspector ---------- */
 export function Inspector() {
   const theme = useUI((s) => s.theme);
   const toggleTheme = useUI((s) => s.toggleTheme);
   const canUndo = useStore(useEditor.temporal, (s) => s.pastStates.length > 0);
   const canRedo = useStore(useEditor.temporal, (s) => s.futureStates.length > 0);
+  const shot = useActiveShot();
+  const card = shotKind(shot) !== "media";
   return (
     <div className="flex w-[240px] shrink-0 flex-col overflow-hidden rounded-lg border border-line bg-panel">
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-line px-1.5">
@@ -421,12 +551,19 @@ export function Inspector() {
         <IconButton icon={theme === "dark" ? "sun" : "moon"} label="Toggle theme (D)" onClick={toggleTheme} />
       </div>
       <div className="scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-        <SourceSection />
-        <SceneSection />
-        <MockupSection />
-        <CameraSection />
-        <BlurSection />
+        <ShotSection />
+        {card ? (
+          <div className="label-sm border-b border-line px-3 py-3 leading-relaxed text-muted">Text and logo shots fill the frame. Scene, mockup, camera and blur settings apply to media shots.</div>
+        ) : (
+          <>
+            <SceneSection />
+            <MockupSection />
+            <CameraSection />
+            <BlurSection />
+          </>
+        )}
         <EffectsSection />
+        <VideoSection />
         <div className="h-6" />
       </div>
     </div>

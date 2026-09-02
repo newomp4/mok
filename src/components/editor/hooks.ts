@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useRef } from "react";
-import { useEditor, redo, undo } from "@/store/editor";
+import { useEditor, redo, undo, hasKeyClipboard, hasShotClipboard } from "@/store/editor";
+import { APP_VERSION } from "@/lib/version";
+import type { AnimProp } from "@/lib/types";
 import { useUI } from "@/store/ui";
 import { loadAutosave, saveAutosave, saveProject, exportProjectFile, importProjectFile, downloadBlob } from "@/lib/persistence";
 import { extractFiles } from "@/lib/media";
@@ -9,7 +11,7 @@ import * as actions from "@/lib/actions";
 import * as capture from "@/export/capture";
 import { viewport as registryViewport } from "@/three/registry";
 import { anim as animState } from "@/three/anim";
-import { totalDuration } from "@/lib/animation";
+import { shotStart, totalDuration } from "@/lib/animation";
 import { captureImage } from "@/export/capture";
 import { getAspect, TEMPLATES, EFFECT_DEFS, SCENES } from "@/lib/presets";
 import { DEVICES } from "@/lib/devices";
@@ -36,6 +38,12 @@ export function useBootstrap() {
       useEditor.temporal.getState().clear();
       useUI.getState().setActiveShot(p.shots[0]?.id ?? null);
     });
+    // what's new, once per version
+    try {
+      const seen = localStorage.getItem("mok:seen-version");
+      if (seen && seen !== APP_VERSION) window.setTimeout(() => useUI.getState().setModal("whatsnew"), 1200);
+      localStorage.setItem("mok:seen-version", APP_VERSION);
+    } catch {}
     return () => { cancelled = true; };
   }, []);
 }
@@ -132,6 +140,8 @@ export async function importProjectFromFile() {
   }
 }
 
+const CAMERA_PROPS: AnimProp[] = ["camera.x", "camera.y", "camera.z", "camera.fov", "camera.zoom", "camera.panX", "camera.panY", "mockup.rotX", "mockup.rotY", "mockup.rotZ"];
+
 export function useShortcuts() {
   const spaceDown = useRef(false);
   useEffect(() => {
@@ -152,6 +162,25 @@ export function useShortcuts() {
       if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); void saveCurrentProject(); return; }
       if (mod && e.key.toLowerCase() === "e") { e.preventDefault(); void quickCapture(); return; }
+      const ed = useEditor.getState();
+      if (mod && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        const active = ui.activeShotId ?? ed.project.shots[0]?.id;
+        if (!active) return;
+        if (e.shiftKey) { const start = shotStart(ed.project, active); ed.splitShot(active, ui.time - start); }
+        else ed.duplicateShot(active);
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "c") {
+        if (ui.selectedKeys.length) { e.preventDefault(); ed.copyKeyframes(ui.selectedKeys); ui.showToast(`Copied ${ui.selectedKeys.length} keyframe${ui.selectedKeys.length === 1 ? "" : "s"}`); }
+        else if (ui.activeShotId) { e.preventDefault(); ed.copyShot(ui.activeShotId); ui.showToast("Shot copied"); }
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "v") {
+        if (hasKeyClipboard()) { e.preventDefault(); ed.pasteKeyframes(); ui.showToast("Keyframes pasted at the playhead"); }
+        else if (hasShotClipboard()) { e.preventDefault(); ed.pasteShot(ui.activeShotId ?? undefined); }
+        return;
+      }
       if (mod) return;
       const p = useEditor.getState().project;
       switch (e.key) {
@@ -177,6 +206,23 @@ export function useShortcuts() {
         case "9": applyCameraPreset("float"); break;
         case "l": case "L": ui.toggleLoop(); break;
         case "d": case "D": if (!e.repeat) ui.toggleTheme(); break;
+        case "g": case "G": if (!e.repeat) ui.setGuides(!ui.guides); break;
+        case "k": case "K": if (!e.repeat) { ed.stampKeyframes(CAMERA_PROPS); ui.showToast("Camera keyframes added"); } break;
+        case "Backspace": case "Delete": {
+          if (!ui.selectedKeys.length) break;
+          e.preventDefault();
+          const keys = ui.selectedKeys;
+          ed.update((pp) => {
+            for (const key of keys) {
+              const s = pp.shots.find((x) => x.id === key.shotId);
+              if (!s) continue;
+              const list = (s.keyframes[key.prop] ?? []).filter((k) => Math.abs(k.t - key.t) > 0.0005);
+              if (list.length) s.keyframes[key.prop] = list; else delete s.keyframes[key.prop];
+            }
+          });
+          ui.setSelectedKeys([]);
+          break;
+        }
       }
     };
     const onKeyDownSpace = (e: KeyboardEvent) => { if (e.code === "Space" && !isTyping(e)) spaceDown.current = true; };

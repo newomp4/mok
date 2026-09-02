@@ -103,7 +103,7 @@ export class ScreenSurface {
     ctx.beginPath();
     ctx.rect(0, top, width, areaH);
     ctx.clip();
-    ctx.drawImage(el, dx, dy, dw, dh);
+    ctx.drawImage(el as CanvasImageSource, dx, dy, dw, dh);
     ctx.restore();
     this.drawChrome();
     this.texture.needsUpdate = true;

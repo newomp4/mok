@@ -7,6 +7,7 @@ import { Timeline } from "./Timeline";
 import { Modals } from "./Modals";
 import { useAutosave, useBootstrap, usePasteImport, useShortcuts } from "./hooks";
 import { Modal, ProgressBar, Button } from "@/components/ui";
+import { useAudioPlayback } from "@/lib/audio";
 
 function ExportProgress() {
   const exporting = useUI((s) => s.exporting);
@@ -35,6 +36,7 @@ export default function Editor() {
   useAutosave();
   usePasteImport();
   useShortcuts();
+  useAudioPlayback();
   const timelineOpen = useUI((s) => s.timelineOpen);
   return (
     <div className="flex h-dvh w-screen flex-col gap-2 bg-app p-2 text-fg">

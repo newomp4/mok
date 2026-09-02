@@ -16,6 +16,7 @@ import { anim } from "@/three/anim";
 import { locate, sampleTrack } from "@/lib/animation";
 import { useShallow } from "zustand/react/shallow";
 import { ACCEPTED_TYPES } from "@/lib/media";
+import { shotKind } from "@/lib/defaults";
 
 let interactTimer: number | null = null;
 function markInteracting() {
@@ -67,7 +68,8 @@ function LoadingPill() {
 function UploadHint() {
   const shot = useActiveShot();
   const dragging = useUI((s) => s.dragging);
-  if (shot?.media || dragging) return null;
+  const toast = useUI((s) => s.toast);
+  if (shot?.media || dragging || toast || shotKind(shot) !== "media") return null;
   return (
     <div className="pointer-events-auto absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-3 rounded-full bg-black/85 py-1.5 pl-4 pr-1.5 text-[12px] text-white shadow-lg backdrop-blur">
       <span>Upload media to get started — or paste / drop.</span>
@@ -149,10 +151,12 @@ export function ViewportPane() {
     const ed = useEditor.getState();
     if (d.mode === "pan") {
       const h = Math.max(1, frame.h);
-      ed.setValues({ "camera.panX": d.start.px + dx / h, "camera.panY": d.start.py - dy / h });
+      let px = d.start.px + dx / h, py = d.start.py - dy / h;
+      if (useUI.getState().snapCenter) { if (Math.abs(px) < 0.025) px = 0; if (Math.abs(py) < 0.025) py = 0; }
+      ed.setValues({ "camera.panX": px, "camera.panY": py });
     } else {
       // Ultramock feel: half a degree per pixel; dragging down lowers the camera
-      ed.setValues({ "camera.x": d.start.cx - dx * 0.5, "camera.y": clamp(d.start.cy - dy * 0.5, -89, 89) });
+      ed.setValues({ "camera.x": d.start.cx - dx * 0.5, "camera.y": clamp(d.start.cy + dy * 0.5, -89, 89) });
     }
   };
   const onPointerUp = (e: React.PointerEvent) => {
@@ -179,13 +183,12 @@ export function ViewportPane() {
       const delta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
       // linear in camera distance (like Ultramock): each 100 wheel units moves the camera by a quarter of the fit distance
       const dist = 1 / zoom;
-      const next = clamp(dist + delta * (e.ctrlKey ? 0.006 : 0.0025), 0.12, 6);
+      const next = clamp(dist + delta * (e.ctrlKey ? 0.007 : 0.003), 0.12, 6);
       zoom = 1 / next;
       ed.setValue("camera.zoom", Math.round(zoom * 1000) / 1000);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => { el.removeEventListener("wheel", onWheel); if (timer) window.clearTimeout(timer); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frame.w, frame.h]);
 
   const onDrop = (e: React.DragEvent) => {
@@ -217,6 +220,7 @@ export function ViewportPane() {
       >
         {frame.w > 0 && !no3d && <Viewport dpr={dpr} />}
         <FocusMarker />
+        <Guides />
       </div>
       <LoadingPill />
       <UploadHint />
@@ -237,7 +241,7 @@ export function ViewportPane() {
   );
 }
 
-/** Small ring at the blur focus point while a blur mode is active. */
+/** Small ring at the blur focus point: shows while the blur is being adjusted, then fades away. */
 function FocusMarker() {
   const mode = useEditor((s) => s.project.blur.mode);
   const time = useUI((s) => s.time);
@@ -246,10 +250,33 @@ function FocusMarker() {
     const fx = loc.shot?.keyframes["blur.focusX"], fy = loc.shot?.keyframes["blur.focusY"];
     return { x: fx?.length ? sampleTrack(fx, loc.localT) : s.project.blur.focusX, y: fy?.length ? sampleTrack(fy, loc.localT) : s.project.blur.focusY };
   }));
-  if (mode === "off") return null;
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    let timer: number | null = null;
+    const show = () => { setVisible(true); if (timer) window.clearTimeout(timer); timer = window.setTimeout(() => setVisible(false), 1400); };
+    const unsub = useEditor.subscribe((s) => s.project.blur, (a, b) => { if (a !== b) show(); });
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Alt") setVisible(true); };
+    const onKeyUp = (e: KeyboardEvent) => { if (e.key === "Alt") show(); };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("keyup", onKeyUp);
+    return () => { unsub(); document.removeEventListener("keydown", onKey); document.removeEventListener("keyup", onKeyUp); if (timer) window.clearTimeout(timer); };
+  }, []);
+  if (mode === "off" || !visible) return null;
   return (
     <div className="pointer-events-none absolute z-10 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.35)]" style={{ left: `${pos.x * 100}%`, top: `${pos.y * 100}%` }}>
       <div className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" />
+    </div>
+  );
+}
+
+/** Centre guides: exact middle of the frame while composing. */
+function Guides() {
+  const on = useUI((s) => s.guides);
+  if (!on) return null;
+  return (
+    <div className="pointer-events-none absolute inset-0 z-10 mix-blend-difference">
+      <div className="absolute inset-y-0 left-1/2 w-px bg-white/70" />
+      <div className="absolute inset-x-0 top-1/2 h-px bg-white/70" />
     </div>
   );
 }

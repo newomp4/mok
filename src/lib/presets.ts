@@ -45,14 +45,14 @@ export interface CameraPreset {
 // The five classic framings match Ultramock's numerically (45° lens, converted to this rig's units);
 // the rest are additions.
 export const CAMERA_PRESETS: CameraPreset[] = [
-  { id: "hero", name: "Hero", camera: { x: 0, y: 0, z: 0, fov: 45, zoom: 1.215, panX: 0.351, panY: -0.36 }, rot: { x: 0, y: 0, z: 0 } },
-  { id: "angled", name: "Angled", camera: { x: -26, y: 28, z: 5, fov: 45, zoom: 1.031, panX: 0.333, panY: -0.135 }, rot: { x: 0, y: 0, z: 0 } },
-  { id: "flat", name: "Flat", camera: { x: 0, y: 0, z: 0, fov: 45, zoom: 0.82, panX: 0.0, panY: 0.0 }, rot: { x: 0, y: 0, z: 0 } },
-  { id: "bottom", name: "Bottom", camera: { x: -1, y: 50, z: 0, fov: 45, zoom: 1.093, panX: 0.0, panY: 0.0 }, rot: { x: 0, y: 0, z: 0 } },
-  { id: "detail", name: "Detail", camera: { x: 22, y: -26, z: 1, fov: 45, zoom: 2.05, panX: -0.27, panY: -0.36 }, rot: { x: 0, y: 0, z: 0 } },
+  { id: "hero", name: "Hero", camera: { x: 0, y: 0, z: 0, fov: 45, zoom: 1.141, panX: 0.343, panY: -0.352 }, rot: { x: 0, y: 0, z: 0 } },
+  { id: "angled", name: "Angled", camera: { x: -26, y: -28, z: 5, fov: 45, zoom: 0.969, panX: 0.276, panY: -0.112 }, rot: { x: 0, y: 0, z: 0 } },
+  { id: "flat", name: "Flat", camera: { x: 0, y: 0, z: 0, fov: 45, zoom: 0.77, panX: 0.0, panY: 0.0 }, rot: { x: 0, y: 0, z: 0 } },
+  { id: "bottom", name: "Bottom", camera: { x: -1, y: -50, z: 0, fov: 45, zoom: 1.027, panX: 0.0, panY: 0.0 }, rot: { x: 0, y: 0, z: 0 } },
+  { id: "detail", name: "Detail", camera: { x: 22, y: 26, z: 1, fov: 45, zoom: 1.925, panX: -0.445, panY: -0.594 }, rot: { x: 0, y: 0, z: 0 } },
   { id: "top", name: "Top", camera: { x: -8, y: 68, z: 0, fov: 30, zoom: 1.05, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 } },
   { id: "profile", name: "Profile", camera: { x: -70, y: 6, z: 0, fov: 35, zoom: 1.1, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 } },
-  { id: "dramatic", name: "Dramatic", camera: { x: 30, y: -12, z: 8, fov: 45, zoom: 1.25, panX: 0, panY: 0.02 }, rot: { x: 6, y: -22, z: 0 } },
+  { id: "dramatic", name: "Dramatic", camera: { x: 30, y: -12, z: -8, fov: 45, zoom: 1.25, panX: 0, panY: 0.02 }, rot: { x: 6, y: -22, z: 0 } },
   { id: "float", name: "Float", camera: { x: -20, y: 24, z: 0, fov: 30, zoom: 0.95, panX: 0, panY: 0 }, rot: { x: -10, y: 20, z: -6 } },
 ];
 
