@@ -51,7 +51,9 @@ export function createFinishMaterials(f: Finish): FinishMaterials {
   const dark = new THREE.MeshStandardMaterial({ color: new THREE.Color("#101012"), metalness: 0.3, roughness: 0.5 });
   const band = new THREE.MeshStandardMaterial({ color: new THREE.Color(f.band ?? "#2a2a2c"), metalness: 0.05, roughness: 0.75 });
   const keys = new THREE.MeshStandardMaterial({ color: new THREE.Color("#1b1b1d"), metalness: 0.1, roughness: 0.6 });
-  return { frame, back, glass, lens, lensRing, dark, band, keys };
+  const all = { frame, back, glass, lens, lensRing, dark, band, keys };
+  for (const mat of Object.values(all)) mat.fog = false;
+  return all;
 }
 
 export function disposeMaterials(m: FinishMaterials) {
@@ -83,5 +85,6 @@ export function createScreenMaterial(texture: THREE.Texture): THREE.MeshPhysical
     );
   };
   m.customProgramCacheKey = () => "mok-screen";
+  m.fog = false;
   return m;
 }

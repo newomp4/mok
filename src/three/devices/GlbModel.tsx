@@ -346,6 +346,7 @@ export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceS
         let t = cache.get(x);
         if (!t) { t = std.clone(); t.userData.baseRoughness = std.roughness; cache.set(x, t); }
         t.envMapIntensity = gloss;
+        t.fog = false;
         t.roughness = Math.max(0.04, Math.min(1, (t.userData.baseRoughness as number) * Math.max(0.45, 1.15 - gloss * 0.3)));
         return t;
       });
