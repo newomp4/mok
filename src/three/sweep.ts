@@ -71,7 +71,8 @@ export function sweepRoundedRect(
       for (let i = 0; i < N; i++) {
         const i2 = (i + 1) % N;
         const a = base + j * N + i, b = base + j * N + i2, c = base + (j + 1) * N + i2, d = base + (j + 1) * N + i;
-        indices.push(a, b, c, a, c, d);
+        // outward-facing winding (outline is CCW, profile runs front → back)
+        indices.push(a, c, b, a, d, c);
       }
     }
     base += run.length * N;

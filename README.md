@@ -72,6 +72,13 @@ The UI uses an icon set drawn in the style of the Central Icon System (24 px gri
 strokes). To use the licensed `@central-icons-react` glyphs instead, replace the path map in
 `src/components/icons.tsx` — names match Central's.
 
+## Development
+
+- `pnpm dev` — dev server · `pnpm typecheck` · `pnpm lint`
+- `scripts/qa-shot.mjs out.png "<js>"` — headless screenshot of the editor for visual QA
+  (needs Playwright's Chromium; `window.__mok` exposes the stores, actions and export API in the page)
+- `scripts/optimize-model.sh in.glb out.glb` — compress a glTF for the web
+
 ## Credits
 
 - HDRIs and concrete textures: [Poly Haven](https://polyhaven.com) (CC0)
