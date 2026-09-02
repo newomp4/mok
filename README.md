@@ -52,6 +52,20 @@ Open http://localhost:3000. Production build: `pnpm build && pnpm start`. Deploy
 - **State** — a single undoable project document (zustand + zundo); the timeline evaluates keyframes
   into a shared per-frame object that scene components read imperatively, so playback never re-renders React.
 
+## Using real 3D models
+
+The built-in devices are procedural (profile-swept bodies with real dimensions), so the repo stays
+tiny and loads instantly. If you want photographic-grade geometry, drop any glTF model in and mok
+will texture its screen and tint its finish:
+
+1. Get a model you have rights to — e.g. CC-BY models on [Sketchfab](https://sketchfab.com/search?features=downloadable&licenses=322a749bcfa841b29dff1e8a1bb74b0b&q=iphone&type=models)
+   (credit the author), or a one-time purchase from CGTrader / TurboSquid (keep purchased models out
+   of a public repo — add `public/models/` to `.gitignore`).
+2. Optimise it: `scripts/optimize-model.sh input.glb public/models/iphone.glb` (meshopt + KTX2 textures,
+   the same pipeline commercial mockup tools use — a 60 MB export becomes ~4 MB).
+3. Add a spec with a `model` block in `src/lib/devices.ts` (there is a commented example) naming the
+   mesh that should show the screen and the materials that should take the finish colour.
+
 ## Icons
 
 The UI uses an icon set drawn in the style of the Central Icon System (24 px grid, 1.5 px round

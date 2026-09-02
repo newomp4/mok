@@ -20,7 +20,7 @@ export function createProject(): Project {
       lightRotX: 0,
       lightRotY: 263,
       lightIntensity: 1,
-      contactShadow: false,
+      contactShadow: true,
       background: { type: "preset", color: "#f2f2f2", preset: "whisp", image: null, blur: 0.85 },
     },
     mockup: { device: "iphone-17", finish: "white", reflection: 0.99, borderRadius: 0.04, rotX: 0, rotY: 8, rotZ: 0 },

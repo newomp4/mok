@@ -77,6 +77,7 @@ export function ViewportPane() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [frame, setFrame] = useState({ w: 0, h: 0 });
   const ratio = getAspect(aspect).ratio;
+  const no3d = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("no3d");
 
   useEffect(() => {
     const el = containerRef.current;
@@ -170,7 +171,7 @@ export function ViewportPane() {
         onWheel={onWheel}
         onContextMenu={(e) => e.preventDefault()}
       >
-        {frame.w > 0 && <Viewport dpr={dpr} />}
+        {frame.w > 0 && !no3d && <Viewport dpr={dpr} />}
       </div>
       <LoadingPill />
       <UploadHint />

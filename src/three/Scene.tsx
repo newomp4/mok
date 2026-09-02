@@ -88,6 +88,9 @@ function CameraRig({ fitSize }: { fitSize: number }) {
     const viewH = 2 * dist * Math.tan((fov / 2) * DEG);
     c.position.set(-v["camera.panX"] * viewH, -v["camera.panY"] * viewH, dist);
     anim.camDist = dist;
+    // keep depth precision high for thin layered surfaces at any distance
+    const near = Math.max(0.05, dist * 0.03), far = Math.max(50, dist * 40);
+    if (Math.abs(c.near - near) > 1e-3 || Math.abs(c.far - far) > 1) { c.near = near; c.far = far; c.updateProjectionMatrix(); }
   }, -50);
   return (
     <group ref={yaw}>
@@ -165,7 +168,11 @@ function BackgroundLayer() {
       tw = ar >= 1 ? 1024 : Math.round(1024 * ar);
       th = ar >= 1 ? Math.round(1024 / ar) : 1024;
     }
-    if (canvas.width !== tw || canvas.height !== th) { canvas.width = tw; canvas.height = th; texture.dispose(); }
+    if (canvas.width !== tw || canvas.height !== th) {
+      canvas.width = tw; canvas.height = th;
+      texture.dispose();
+      texture.source = new THREE.Source(canvas);
+    }
     if (bg.type === "image") {
       if (!media) { scene.background = new THREE.Color(bg.color); invalidate(); return; }
       paintImage(ctx, media.element, media.width, media.height, tw, th, bg.blur);

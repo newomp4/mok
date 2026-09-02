@@ -2,7 +2,8 @@
 import { useMemo } from "react";
 import * as THREE from "three";
 import type { DeviceSpec } from "@/lib/devices";
-import { S, roundedBoxGeometry, roundedPlaneGeometry } from "@/three/geometry";
+import { S, roundedPlaneGeometry } from "@/three/geometry";
+import { contourProfile, sweepRoundedRect } from "@/three/sweep";
 import type { FinishMaterials } from "@/three/materials";
 
 export function FlatModel({ spec, mats, screen, size, radius, finish }: {
@@ -13,7 +14,7 @@ export function FlatModel({ spec, mats, screen, size, radius, finish }: {
   const edge = finish !== "none";
   const geos = useMemo(() => {
     const t = spec.body.d;
-    const body = roundedBoxGeometry(w * S, h * S, t * S, rMm * S, 0.4 * S, 24, 3);
+    const body = sweepRoundedRect(w * S, h * S, Math.max(0.05, rMm) * S, contourProfile(t * S, 0.35 * S, 0.35 * S, 3), { cornerSegments: 12 });
     const scr = roundedPlaneGeometry(w * S, h * S, rMm * S, 24);
     return { body, scr, t };
   }, [w, h, rMm, spec.body.d]);
@@ -21,7 +22,7 @@ export function FlatModel({ spec, mats, screen, size, radius, finish }: {
   return (
     <group>
       {edge && <mesh geometry={geos.body} material={edgeMat} castShadow receiveShadow />}
-      <mesh geometry={geos.scr} material={screen} position={[0, 0, (edge ? geos.t / 2 : 0) * S + 0.03 * S]} castShadow />
+      <mesh geometry={geos.scr} material={screen} position={[0, 0, (edge ? geos.t / 2 : 0) * S + 0.25 * S]} castShadow />
     </group>
   );
 }

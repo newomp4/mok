@@ -197,7 +197,7 @@ export interface ScenePreset {
 export const SCENES: ScenePreset[] = [
   {
     id: "custom", name: "Custom scene", description: "Custom lighting + background", swatch: "#e9e9e9",
-    lighting: "default", lightRotY: 263, lightIntensity: 1, contactShadow: false,
+    lighting: "default", lightRotY: 263, lightIntensity: 1, contactShadow: true,
     background: { type: "color", color: "#f2f2f2", preset: "whisp", image: null, blur: 0.85 },
   },
   {

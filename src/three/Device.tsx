@@ -15,6 +15,8 @@ import { LaptopModel } from "@/three/devices/Laptop";
 import { WatchModel } from "@/three/devices/Watch";
 import { DesktopModel } from "@/three/devices/Desktop";
 import { FlatModel } from "@/three/devices/Flat";
+import { GlbDevice } from "@/three/devices/GlbModel";
+import { Suspense } from "react";
 
 const DEG = Math.PI / 180;
 
@@ -95,7 +97,13 @@ export function Device({ layout }: { layout: DeviceLayout }) {
   }, -20);
 
   let model: React.ReactNode;
-  switch (spec.family) {
+  if (spec.model) {
+    model = (
+      <Suspense fallback={null}>
+        <GlbDevice spec={spec} finish={finish} screen={screenMat} />
+      </Suspense>
+    );
+  } else switch (spec.family) {
     case "phone": model = <PhoneModel spec={spec} mats={mats} screen={screenMat} />; break;
     case "tablet": model = <PhoneModel spec={spec} mats={mats} screen={screenMat} tablet />; break;
     case "laptop": model = <LaptopModel spec={spec} mats={mats} screen={screenMat} />; break;

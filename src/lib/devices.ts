@@ -23,10 +23,27 @@ export interface CameraBump {
   depth: number;
 }
 
+export interface GlbModel {
+  /** URL of a .glb (ideally optimised with gltf-transform: meshopt + KTX2) */
+  url: string;
+  /** name of the mesh (or its material) that should display the screen */
+  screenMesh: string;
+  /** material names that should take the finish colour */
+  finishMaterials?: string[];
+  /** explicit scale; by default the model is scaled so its height matches body.h */
+  scale?: number;
+  rotation?: [number, number, number];
+  position?: [number, number, number];
+}
+
 export interface DeviceSpec {
   id: string;
   name: string;
   family: DeviceFamily;
+  /** optional real 3D model — replaces the procedural geometry */
+  model?: GlbModel;
+  /** contoured edge radius in mm (procedural bodies) */
+  edge?: number;
   /** native screen resolution (portrait for phones/tablets/watches) */
   screenPx: [number, number];
   /** physical screen size in mm */
@@ -94,6 +111,7 @@ export const DEVICES: DeviceSpec[] = [
     screenMm: [64.9, 141.1],
     screenRadius: 12.5,
     body: { w: 71.5, h: 149.6, d: 7.95, r: 14 },
+    edge: 1.6,
     island: { w: 37, h: 11, top: 10.5 },
     bump: { kind: "pill", lenses: 2, w: 27, h: 55, top: 13, left: 8, depth: 2.4 },
     buttons: true,
@@ -117,6 +135,7 @@ export const DEVICES: DeviceSpec[] = [
     screenMm: [64.9, 141.1],
     screenRadius: 12.5,
     body: { w: 71.9, h: 150, d: 8.75, r: 14 },
+    edge: 2.4,
     island: { w: 37, h: 11, top: 10.5 },
     bump: { kind: "plateau", lenses: 3, w: 62, h: 38, top: 10, left: 5, depth: 3.2 },
     buttons: true,
@@ -137,6 +156,7 @@ export const DEVICES: DeviceSpec[] = [
     screenMm: [70.5, 153.3],
     screenRadius: 13.5,
     body: { w: 78, h: 163.4, d: 8.75, r: 15 },
+    edge: 2.4,
     island: { w: 37, h: 11, top: 11 },
     bump: { kind: "plateau", lenses: 3, w: 68, h: 40, top: 10, left: 5, depth: 3.2 },
     buttons: true,
@@ -157,6 +177,7 @@ export const DEVICES: DeviceSpec[] = [
     screenMm: [67.5, 146.7],
     screenRadius: 13,
     body: { w: 74.7, h: 156.2, d: 5.64, r: 14.5 },
+    edge: 2.3,
     island: { w: 37, h: 11, top: 10.5 },
     bump: { kind: "bar", lenses: 1, w: 66, h: 18, top: 8, left: 4.3, depth: 3.4 },
     buttons: true,
@@ -178,6 +199,8 @@ export const DEVICES: DeviceSpec[] = [
     screenMm: [196.9, 262.5],
     screenRadius: 18,
     body: { w: 215.5, h: 281.6, d: 5.1, r: 20 },
+    edge: 1.2,
+    buttons: true,
     bump: { kind: "square", lenses: 1, w: 22, h: 22, top: 10, left: 10, depth: 1.4 },
     finishes: [
       { id: "silver", name: "Silver", color: "#dfe0e2", back: "#e6e7e9", ...ALU },
@@ -195,6 +218,8 @@ export const DEVICES: DeviceSpec[] = [
     screenMm: [165.5, 238.1],
     screenRadius: 16,
     body: { w: 178.5, h: 247.6, d: 6.1, r: 18 },
+    edge: 1.4,
+    buttons: true,
     bump: { kind: "square", lenses: 1, w: 18, h: 18, top: 9, left: 9, depth: 1.2 },
     finishes: [
       { id: "space-gray", name: "Space Gray", color: "#5f5f63", back: "#6a6a6e", ...ALU },
@@ -352,6 +377,22 @@ export const DEVICES: DeviceSpec[] = [
   },
 ];
 
+/*
+ * To use a real 3D model instead of the procedural geometry, drop a .glb into
+ * public/models/ and add a spec with a `model` block, e.g.:
+ *
+ *   {
+ *     id: "iphone-17-pro-glb", name: "iPhone 17 Pro (GLB)", family: "phone",
+ *     screenPx: [1206, 2622], screenMm: [64.9, 141.1], screenRadius: 12.5,
+ *     body: { w: 71.9, h: 150, d: 8.75, r: 14 },
+ *     model: { url: "/models/iphone-17-pro.glb", screenMesh: "Screen", finishMaterials: ["Frame", "Back"] },
+ *     finishes: [{ id: "silver", name: "Silver", color: "#dcdde0" }],
+ *     fitSize: 1.55, icon: "phone", placement: "stand",
+ *   }
+ *
+ * Optimise models first (meshopt + KTX2, same pipeline Ultramock uses):
+ *   pnpm dlx @gltf-transform/cli optimize in.glb public/models/out.glb --compress meshopt --texture-compress ktx2
+ */
 export const DEVICE_MAP = new Map(DEVICES.map((d) => [d.id, d]));
 export function getDevice(id: string): DeviceSpec {
   return DEVICE_MAP.get(id) ?? DEVICES[2];
