@@ -214,6 +214,9 @@ function MockupSection() {
       </div>
       <SelectRow label="Finish" value={finish.id} onChange={(v) => update((p) => { p.mockup.finish = v; })} options={spec.finishes.map((f) => ({ value: f.id, label: f.name, swatch: f.color }))} />
       <NumberRow label="Reflection" value={mockup.reflection} min={0} max={1} step={0.01} onChange={(v) => update((p) => { p.mockup.reflection = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+      {spec.model && (
+        <NumberRow label="Body gloss" value={mockup.gloss ?? 1.3} min={0.2} max={3} step={0.05} onChange={(v) => update((p) => { p.mockup.gloss = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+      )}
       <NumberRow label="Border radius" value={mockup.borderRadius} min={0} max={0.25} step={0.001} disabled={spec.family !== "flat"} onChange={(v) => update((p) => { p.mockup.borderRadius = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
       <AnimRow prop="mockup.rotY" label="Rotate Y" min={-180} max={180} step={1} />
       <AnimRow prop="mockup.rotX" label="Rotate X" min={-180} max={180} step={1} />

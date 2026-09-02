@@ -201,7 +201,7 @@ export const SCENES: ScenePreset[] = [
     background: { type: "color", color: "#f2f2f2", preset: "whisp", image: null, blur: 0.85 },
   },
   {
-    id: "studio", name: "Studio", description: "Soft cyclorama with floor shadows", swatch: "#dcdcdc",
+    id: "studio", name: "Studio", description: "Infinite soft floor with real shadows", swatch: "#dcdcdc",
     lighting: "soft", lightRotY: 200, lightIntensity: 0.95, contactShadow: true,
     background: { type: "color", color: "#dedede", preset: "whisp", image: null, blur: 0 },
   },
@@ -216,7 +216,7 @@ export const SCENES: ScenePreset[] = [
     background: { type: "color", color: "#050505", preset: "noir", image: null, blur: 0 },
   },
   {
-    id: "gallery", name: "Gallery", description: "Bright white floor and wall", swatch: "#f6f6f6",
+    id: "gallery", name: "Bright studio", description: "High-key white floor, soft shadows", swatch: "#f6f6f6",
     lighting: "bright", lightRotY: 90, lightIntensity: 1.05, contactShadow: true,
     background: { type: "color", color: "#f4f4f4", preset: "paper", image: null, blur: 0 },
   },

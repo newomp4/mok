@@ -109,6 +109,8 @@ export interface Project {
     device: string;
     finish: string;
     reflection: number;
+    /** environment reflectivity of glTF body materials (1 = as authored) */
+    gloss?: number;
     borderRadius: number;
     rotX: number;
     rotY: number;

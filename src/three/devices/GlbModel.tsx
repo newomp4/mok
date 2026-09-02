@@ -6,7 +6,7 @@ import { useGLTF } from "@react-three/drei";
 import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 import type { DeviceSpec, Finish } from "@/lib/devices";
 import { S } from "@/three/geometry";
-import { viewport } from "@/three/registry";
+import { useModelBounds, viewport } from "@/three/registry";
 
 let ktx2: KTX2Loader | null = null;
 
@@ -140,14 +140,18 @@ function averageFaceNormal(mesh: THREE.Mesh): THREE.Vector3 {
   const step = Math.max(3, Math.floor(n / 3000) * 3);
   const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), acc = new THREE.Vector3(), tmp = new THREE.Vector3();
   const m = mesh.matrixWorld;
+  let areaSum = 0;
   for (let i = 0; i + 2 < n; i += step) {
     const ia = idx ? idx.getX(i) : i, ib = idx ? idx.getX(i + 1) : i + 1, ic = idx ? idx.getX(i + 2) : i + 2;
     a.fromBufferAttribute(pos, ia).applyMatrix4(m);
     b.fromBufferAttribute(pos, ib).applyMatrix4(m);
     c.fromBufferAttribute(pos, ic).applyMatrix4(m);
     tmp.crossVectors(b.sub(a), c.sub(a));
+    areaSum += tmp.length();
     acc.add(tmp);
   }
+  // a closed/boxy mesh has normals pointing everywhere: report "unknown" so callers fall back
+  if (areaSum <= 0 || acc.length() / areaSum < 0.5) return new THREE.Vector3();
   return acc.normalize();
 }
 
@@ -156,37 +160,48 @@ function averageFaceNormal(mesh: THREE.Mesh): THREE.Vector3 {
  * (u → right, v → up, facing outward) so uploaded media fills it edge to edge even
  * when the source model uses atlas UVs.
  */
-export function planarizeScreenUVs(mesh: THREE.Mesh, root: THREE.Object3D) {
+export function planarizeScreenUVs(mesh: THREE.Mesh, root: THREE.Object3D, targetAspect?: number, extra: [number, number, number, number] = [0, 0, 0, 0]) {
   root.updateWorldMatrix(true, true);
   const f = meshFrame(mesh);
-  let u = f.axes[0].clone(), vv = f.axes[1].clone();
-  let uRange = f.ranges[0], vRange = f.ranges[1];
-  if (Math.abs(u.y) > Math.abs(vv.y)) { [u, vv] = [vv, u]; [uRange, vRange] = [vRange, uRange]; }
-  let vSign = vv.y >= 0 ? 1 : -1;
-  if (Math.abs(vv.y) < 0.15) vSign = 1; // flat-lying screens: keep as modelled
-  // orient u so that (u × v) matches the geometry's own facing direction (winding normal)
-  const facing = averageFaceNormal(mesh);
-  const rootBox = new THREE.Box3().setFromObject(root);
-  const rootCenter = new THREE.Vector3();
-  rootBox.getCenter(rootCenter);
-  if (facing.lengthSq() < 1e-6) facing.copy(f.center).sub(rootCenter); // fallback: outward from the model centre
-  const normal = new THREE.Vector3().crossVectors(u, vv.clone().multiplyScalar(vSign));
-  const uSign = normal.dot(facing) >= 0 ? 1 : -1;
-  const geometry = mesh.geometry.clone();
-  const pos = geometry.attributes.position as THREE.BufferAttribute;
-  const uvs = new Float32Array(pos.count * 2);
+  // The plane normal comes from PCA (robust); the in-plane axes are locked to the world so the
+  // content is never rotated by an asymmetric vertex distribution (e.g. an island cut-out).
+  const n = f.axes[2].clone();
+  if (n.z < 0) n.negate(); // face the camera (+z) whenever the plane is not lying flat
+  let u = new THREE.Vector3(1, 0, 0).addScaledVector(n, -n.x); // world X projected onto the plane
+  if (u.lengthSq() < 1e-4) u = new THREE.Vector3(0, 0, 1).addScaledVector(n, -n.z);
+  u.normalize();
+  const vv = new THREE.Vector3().crossVectors(n, u).normalize(); // in-plane "up"
+  if (vv.y < -0.05 || (Math.abs(vv.y) <= 0.05 && vv.z > 0)) { vv.negate(); u.negate(); } // keep v pointing up (and cross consistent)
+  if (new THREE.Vector3().crossVectors(u, vv).dot(n) < 0) u.negate(); // (u × v) must equal the facing normal
+  const pos = mesh.geometry.attributes.position as THREE.BufferAttribute;
   const p = new THREE.Vector3();
-  const uLen = Math.max(1e-9, uRange[1] - uRange[0]), vLen = Math.max(1e-9, vRange[1] - vRange[0]);
+  let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
   for (let i = 0; i < pos.count; i++) {
     p.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld).sub(f.center);
-    let uu = (p.dot(u) - uRange[0]) / uLen;
-    let vvv = (p.dot(vv) - vRange[0]) / vLen;
-    if (uSign < 0) uu = 1 - uu;
-    if (vSign < 0) vvv = 1 - vvv;
-    uvs[i * 2] = uu; uvs[i * 2 + 1] = vvv;
+    const du = p.dot(u), dv = p.dot(vv);
+    if (du < minU) minU = du; if (du > maxU) maxU = du;
+    if (dv < minV) minV = dv; if (dv > maxV) maxV = dv;
+  }
+  const geometry = mesh.geometry.clone();
+  const uvs = new Float32Array(pos.count * 2);
+  const lenU = Math.max(1e-9, maxU - minU), lenV = Math.max(1e-9, maxV - minV);
+  // centre a rectangle with the device's true screen aspect inside the mesh; whatever is left
+  // over maps outside 0..1 and is rendered black by the screen material (reads as bezel)
+  let [il, it, ir, ib] = extra;
+  if (targetAspect) {
+    const meshAspect = (lenU * (1 - il - ir)) / (lenV * (1 - it - ib));
+    if (meshAspect > targetAspect) { const cut = (1 - il - ir) * (1 - targetAspect / meshAspect) / 2; il += cut; ir += cut; }
+    else if (meshAspect < targetAspect) { const cut = (1 - it - ib) * (1 - meshAspect / targetAspect) / 2; it += cut; ib += cut; }
+  }
+  const spanU = Math.max(1e-6, 1 - il - ir), spanV = Math.max(1e-6, 1 - it - ib);
+  for (let i = 0; i < pos.count; i++) {
+    p.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld).sub(f.center);
+    uvs[i * 2] = ((p.dot(u) - minU) / lenU - il) / spanU;
+    uvs[i * 2 + 1] = ((p.dot(vv) - minV) / lenV - ib) / spanV;
   }
   geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
   mesh.geometry = geometry;
+  mesh.userData.screenAspect = (lenU * spanU) / (lenV * spanV);
 }
 
 /**
@@ -223,7 +238,7 @@ export function hideScreenOverlays(root: THREE.Object3D, screen: THREE.Mesh): TH
  * live screen material; materials listed in `finishMaterials` are tinted with
  * the chosen finish. Supports meshopt + KTX2-compressed assets out of the box.
  */
-export function GlbDevice({ spec, finish, screen }: { spec: DeviceSpec; finish: Finish; screen: THREE.Material }) {
+export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceSpec; finish: Finish; screen: THREE.Material; gloss?: number }) {
   const gl = useThree((s) => s.gl);
   const invalidate = useThree((s) => s.invalidate);
   const model = spec.model!;
@@ -246,7 +261,23 @@ export function GlbDevice({ spec, finish, screen }: { spec: DeviceSpec; finish: 
     holder.add(clone);
     holder.scale.setScalar(scale);
     return holder;
-  }, [gltf.scene, model.scale, spec.body.h]);
+  }, [gltf.scene, model.scale, model.size, spec.body.h, spec.body.w]);
+
+  // publish the real footprint (after rotation) so floors, shadows and framing use it
+  useEffect(() => {
+    const r = model.rotation ?? [0, 0, 0];
+    const probe = new THREE.Group();
+    probe.rotation.set(r[0], r[1], r[2]);
+    const parent = root.parent;
+    probe.add(root);
+    probe.updateWorldMatrix(true, true);
+    const b = new THREE.Box3().setFromObject(root);
+    probe.remove(root);
+    if (parent) parent.add(root);
+    const sz = new THREE.Vector3();
+    b.getSize(sz);
+    useModelBounds.getState().set(spec.id, { minY: b.min.y, maxY: b.max.y, width: sz.x, height: sz.y });
+  }, [root, model.rotation, spec.id]);
 
   useEffect(() => {
     const finishNames = new Set(model.finishMaterials ?? []);
@@ -264,7 +295,8 @@ export function GlbDevice({ spec, finish, screen }: { spec: DeviceSpec; finish: 
       const screens = findScreenMeshes(root, model.screenMesh);
       root.userData.screens = screens;
       root.userData.screenMesh = screens[0] ?? null;
-      for (const sm of screens) planarizeScreenUVs(sm, root);
+      for (const sm of screens) planarizeScreenUVs(sm, root, spec.screenPx[0] / spec.screenPx[1], model.screenInset);
+      if (screens[0]?.userData.screenAspect) useModelBounds.getState().set(spec.id, { screenAspect: screens[0].userData.screenAspect as number });
       if (screens[0] && model.hideOverlays !== false) {
         const hidden = hideScreenOverlays(root, screens[0]).filter((h) => !screens.includes(h));
         for (const h of hidden) h.visible = false;
@@ -306,6 +338,18 @@ export function GlbDevice({ spec, finish, screen }: { spec: DeviceSpec; finish: 
         return;
       }
       mesh.material = original;
+      // body gloss: scale environment reflections and polish the authored roughness
+      const tuned = ((Array.isArray(original) ? original : [original]) as THREE.Material[]).map((x) => {
+        const std = x as THREE.MeshStandardMaterial;
+        if (!("envMapIntensity" in std)) return x;
+        const cache = (mesh.userData.tuned ??= new Map<THREE.Material, THREE.MeshStandardMaterial>()) as Map<THREE.Material, THREE.MeshStandardMaterial>;
+        let t = cache.get(x);
+        if (!t) { t = std.clone(); t.userData.baseRoughness = std.roughness; cache.set(x, t); }
+        t.envMapIntensity = gloss;
+        t.roughness = Math.max(0.04, Math.min(1, (t.userData.baseRoughness as number) * Math.max(0.45, 1.15 - gloss * 0.3)));
+        return t;
+      });
+      mesh.material = tuned.length === 1 ? tuned[0] : tuned;
       const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       mesh.material = mats.map((m) => {
         if (finishNames.has(m.name) && "color" in m) {
@@ -323,7 +367,7 @@ export function GlbDevice({ spec, finish, screen }: { spec: DeviceSpec; finish: 
       }
     });
     invalidate();
-  }, [root, model.screenMesh, model.finishMaterials, finish.color, screen, invalidate]);
+  }, [root, model.screenMesh, model.screenInset, model.finishMaterials, finish.color, screen, invalidate, gloss, spec.id, spec.screenPx]);
 
   return <primitive object={root} rotation={model.rotation ?? [0, 0, 0]} position={model.position ?? [0, 0, 0]} />;
 }

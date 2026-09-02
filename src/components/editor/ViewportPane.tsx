@@ -12,6 +12,7 @@ import { cn, clamp } from "@/lib/cn";
 import { useActiveShot } from "@/three/Device";
 import { AutoMotionOverlay } from "./AutoMotion";
 import { pickFiles } from "./hooks";
+import { anim } from "@/three/anim";
 import { ACCEPTED_TYPES } from "@/lib/media";
 
 function Toast() {
@@ -97,22 +98,26 @@ export function ViewportPane() {
     return () => ro.disconnect();
   }, [ratio, setViewport]);
 
-  // orbit / pan / zoom
+  // orbit / pan / zoom — always start from the values currently on screen (keyframed or not)
   const drag = useRef<{ x: number; y: number; mode: "orbit" | "pan"; start: Record<string, number> } | null>(null);
-  const spaceRef = useRef(false);
-  useEffect(() => {
-    const down = (e: KeyboardEvent) => { if (e.code === "Space") spaceRef.current = true; };
-    const up = (e: KeyboardEvent) => { if (e.code === "Space") spaceRef.current = false; };
-    window.addEventListener("keydown", down, true);
-    window.addEventListener("keyup", up, true);
-    return () => { window.removeEventListener("keydown", down, true); window.removeEventListener("keyup", up, true); };
-  }, []);
+  const frameRef = useRef<HTMLDivElement>(null);
+  const current = () => {
+    const v = anim.values;
+    const c = useEditor.getState().project.camera;
+    return {
+      cx: v ? v["camera.x"] : c.x, cy: v ? v["camera.y"] : c.y,
+      px: v ? v["camera.panX"] : c.panX, py: v ? v["camera.panY"] : c.panY,
+      zoom: v ? v["camera.zoom"] : c.zoom,
+    };
+  };
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0 && e.button !== 1 && e.button !== 2) return;
-    const p = useEditor.getState().project;
-    const mode: "orbit" | "pan" = spaceRef.current || e.button === 1 || e.button === 2 || e.shiftKey ? "pan" : "orbit";
-    drag.current = { x: e.clientX, y: e.clientY, mode, start: { cx: p.camera.x, cy: p.camera.y, px: p.camera.panX, py: p.camera.panY } };
+    const ui = useUI.getState();
+    const mode: "orbit" | "pan" = ui.spaceHeld || e.button === 1 || e.button === 2 || e.shiftKey ? "pan" : "orbit";
+    if (ui.spaceHeld) useUI.setState({ spaceDragged: true });
+    const c = current();
+    drag.current = { x: e.clientX, y: e.clientY, mode, start: { cx: c.cx, cy: c.cy, px: c.px, py: c.py } };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     beginInteraction();
   };
@@ -134,15 +139,28 @@ export function ViewportPane() {
     try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch {}
     endInteraction();
   };
-  const wheelTimer = useRef<number | null>(null);
-  const onWheel = (e: React.WheelEvent) => {
-    const ed = useEditor.getState();
-    if (wheelTimer.current === null) beginInteraction();
-    else window.clearTimeout(wheelTimer.current);
-    wheelTimer.current = window.setTimeout(() => { endInteraction(); wheelTimer.current = null; }, 300);
-    const zoom = clamp(ed.project.camera.zoom * Math.exp(-e.deltaY * 0.0015), 0.2, 8);
-    ed.setValue("camera.zoom", Math.round(zoom * 1000) / 1000);
-  };
+
+  // wheel / pinch zoom: non-passive so the browser never page-zooms, accumulated per gesture
+  useEffect(() => {
+    const el = frameRef.current;
+    if (!el) return;
+    let timer: number | null = null;
+    let zoom = 1;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const ed = useEditor.getState();
+      if (timer === null) { beginInteraction(); zoom = current().zoom; }
+      else window.clearTimeout(timer);
+      timer = window.setTimeout(() => { endInteraction(); timer = null; }, 250);
+      const delta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+      const factor = Math.exp(-delta * (e.ctrlKey ? 0.01 : 0.0015));
+      zoom = clamp(zoom * factor, 0.2, 8);
+      ed.setValue("camera.zoom", Math.round(zoom * 1000) / 1000);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => { el.removeEventListener("wheel", onWheel); if (timer) window.clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frame.w, frame.h]);
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -162,13 +180,13 @@ export function ViewportPane() {
       onDrop={onDrop}
     >
       <div
-        className={cn("relative overflow-hidden", ratio !== null && "rounded-md shadow-[0_0_0_1px_var(--line)]", transparent && "checker")}
+        ref={frameRef}
+        className={cn("relative overflow-hidden touch-none", ratio !== null && "rounded-md shadow-[0_0_0_1px_var(--line)]", transparent && "checker")}
         style={{ width: frame.w || "100%", height: frame.h || "100%", cursor: "grab" }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
-        onWheel={onWheel}
         onContextMenu={(e) => e.preventDefault()}
       >
         {frame.w > 0 && !no3d && <Viewport dpr={dpr} />}

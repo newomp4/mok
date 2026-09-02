@@ -16,6 +16,7 @@ import { WatchModel } from "@/three/devices/Watch";
 import { DesktopModel } from "@/three/devices/Desktop";
 import { FlatModel } from "@/three/devices/Flat";
 import { GlbDevice } from "@/three/devices/GlbModel";
+import { useModelBounds } from "@/three/registry";
 import { Suspense } from "react";
 
 const DEG = Math.PI / 180;
@@ -29,6 +30,7 @@ export function Device({ layout }: { layout: DeviceLayout }) {
   const deviceId = useEditor((s) => s.project.mockup.device);
   const finishId = useEditor((s) => s.project.mockup.finish);
   const reflection = useEditor((s) => s.project.mockup.reflection);
+  const gloss = useEditor((s) => s.project.mockup.gloss ?? 1.3);
   const borderRadius = useEditor((s) => s.project.mockup.borderRadius);
   const scenePreset = useEditor((s) => s.project.scene.preset);
   const shot = useActiveShot();
@@ -46,7 +48,7 @@ export function Device({ layout }: { layout: DeviceLayout }) {
   const screenMat = useMemo(() => createScreenMaterial(surface.texture), [surface]);
   useEffect(() => () => screenMat.dispose(), [screenMat]);
 
-  // size the screen canvas to the device (or media for flat devices)
+  // size the screen canvas to the device's native resolution (or the media for flat devices)
   useEffect(() => {
     if (spec.family === "flat" && layout.flat) surface.setSize(layout.flat.px[0], layout.flat.px[1]);
     else surface.setSize(spec.screenPx[0], spec.screenPx[1]);
@@ -73,7 +75,7 @@ export function Device({ layout }: { layout: DeviceLayout }) {
   }, [reflection, screenMat, invalidate]);
 
   const group = useRef<THREE.Group>(null);
-  const standing = scenePreset !== "custom" && (spec.family === "phone" || spec.family === "tablet");
+  const standing = scenePreset !== "custom" && !spec.model && (spec.family === "phone" || spec.family === "tablet");
 
   useFrame(() => {
     const v = anim.values;
@@ -100,7 +102,7 @@ export function Device({ layout }: { layout: DeviceLayout }) {
   if (spec.model) {
     model = (
       <Suspense fallback={null}>
-        <GlbDevice spec={spec} finish={finish} screen={screenMat} />
+        <GlbDevice spec={spec} finish={finish} screen={screenMat} gloss={gloss} />
       </Suspense>
     );
   } else switch (spec.family) {
@@ -125,5 +127,12 @@ export function useDeviceLayout(): DeviceLayout {
   const deviceId = useEditor((s) => s.project.mockup.device);
   const shot = useActiveShot();
   const spec = getDevice(deviceId);
-  return useMemo(() => deviceLayout(spec, shot?.media ?? null), [spec, shot?.media]);
+  const bounds = useModelBounds((s) => s.bounds[deviceId]);
+  return useMemo(() => {
+    const base = deviceLayout(spec, shot?.media ?? null);
+    if (spec.model && bounds) {
+      return { ...base, floorY: bounds.minY, height: bounds.height, lean: 0, fitSize: Math.max(bounds.width, bounds.height) * 1.04 };
+    }
+    return base;
+  }, [spec, shot?.media, bounds]);
 }

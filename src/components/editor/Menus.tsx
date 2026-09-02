@@ -57,9 +57,10 @@ export function TemplatesMenu() {
                 onClick={() => { applyTemplate(t.id); setOpen(false); }}
                 className="group flex flex-col overflow-hidden rounded-lg border border-line bg-panel-2 text-left transition-colors hover:border-line-2"
               >
-                <div className="relative flex h-24 items-center justify-center" style={{ background: `linear-gradient(135deg, ${t.swatch[0]}, ${t.swatch[1]})` }}>
-                  <Icon name={spec.icon} size={34} className="text-black/55 transition-transform group-hover:scale-105" strokeWidth={1.25} />
-                  <span className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white"><Icon name="play" size={9} /></span>
+                <div className="relative aspect-[8/5] overflow-hidden" style={{ background: `linear-gradient(135deg, ${t.swatch[0]}, ${t.swatch[1]})` }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={`/templates/${t.id}.webp`} alt="" className="h-full w-full object-cover transition-transform group-hover:scale-[1.03]" draggable={false} onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+                  {t.motion && <span className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white"><Icon name="play" size={9} /></span>}
                 </div>
                 <div className="flex items-center justify-between px-2.5 py-2">
                   <span className="label text-fg">{t.name}</span>

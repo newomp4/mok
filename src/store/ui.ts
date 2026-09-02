@@ -32,6 +32,9 @@ interface UIState {
   hasInteracted: boolean;
   dpr: number;
   setDpr: (d: number) => void;
+  /** Space is held (pan modifier); spaceDragged tells the keyup handler not to toggle playback */
+  spaceHeld: boolean;
+  spaceDragged: boolean;
 
   setTime: (t: number) => void;
   setPlaying: (p: boolean) => void;
@@ -76,6 +79,8 @@ export const useUI = create<UIState>()(subscribeWithSelector((set, get) => ({
   viewport: { w: 1200, h: 700 },
   hasInteracted: false,
   dpr: (() => { try { return Number(localStorage.getItem("mok:dpr")) || 2; } catch { return 2; } })(),
+  spaceHeld: false,
+  spaceDragged: false,
   setDpr: (dpr) => { set({ dpr }); try { localStorage.setItem("mok:dpr", String(dpr)); } catch {} },
 
   setTime: (time) => set({ time }),

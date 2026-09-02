@@ -37,6 +37,8 @@ export interface GlbModel {
   position?: [number, number, number];
   /** hide transparent glass meshes covering the screen (default true) */
   hideOverlays?: boolean;
+  /** fraction of the screen mesh hidden under the bezel: [left, top, right, bottom] */
+  screenInset?: [number, number, number, number];
 }
 
 export interface DeviceSpec {
@@ -97,8 +99,8 @@ export const DEVICES: DeviceSpec[] = [
   },
   {
     id: "ipad-pro-13-glb", name: "iPad Pro 13\"", family: "tablet",
-    screenPx: [2064, 2752], screenMm: [196.9, 262.5], screenRadius: 18,
-    body: { w: 215.5, h: 281.6, d: 5.1, r: 20 },
+    screenPx: [2752, 2064], screenMm: [262.5, 196.9], screenRadius: 18,
+    body: { w: 281.6, h: 215.5, d: 5.1, r: 20 },
     model: { url: "/models/ipad-pro-13.glb", screenMesh: "EjCaatfcGdAQBho", size: 300, rotation: [0, -Math.PI / 2, 0] },
     finishes: [{ id: "silver", name: "Silver", color: "#dfe0e2" }],
     fitSize: 2.9, icon: "tablet", placement: "stand",

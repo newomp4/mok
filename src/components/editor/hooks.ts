@@ -10,7 +10,7 @@ import * as capture from "@/export/capture";
 import { viewport as registryViewport } from "@/three/registry";
 import { totalDuration } from "@/lib/animation";
 import { captureImage } from "@/export/capture";
-import { getAspect } from "@/lib/presets";
+import { getAspect, TEMPLATES } from "@/lib/presets";
 import { clamp } from "@/lib/cn";
 import { preferModel } from "@/lib/devices";
 
@@ -18,7 +18,7 @@ export function useBootstrap() {
   useEffect(() => {
     const ui = useUI.getState();
     // debug handle for QA / power users
-    (window as unknown as { __mok: unknown }).__mok = { useEditor, useUI, actions, capture, registry: registryViewport };
+    (window as unknown as { __mok: unknown }).__mok = { useEditor, useUI, actions, capture, registry: registryViewport, templates: TEMPLATES };
     ui.setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
     let cancelled = false;
     loadAutosave().then((p) => {
@@ -153,7 +153,10 @@ export function useShortcuts() {
       if (mod) return;
       const p = useEditor.getState().project;
       switch (e.key) {
-        case " ": e.preventDefault(); if (!e.repeat) ui.setPlaying(!ui.playing); break;
+        case " ":
+          e.preventDefault();
+          if (!e.repeat) useUI.setState({ spaceHeld: true, spaceDragged: false });
+          break;
         case "t": case "T": ui.setTimelineOpen(!ui.timelineOpen); break;
         case "r": case "R": ui.setRecording(!ui.recording); break;
         case "?": ui.setModal(ui.modal === "shortcuts" ? null : "shortcuts"); break;
@@ -172,7 +175,13 @@ export function useShortcuts() {
       }
     };
     const onKeyDownSpace = (e: KeyboardEvent) => { if (e.code === "Space" && !isTyping(e)) spaceDown.current = true; };
-    const onKeyUpSpace = (e: KeyboardEvent) => { if (e.code === "Space") spaceDown.current = false; };
+    const onKeyUpSpace = (e: KeyboardEvent) => {
+      if (e.code !== "Space") return;
+      spaceDown.current = false;
+      const ui = useUI.getState();
+      if (ui.spaceHeld && !ui.spaceDragged && !isTyping(e)) ui.setPlaying(!ui.playing);
+      useUI.setState({ spaceHeld: false, spaceDragged: false });
+    };
     document.addEventListener("keydown", onKey);
     document.addEventListener("keydown", onKeyDownSpace, true);
     document.addEventListener("keyup", onKeyUpSpace, true);

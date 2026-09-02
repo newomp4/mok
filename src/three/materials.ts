@@ -72,5 +72,16 @@ export function createScreenMaterial(texture: THREE.Texture): THREE.MeshPhysical
     envMapIntensity: 1,
     side: THREE.DoubleSide,
   });
+  // anything mapped outside the content window (bezel overshoot on glTF screens) renders black
+  m.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <emissivemap_fragment>",
+      `#include <emissivemap_fragment>
+      #ifdef USE_EMISSIVEMAP
+      { vec2 w = step(vec2(0.0), vEmissiveMapUv) * step(vEmissiveMapUv, vec2(1.0)); totalEmissiveRadiance *= w.x * w.y; }
+      #endif`,
+    );
+  };
+  m.customProgramCacheKey = () => "mok-screen";
   return m;
 }
