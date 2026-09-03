@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { useEditor, redo, undo, beginInteraction, endInteraction } from "@/store/editor";
@@ -14,7 +14,8 @@ import { cn } from "@/lib/cn";
 import { useMedia, ACCEPTED_TYPES, ACCEPTED_IMAGES } from "@/lib/media";
 import { useModelBounds } from "@/three/registry";
 import { useActiveShot } from "@/three/Device";
-import { applyCameraPreset, importBackgroundImage, importFilesToShot, importLogo, importScreenBackground, resetBlur, resetCamera, setShotMedia } from "@/lib/actions";
+import { applyCameraPreset, importBackgroundImage, importFilesToShot, importLogo, importScreenBackground, resetBlur, resetCamera, setShotMedia, applySampleScreen } from "@/lib/actions";
+import { SAMPLE_SCREENS, drawSampleScreen } from "@/lib/screens";
 import { pickFiles } from "./hooks";
 import { defaultLogoStyle, defaultTextStyle, shotKind } from "@/lib/defaults";
 import { FONTS, cssFamily, ensureFont, getFont, nearestWeight } from "@/lib/fonts";
@@ -80,11 +81,14 @@ function MediaEditor({ shot }: { shot: Shot | null }) {
   const pick = () => void pickFiles(ACCEPTED_TYPES).then((f) => importFilesToShot(f, shot?.id));
   if (!media) {
     return (
-      <button type="button" onClick={pick} className="flex h-28 w-full flex-col items-center justify-center gap-1.5 rounded-md border border-dashed border-line-2 bg-panel-2 text-fg-2 transition-colors hover:border-fg-2 hover:text-fg">
-        <Icon name="upload" size={16} />
-        <span className="label">Click to upload</span>
-        <span className="label-sm text-muted">Drag & drop or paste</span>
-      </button>
+      <div className="flex flex-col gap-2">
+        <button type="button" onClick={pick} className="flex h-28 w-full flex-col items-center justify-center gap-1.5 rounded-md border border-dashed border-line-2 bg-panel-2 text-fg-2 transition-colors hover:border-fg-2 hover:text-fg">
+          <Icon name="upload" size={16} />
+          <span className="label">Click to upload</span>
+          <span className="label-sm text-muted">Drag & drop or paste</span>
+        </button>
+        <SampleScreens shotId={shot?.id ?? null} />
+      </div>
     );
   }
   const isVideo = media.kind === "video";
@@ -115,6 +119,52 @@ function MediaEditor({ shot }: { shot: Shot | null }) {
         </>
       )}
       <Button variant="ghost" size="sm" icon="copy" onClick={() => update((p) => { for (const s of p.shots) if (shotKind(s) === "media") s.media = shot?.media ?? null; })} className="justify-start text-muted">Use for all shots</Button>
+      <SampleScreens shotId={shot?.id ?? null} collapsed />
+    </div>
+  );
+}
+
+/** Built-in demo screens, drawn live so they stay crisp at any size. */
+function SampleScreens({ shotId, collapsed = false }: { shotId: string | null; collapsed?: boolean }) {
+  const [open, setOpen] = useState(!collapsed);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <button type="button" onClick={() => setOpen((o) => !o)} className="label-sm flex items-center gap-1 px-0.5 pt-1 text-muted hover:text-fg">
+        <Icon name={open ? "chevron-down" : "chevron-right"} size={10} />
+        Sample screens
+      </button>
+      {open && (
+        <div className="grid grid-cols-3 gap-1.5">
+          {SAMPLE_SCREENS.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              title={s.name}
+              onClick={() => void applySampleScreen(s.id, shotId)}
+              className="group flex flex-col gap-1 overflow-hidden rounded-md border border-line bg-panel-2 p-1 text-left transition-colors hover:border-line-2"
+            >
+              <SampleThumb id={s.id} shape={s.shape} />
+              <span className="label-sm truncate text-fg-2 group-hover:text-fg">{s.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SampleThumb({ id, shape }: { id: string; shape: "portrait" | "landscape" }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const c = ref.current;
+    if (!c) return;
+    const w = 132, h = shape === "portrait" ? 220 : 84;
+    drawSampleScreen(id, c, w, h);
+    c.style.aspectRatio = `${w} / ${h}`;
+  }, [id, shape]);
+  return (
+    <div className="flex h-11 w-full items-center justify-center overflow-hidden rounded-sm bg-fill">
+      <canvas ref={ref} className={cn("block", shape === "portrait" ? "h-full w-auto" : "w-full h-auto")} />
     </div>
   );
 }
@@ -272,25 +322,42 @@ function ScenePicker() {
   const setPicker = useUI((s) => s.setPicker);
   return (
     <Section title="Scene" right={<Button variant="ghost" size="sm" icon="arrow-left" onClick={() => setPicker(null)}>Back</Button>}>
-      <div className="grid grid-cols-2 gap-1.5">
-        {SCENES.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            onClick={() => { setScenePreset(s.id); setPicker(null); }}
-            className={cn("flex flex-col overflow-hidden rounded-md border text-left transition-colors", s.id === current ? "border-accent" : "border-line hover:border-line-2")}
-          >
-            <div className="relative flex h-16 items-center justify-center overflow-hidden" style={{ background: `linear-gradient(160deg, ${s.swatch}, ${shade(s.swatch)})` }}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={`/scenes/${s.id}.webp`} alt="" className="absolute inset-0 h-full w-full object-cover" draggable={false} onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
-              <Icon name={s.id === "custom" ? "sliders" : "cube"} size={18} className={cn("relative", isDark(s.swatch) ? "text-white/70" : "text-black/55")} />
-            </div>
-            <div className="flex flex-col gap-0.5 px-2 py-1.5">
-              <span className="label text-fg">{s.name}</span>
-              <span className="label-sm truncate text-muted">{s.description}</span>
-            </div>
-          </button>
-        ))}
+      <div className="flex flex-col gap-2">
+        {SCENES.map((s) => {
+          const active = s.id === current;
+          const custom = s.id === "custom";
+          return (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => { setScenePreset(s.id); setPicker(null); }}
+              className={cn("group flex flex-col overflow-hidden rounded-lg border text-left transition-colors", active ? "border-accent" : "border-line hover:border-line-2")}
+            >
+              {custom ? (
+                <div className="flex items-center gap-2.5 p-2">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-fill text-fg-2"><Icon name="sliders" size={15} /></div>
+                  <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="label text-fg">{s.name}</span>
+                    <span className="label-sm truncate text-muted">{s.description}</span>
+                  </div>
+                  {active && <span className="label-sm rounded bg-accent-soft px-1.5 py-0.5 text-accent">Current</span>}
+                </div>
+              ) : (
+                <>
+                  <div className="relative aspect-[16/10] overflow-hidden" style={{ background: `linear-gradient(160deg, ${s.swatch}, ${shade(s.swatch)})` }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={`/scenes/${s.id}.webp`} alt="" className="absolute inset-0 h-full w-full object-cover transition-transform group-hover:scale-[1.03]" draggable={false} onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+                    {active && <span className="label-sm absolute right-2 top-2 rounded bg-accent px-1.5 py-0.5 text-white">Current</span>}
+                  </div>
+                  <div className="flex flex-col gap-0.5 px-2.5 py-2">
+                    <span className="label text-fg">{s.name}</span>
+                    <span className="label-sm truncate text-muted">{s.description}</span>
+                  </div>
+                </>
+              )}
+            </button>
+          );
+        })}
       </div>
     </Section>
   );

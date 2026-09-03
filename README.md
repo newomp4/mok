@@ -41,6 +41,9 @@ rendering and encoding happens locally with WebGL and WebCodecs.
   exit animations
 - **Audio lane**: music or voiceover with volume, fades, trim and drag-to-offset; mixed into the exported video
 - **Source tools**: crop, cover / contain / stretch, playback speed and trim start for video shots, per-shot media
+- **Six built-in sample screens** (Finance dark / light, Music, Messages, Analytics, Landing page) drawn
+  procedurally at any resolution, so a mockup looks finished before you upload anything and every starter
+  template opens with content already on the device
 - **Export**: PNG / WebP / JPG up to 8K (or any custom size) with transparent background; MP4 (H.264) or WebM
   (VP9, alpha) up to 4K, 24 / 30 / 60 fps, 4× / 8× / 16× motion blur, App Store preview sizes, audio muxed in
 - **20 starter templates** with hover previews, including multi-shot sequences (title → device → logo)

@@ -5,6 +5,7 @@ import { CAMERA_PRESETS, MOTION_PRESETS, TEMPLATES, getScene } from "./presets";
 import type { AnimProp, Keyframe, MediaRef, Project, Shot } from "./types";
 import { importMedia } from "./media";
 import { getDevice } from "./devices";
+import { getSampleScreen, sampleScreenBlob } from "./screens";
 import { shotStart } from "./animation";
 import { createLogoShot, createProject, createShot, createTextShot, defaultLogoStyle, shotKind } from "./defaults";
 import { deviceLayout } from "@/three/devices/layout";
@@ -51,9 +52,12 @@ export function applyMotionPreset(id: string, shotId?: string) {
   if (targetId) useUI.getState().setTime(shotStart(p, targetId));
 }
 
+let templateToken = 0;
+
 export function applyTemplate(id: string) {
   const t = TEMPLATES.find((x) => x.id === id);
   if (!t) return;
+  const token = ++templateToken;
   const ed = useEditor.getState();
   ed.update((p) => {
     const spec = getDevice(t.device);
@@ -105,7 +109,21 @@ export function applyTemplate(id: string) {
   const first = useEditor.getState().project.shots[0]?.id ?? null;
   if (t.motion && !t.sequence) applyMotionPreset(t.motion, first ?? undefined);
   useUI.getState().setActiveShot(first);
-  useUI.getState().setTime(0);
+  // a fade-in means t=0 is a blank frame, so park the playhead just past it
+  const fadeIn = useEditor.getState().project.fade?.in ?? 0;
+  useUI.getState().setTime(fadeIn > 0 ? Math.round((fadeIn + 0.4) * 100) / 100 : 0);
+  // a template should look finished straight away: fill empty media shots with its sample screen
+  if (t.screen) {
+    const p = useEditor.getState().project;
+    if (!p.shots.some((sh) => shotKind(sh) === "media" && sh.media)) {
+      void applySampleScreen(t.screen).then(() => {
+        // another template may have been picked while the screen was rendering
+        if (token !== templateToken) return;
+        const ref = useEditor.getState().project.shots.find((sh) => sh.media)?.media ?? null;
+        if (ref) useEditor.getState().update((pp) => { for (const sh of pp.shots) if (shotKind(sh) === "media") sh.media = ref; });
+      });
+    }
+  }
 }
 
 export function setShotMedia(shotId: string | null, media: MediaRef | null) {
@@ -187,6 +205,29 @@ export async function importBackgroundImage(file: File) {
   } catch (e) {
     ui.showToast(`Could not import image: ${(e as Error).message}`);
   }
+}
+
+/** Put one of the built-in sample screens on a shot, rendered at the device's native resolution. */
+export async function applySampleScreen(id: string, shotId?: string | null) {
+  const ui = useUI.getState();
+  const ed = useEditor.getState();
+  const spec = getDevice(ed.project.mockup.device);
+  const screen = getSampleScreen(id);
+  if (!screen) return;
+  const targetId = shotId ?? ui.activeShotId ?? ed.project.shots[0]?.id;
+  const shot = ed.project.shots.find((x) => x.id === targetId);
+  // a screen that matches the device's orientation is drawn at its native resolution so it fits
+  // exactly; a mismatched one keeps its own proportions and is fitted by the shot's fit mode
+  const landscape = screen.shape === "landscape";
+  let [w, h] = spec.screenPx;
+  if (spec.family === "flat") [w, h] = landscape ? [1600, 1000] : [1206, 2622];
+  else if ((w > h) !== landscape) { const long = Math.max(w, h); [w, h] = landscape ? [long, Math.round(long * 0.625)] : [Math.round(long * 0.46), long]; }
+  const blob = await sampleScreenBlob(id, Math.min(w, 2560), Math.min(h, 2560));
+  if (!blob) return;
+  const file = new File([blob], `${screen.name}.png`, { type: "image/png" });
+  const ref = await importMedia(file);
+  setShotMedia(shot?.id ?? null, ref);
+  ui.showToast(`${screen.name} sample screen added`);
 }
 
 export async function importScreenBackground(file: File) {

@@ -15,6 +15,7 @@ import { shotStart, totalDuration } from "@/lib/animation";
 import { captureImage } from "@/export/capture";
 import { getAspect, TEMPLATES, EFFECT_DEFS, SCENES } from "@/lib/presets";
 import { DEVICES } from "@/lib/devices";
+import * as screens from "@/lib/screens";
 import { clamp } from "@/lib/cn";
 import { preferModel } from "@/lib/devices";
 
@@ -22,7 +23,7 @@ export function useBootstrap() {
   useEffect(() => {
     const ui = useUI.getState();
     // debug handle for QA / power users
-    (window as unknown as { __mok: unknown }).__mok = { useEditor, useUI, actions, capture, registry: registryViewport, templates: TEMPLATES, anim: animState, effectDefs: EFFECT_DEFS, devices: DEVICES, scenes: SCENES };
+    (window as unknown as { __mok: unknown }).__mok = { useEditor, useUI, actions, capture, registry: registryViewport, templates: TEMPLATES, anim: animState, effectDefs: EFFECT_DEFS, devices: DEVICES, scenes: SCENES, screens };
     ui.setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
     let cancelled = false;
     loadAutosave().then((p) => {

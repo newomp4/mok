@@ -341,23 +341,25 @@ export interface Template {
   /** where along shot 1 (0..1) the thumbnail is captured */
   thumbAt?: number;
   description?: string;
+  /** built-in sample screen applied when the project has no media yet */
+  screen?: string;
 }
 
 const FADE: Transition = { type: "fade", duration: 0.6, color: "#000000" };
 const fx = (id: EffectId, params: Record<string, number>): EffectInstance => ({ id, enabled: true, params });
 export const TEMPLATES: Template[] = [
-  { id: "iphone-hero", name: "iPhone hero", device: "iphone-17-pro-max-glb", finish: "model", scene: "custom", camera: { x: -18, y: 14, z: 0, fov: 24, zoom: 1, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 }, motion: "drift", aspect: "4:5", background: { type: "preset", preset: "glaze" }, swatch: ["#f6efe8", "#d7b79c"] },
-  { id: "iphone-detail", name: "iPhone detail", device: "iphone-17-pro-glb", finish: "model", scene: "custom", camera: { x: -24, y: 48, z: 0, fov: 24, zoom: 1.9, panX: 0.06, panY: -0.17 }, rot: { x: 0, y: 0, z: 0 }, motion: "scan-lr", aspect: "16:9", background: { type: "preset", preset: "whisp" }, blur: { mode: "radial", strength: 6, focusSize: 0.5, falloff: 0.3, bokeh: true, focusX: 0.5, focusY: 0.55 }, swatch: ["#f4f4f6", "#c5c9d3"], thumbAt: 0.5 },
-  { id: "concrete-macbook", name: "Concrete MacBook", device: "macbook-pro-14-glb", finish: "space-gray", scene: "concrete", camera: { x: -28, y: 18, z: 0, fov: 26, zoom: 1.1, panX: 0, panY: 0.02 }, rot: { x: 0, y: 12, z: 0 }, motion: "low-pan-up", aspect: "16:9", swatch: ["#3a3a3a", "#151515"] },
-  { id: "darkroom-macbook", name: "Dark room MacBook", device: "macbook-pro-16-glb", finish: "space-black", scene: "darkroom", camera: { x: 22, y: 12, z: 0, fov: 24, zoom: 1.15, panX: 0, panY: 0.02 }, rot: { x: 0, y: -18, z: 0 }, motion: "slow-zoom-out", aspect: "16:9", swatch: ["#0c0c0c", "#2a2f39"] },
-  { id: "studio-ipad", name: "Studio iPad", device: "ipad-pro-13-glb", finish: "silver", scene: "studio", camera: { x: -20, y: 16, z: 0, fov: 24, zoom: 1, panX: 0, panY: 0 }, rot: { x: 0, y: 10, z: 0 }, motion: "orbit", aspect: "4:3", swatch: ["#dcdcdc", "#f0f0f0"] },
-  { id: "watch-aurora", name: "Watch aurora", device: "apple-watch-ultra-glb", finish: "natural", scene: "custom", camera: { x: -26, y: 20, z: 8, fov: 24, zoom: 1.1, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 }, motion: "orbit", aspect: "1:1", background: { type: "preset", preset: "aurora" }, swatch: ["#0c1224", "#3a6b8a"] },
-  { id: "display-gallery", name: "Gallery display", device: "pro-display-xdr-glb", finish: "silver", scene: "gallery", camera: { x: -14, y: 8, z: 0, fov: 22, zoom: 1, panX: 0, panY: 0 }, rot: { x: 0, y: 6, z: 0 }, motion: "push-in", aspect: "16:9", swatch: ["#f6f6f6", "#dcdcdc"], thumbAt: 0.05 },
-  { id: "browser-peach", name: "Browser card", device: "browser", finish: "light", scene: "custom", camera: { x: -12, y: 10, z: -2, fov: 22, zoom: 1, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 }, motion: "drift", aspect: "16:9", background: { type: "preset", preset: "peach" }, swatch: ["#fff1e8", "#ff9e7a"] },
-  { id: "air-mint", name: "Air on mint", device: "iphone-16-pro-max-glb", finish: "model", scene: "custom", camera: { x: 20, y: 12, z: 4, fov: 24, zoom: 1, panX: 0, panY: 0 }, rot: { x: 0, y: -20, z: 0 }, motion: "flip", aspect: "9:16", background: { type: "preset", preset: "mint" }, swatch: ["#e6f4ec", "#8fd1ae"] },
-  { id: "imac-noir", name: "iMac noir", device: "imac-24-glb", finish: "green", scene: "darkroom", camera: { x: -16, y: 10, z: 0, fov: 24, zoom: 1, panX: 0, panY: 0.04 }, rot: { x: 0, y: 8, z: 0 }, motion: "out-and-back", aspect: "16:9", swatch: ["#0c0c0c", "#2c5e9a"] },
+  { id: "iphone-hero", screen: "finance-dark", name: "iPhone hero", device: "iphone-17-pro-max-glb", finish: "model", scene: "custom", camera: { x: -18, y: 14, z: 0, fov: 24, zoom: 1, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 }, motion: "drift", aspect: "4:5", background: { type: "preset", preset: "glaze" }, swatch: ["#f6efe8", "#d7b79c"] },
+  { id: "iphone-detail", screen: "finance-dark", name: "iPhone detail", device: "iphone-17-pro-glb", finish: "model", scene: "custom", camera: { x: -24, y: 48, z: 0, fov: 24, zoom: 1.9, panX: 0.06, panY: -0.17 }, rot: { x: 0, y: 0, z: 0 }, motion: "scan-lr", aspect: "16:9", background: { type: "preset", preset: "whisp" }, blur: { mode: "radial", strength: 6, focusSize: 0.5, falloff: 0.3, bokeh: true, focusX: 0.5, focusY: 0.55 }, swatch: ["#f4f4f6", "#c5c9d3"], thumbAt: 0.5 },
+  { id: "concrete-macbook", screen: "analytics", name: "Concrete MacBook", device: "macbook-pro-14-glb", finish: "space-gray", scene: "concrete", camera: { x: -28, y: 18, z: 0, fov: 26, zoom: 1.1, panX: 0, panY: 0.02 }, rot: { x: 0, y: 12, z: 0 }, motion: "low-pan-up", aspect: "16:9", swatch: ["#3a3a3a", "#151515"] },
+  { id: "darkroom-macbook", screen: "analytics", name: "Dark room MacBook", device: "macbook-pro-16-glb", finish: "space-black", scene: "darkroom", camera: { x: 22, y: 12, z: 0, fov: 24, zoom: 1.15, panX: 0, panY: 0.02 }, rot: { x: 0, y: -18, z: 0 }, motion: "slow-zoom-out", aspect: "16:9", swatch: ["#0c0c0c", "#2a2f39"] },
+  { id: "studio-ipad", screen: "analytics", name: "Studio iPad", device: "ipad-pro-13-glb", finish: "silver", scene: "studio", camera: { x: -20, y: 16, z: 0, fov: 24, zoom: 1, panX: 0, panY: 0 }, rot: { x: 0, y: 10, z: 0 }, motion: "orbit", aspect: "4:3", swatch: ["#dcdcdc", "#f0f0f0"] },
+  { id: "watch-aurora", screen: "finance-dark", name: "Watch aurora", device: "apple-watch-ultra-glb", finish: "natural", scene: "custom", camera: { x: -26, y: 20, z: 8, fov: 24, zoom: 1.1, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 }, motion: "orbit", aspect: "1:1", background: { type: "preset", preset: "aurora" }, swatch: ["#0c1224", "#3a6b8a"] },
+  { id: "display-gallery", screen: "analytics", name: "Gallery display", device: "pro-display-xdr-glb", finish: "silver", scene: "gallery", camera: { x: -14, y: 8, z: 0, fov: 22, zoom: 1, panX: 0, panY: 0 }, rot: { x: 0, y: 6, z: 0 }, motion: "push-in", aspect: "16:9", swatch: ["#f6f6f6", "#dcdcdc"], thumbAt: 0.05 },
+  { id: "browser-peach", screen: "landing", name: "Browser card", device: "browser", finish: "light", scene: "custom", camera: { x: -12, y: 10, z: -2, fov: 22, zoom: 1, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 }, motion: "drift", aspect: "16:9", background: { type: "preset", preset: "peach" }, swatch: ["#fff1e8", "#ff9e7a"] },
+  { id: "air-mint", screen: "music", name: "Air on mint", device: "iphone-16-pro-max-glb", finish: "model", scene: "custom", camera: { x: 20, y: 12, z: 4, fov: 24, zoom: 0.8, panX: 0, panY: 0 }, rot: { x: 0, y: -20, z: 0 }, motion: "flip", aspect: "9:16", background: { type: "preset", preset: "mint" }, swatch: ["#e6f4ec", "#8fd1ae"] },
+  { id: "imac-noir", screen: "analytics", name: "iMac noir", device: "imac-24-glb", finish: "green", scene: "darkroom", camera: { x: -16, y: 10, z: 0, fov: 24, zoom: 1, panX: 0, panY: 0.04 }, rot: { x: 0, y: 8, z: 0 }, motion: "out-and-back", aspect: "16:9", swatch: ["#0c0c0c", "#2c5e9a"] },
   {
-    id: "clean-demo", name: "Clean demo", description: "Title · two iPhone moves · logo", device: "iphone-17-pro-glb", finish: "model", scene: "custom",
+    id: "clean-demo", screen: "finance-light", name: "Clean demo", description: "Title · two iPhone moves · logo", device: "iphone-17-pro-glb", finish: "model", scene: "custom",
     camera: { x: -30, y: -12, z: 0, fov: 24, zoom: 1.05, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 }, aspect: "16:9",
     background: { type: "preset", preset: "paper" }, swatch: ["#f7f5f0", "#ddd5c6"], fade: { in: 0.4, out: 0.6, color: "#f7f5f0" },
     sequence: [
@@ -368,17 +370,17 @@ export const TEMPLATES: Template[] = [
     ],
   },
   {
-    id: "appstore-iphone", name: "App Store iPhone", description: "1290 × 2796 still", device: "iphone-17-pro-glb", finish: "model", scene: "custom",
+    id: "appstore-iphone", screen: "finance-dark", name: "App Store iPhone", description: "1290 × 2796 still", device: "iphone-17-pro-glb", finish: "model", scene: "custom",
     camera: { x: -8, y: 6, z: 0, fov: 24, zoom: 1.02, panX: 0, panY: 0.02 }, rot: { x: 0, y: 0, z: 0 }, aspect: "as-iphone",
     background: { type: "preset", preset: "glaze" }, swatch: ["#f6efe8", "#d7b79c"],
   },
   {
-    id: "tablet-corner", name: "Tablet corner", description: "Lens blur on an iPad edge", device: "ipad-pro-13-glb", finish: "silver", scene: "custom",
+    id: "tablet-corner", screen: "analytics", name: "Tablet corner", description: "Lens blur on an iPad edge", device: "ipad-pro-13-glb", finish: "silver", scene: "custom",
     camera: { x: 24, y: 22, z: 2, fov: 32, zoom: 2.1, panX: -0.42, panY: -0.46 }, rot: { x: 0, y: 0, z: 0 }, aspect: "16:9", motion: "drift",
     background: { type: "preset", preset: "whisp" }, blur: { mode: "depth", strength: 9, focusSize: 0.35, falloff: 0.3, focusX: 0.32, focusY: 0.42 }, swatch: ["#f4f4f6", "#c5c9d3"],
   },
   {
-    id: "linear", name: "Linear", description: "Dark, typographic MacBook sequence", device: "macbook-pro-16-glb", finish: "space-black", scene: "darkroom",
+    id: "linear", screen: "analytics", name: "Linear", description: "Dark, typographic MacBook sequence", device: "macbook-pro-16-glb", finish: "space-black", scene: "darkroom",
     camera: { x: 20, y: 14, z: 0, fov: 24, zoom: 1.1, panX: 0, panY: 0.02 }, rot: { x: 0, y: -14, z: 0 }, aspect: "16:9",
     effects: [fx("grain", { amount: 0.16 }), fx("vignette", { darkness: 0.55, offset: 0.3 })], swatch: ["#0b0b0f", "#2a2a33"], fade: { in: 0.5, out: 0.8, color: "#000000" },
     sequence: [
@@ -388,32 +390,32 @@ export const TEMPLATES: Template[] = [
     ],
   },
   {
-    id: "brutal-phone", name: "Brutal phone", description: "Square, grainy, high contrast", device: "iphone-16-pro-max-glb", finish: "model", scene: "custom",
+    id: "brutal-phone", screen: "finance-dark", name: "Brutal phone", description: "Square, grainy, high contrast", device: "iphone-16-pro-max-glb", finish: "model", scene: "custom",
     camera: { x: 0, y: 0, z: 0, fov: 30, zoom: 1.2, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 }, aspect: "1:1", motion: "push-in",
     background: { type: "color", color: "#000000" }, effects: [fx("grain", { amount: 0.5 }), fx("vignette", { darkness: 0.7, offset: 0.25 }), fx("chromatic", { amount: 0.4 })], swatch: ["#000000", "#333333"], thumbAt: 0.15,
   },
   {
-    id: "hero-detail", name: "Hero detail", description: "Corner close-up with radial blur", device: "iphone-17-pro-glb", finish: "model", scene: "custom",
+    id: "hero-detail", screen: "finance-dark", name: "Hero detail", description: "Corner close-up with radial blur", device: "iphone-17-pro-glb", finish: "model", scene: "custom",
     camera: { x: 22, y: 26, z: 1, fov: 45, zoom: 1.925, panX: -0.445, panY: -0.594 }, rot: { x: 0, y: 0, z: 0 }, aspect: "16:9", motion: "drift",
     background: { type: "preset", preset: "whisp" }, blur: { mode: "radial", strength: 8, focusSize: 0.3, falloff: 0.35, focusX: 0.3, focusY: 0.35 }, swatch: ["#f4f4f6", "#c5c9d3"],
   },
   {
-    id: "flat-look", name: "Flat look", description: "Straight-on browser card", device: "browser", finish: "light", scene: "custom",
+    id: "flat-look", screen: "landing", name: "Flat look", description: "Straight-on browser card", device: "browser", finish: "light", scene: "custom",
     camera: { x: 0, y: 0, z: 0, fov: 20, zoom: 0.95, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 }, aspect: "16:9",
     background: { type: "preset", preset: "paper" }, swatch: ["#f7f5f0", "#ddd5c6"],
   },
   {
-    id: "violet-glass", name: "Violet glass", description: "Liquid glass over lilac", device: "iphone-17-pro-max-glb", finish: "model", scene: "custom",
-    camera: { x: -20, y: 10, z: 0, fov: 24, zoom: 1.05, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 }, aspect: "4:5", motion: "out-and-back",
+    id: "violet-glass", screen: "music", name: "Violet glass", description: "Liquid glass over lilac", device: "iphone-17-pro-max-glb", finish: "model", scene: "custom",
+    camera: { x: -20, y: 10, z: 0, fov: 24, zoom: 0.82, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 }, aspect: "4:5", motion: "out-and-back",
     background: { type: "preset", preset: "lilac" }, effects: [fx("liquidGlass", { x: 0.5, y: 0.5, width: 0.5, height: 0.3, radius: 0.14, refraction: 0.55, tint: 0.14 })], swatch: ["#f1ecfa", "#a992d8"],
   },
   {
-    id: "spectrum", name: "Spectrum", description: "Watch flip with bloom and fringing", device: "apple-watch-9-glb", finish: "midnight", scene: "custom",
-    camera: { x: -20, y: 14, z: 6, fov: 24, zoom: 1.1, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 }, aspect: "1:1", motion: "flip",
+    id: "spectrum", screen: "music", name: "Spectrum", description: "Watch flip with bloom and fringing", device: "apple-watch-9-glb", finish: "midnight", scene: "custom",
+    camera: { x: -20, y: 14, z: 6, fov: 24, zoom: 1.1, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 }, aspect: "1:1", motion: "orbit",
     background: { type: "preset", preset: "dusk" }, effects: [fx("bloom", { intensity: 0.8, threshold: 0.7, radius: 0.7 }), fx("chromatic", { amount: 0.3 })], swatch: ["#2b1c3a", "#c2664f"],
   },
   {
-    id: "macbook-2", name: "MacBook 2", description: "Lid opens as the camera settles", device: "macbook-pro-16-glb", finish: "space-black", scene: "studio",
+    id: "macbook-2", screen: "analytics", name: "MacBook 2", description: "Lid opens as the camera settles", device: "macbook-pro-16-glb", finish: "space-black", scene: "studio",
     camera: { x: -26, y: 22, z: 0, fov: 26, zoom: 1.05, panX: 0, panY: 0.03 }, rot: { x: 0, y: 8, z: 0 }, aspect: "16:9", swatch: ["#dcdcdc", "#f0f0f0"],
     sequence: [
       { kind: "media", name: "Open", duration: 4.5, keyframes: { "mockup.lid": [{ t: 0, v: 28, ease: "easeInOut" }, { t: 3.2, v: 110, ease: "easeInOut" }], "camera.y": [{ t: 0, v: 34, ease: "easeInOut" }, { t: 4.5, v: 18, ease: "easeInOut" }], "camera.zoom": [{ t: 0, v: 1.2, ease: "easeInOut" }, { t: 4.5, v: 1.02, ease: "easeInOut" }] } },

@@ -356,6 +356,7 @@ export function hideScreenOverlays(root: THREE.Object3D, screen: THREE.Mesh): TH
  */
 export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceSpec; finish: Finish; screen: THREE.Material; gloss?: number }) {
   const gl = useThree((s) => s.gl);
+  const maxAniso = gl.capabilities.getMaxAnisotropy();
   const invalidate = useThree((s) => s.invalidate);
   const model = spec.model!;
   const gltf = useGLTF(model.url, true, true, (loader) => {
@@ -541,10 +542,29 @@ export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceS
         if (!("envMapIntensity" in std)) return x;
         const cache = (mesh.userData.tuned ??= new Map<THREE.Material, THREE.MeshStandardMaterial>()) as Map<THREE.Material, THREE.MeshStandardMaterial>;
         let t = cache.get(x);
-        if (!t) { t = std.clone(); t.userData.baseRoughness = std.roughness; cache.set(x, t); }
+        if (!t) {
+          t = std.clone();
+          t.userData.baseRoughness = std.roughness;
+          // photogrammetry-style normal maps are high-frequency noise; without mip filtering they
+          // alias into sparkles under a bright HDRI, so filter them properly and tame the strength
+          for (const map of [t.normalMap, t.map, t.roughnessMap, t.metalnessMap, t.aoMap]) {
+            if (!map) continue;
+            map.anisotropy = maxAniso;
+            map.minFilter = THREE.LinearMipmapLinearFilter;
+            map.magFilter = THREE.LinearFilter;
+            map.generateMipmaps = true;
+            map.needsUpdate = true;
+          }
+          if (t.normalMap) t.normalScale = t.normalScale.clone().multiplyScalar(0.65);
+          cache.set(x, t);
+        }
         t.envMapIntensity = gloss;
         t.fog = false;
-        t.roughness = Math.max(0.04, Math.min(1, (t.userData.baseRoughness as number) * Math.max(0.45, 1.15 - gloss * 0.3)));
+        const base = t.userData.baseRoughness as number;
+        // gloss polishes the surface a little, never to a mirror: a noisy normal map on a near-mirror
+        // surface is what produces speckle, so keep a floor when one is present
+        const polished = base * Math.max(0.7, 1.08 - gloss * 0.12);
+        t.roughness = Math.max(t.normalMap ? 0.22 : 0.05, Math.min(1, polished));
         return t;
       });
       mesh.material = tuned.length === 1 ? tuned[0] : tuned;
@@ -565,7 +585,7 @@ export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceS
       }
     });
     invalidate();
-  }, [root, model.screenMesh, model.screenInset, model.finishMaterials, model.hide, finish.color, screen, invalidate, gloss, spec.id, spec.screenPx, spec, scene, notch, caseKeyboard, bandColor]);
+  }, [root, model.screenMesh, model.screenInset, model.finishMaterials, model.hide, finish.color, screen, invalidate, gloss, spec.id, spec.screenPx, spec, scene, notch, caseKeyboard, bandColor, maxAniso]);
 
   return <primitive object={root} rotation={model.rotation ?? [0, 0, 0]} position={model.position ?? [0, 0, 0]} />;
 }

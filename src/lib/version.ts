@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.2.0";
+export const APP_VERSION = "0.3.0";
 
 export interface ChangelogEntry {
   version: string;
@@ -8,6 +8,19 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.3.0",
+    date: "Sep 2, 2026",
+    title: "Sample screens, cleaner materials, a calmer default",
+    items: [
+      "Six built-in sample screens (Finance dark and light, Music, Messages, Analytics, Landing page) drawn procedurally at any resolution: pick one from the Source panel, and every starter template now opens with one already on the device.",
+      "Fixed the sparkle speckle on device bodies: normal maps are now mip-filtered and anisotropically sampled, and Body gloss no longer polishes a textured surface down to a mirror.",
+      "The default project no longer ships with camera keyframes, so dragging the camera edits the pose itself and a refresh brings back exactly what you left.",
+      "Scene picker rebuilt as full-width preview cards.",
+      "Applying a template parks the playhead past its fade-in, so you see the shot instead of a black frame.",
+      "iPhone 17 Pro finishes: Silver, Cosmic Orange, Deep Blue.",
+    ],
+  },
   {
     version: "0.2.0",
     date: "Sep 2, 2026",
