@@ -1,4 +1,10 @@
 import { uid } from "./ids";
+import { DEVICES } from "./devices";
+import { LIGHTINGS, SCENES } from "./presets";
+
+const DEVICE_IDS = new Set(DEVICES.map((d) => d.id));
+const SCENE_IDS = new Set(SCENES.map((s) => s.id));
+const LIGHTING_IDS = new Set(LIGHTINGS.map((l) => l.id));
 import type { EnterExit, Project, Shot, TextStyle, LogoStyle } from "./types";
 
 export function createShot(name: string, duration = 3): Shot {
@@ -73,7 +79,15 @@ export function normalizeProject(p: Project): Project {
   p.scene.shadowOpacity ??= 0.5;
   p.audio ??= null;
   p.fade ??= { in: 0, out: 0, color: "#000000" };
-  for (const s of p.shots) { s.kind ??= "media"; s.focusAreas ??= []; s.keyframes ??= {}; }
+  for (const s of p.shots) {
+    s.kind ??= "media";
+    s.focusAreas ??= [];
+    s.keyframes ??= {};
+    // a per-shot override pointing at a device or scene that no longer exists falls back to the project
+    if (s.device && !DEVICE_IDS.has(s.device)) delete s.device;
+    if (s.scene && !SCENE_IDS.has(s.scene)) delete s.scene;
+    if (s.lighting && !LIGHTING_IDS.has(s.lighting)) delete s.lighting;
+  }
   return p;
 }
 

@@ -29,4 +29,7 @@ export const anim = {
   card: false,
   /** average linear colour of the screen, for the light it throws into a lit scene */
   screenColor: null as [number, number, number] | null,
+  /** world position of the screen's centre and the direction it faces, for that light */
+  screenPos: null as [number, number, number] | null,
+  screenDir: null as [number, number, number] | null,
 };

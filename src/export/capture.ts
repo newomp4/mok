@@ -6,6 +6,7 @@ import { nextFrame, useRenderFlags, viewport } from "@/three/registry";
 import { useEditor } from "@/store/editor";
 import { useUI } from "@/store/ui";
 import { locate, totalDuration } from "@/lib/animation";
+import { resolveShotView } from "@/lib/shotView";
 import { getMedia } from "@/lib/media";
 import { ensureFont } from "@/lib/fonts";
 
@@ -18,6 +19,13 @@ export interface ExportSessionOptions {
 export interface ExportSession {
   canvas: HTMLCanvasElement;
   renderAt: (t: number) => Promise<void>;
+}
+
+/** A stable key for the look at time t, so an export only pauses when the look actually changes. */
+function shotViewAt(t: number): string {
+  const p = useEditor.getState().project;
+  const v = resolveShotView(p, locate(p, t).shot);
+  return `${v.device}|${v.finish}|${v.scene}|${v.lighting}`;
 }
 
 async function seekVideoForTime(t: number) {
@@ -66,8 +74,22 @@ export async function withExportSession<T>(opts: ExportSessionOptions, fn: (s: E
   await nextFrame();
   viewport.composer?.setSize(opts.width, opts.height);
   const canvas = st.gl.domElement;
+  const prevTime = useUI.getState().time;
+  let mounted = shotViewAt(prevTime);
   const renderAt = async (t: number) => {
     anim.exportTime = t;
+    // keep the React tree on the same shot as the frame being rendered, so per-shot devices,
+    // scenes and lighting are the ones that get exported
+    const view = shotViewAt(t);
+    const changed = view !== mounted;
+    if (useUI.getState().time !== t) useUI.setState({ time: t });
+    if (changed) {
+      mounted = view;
+      // give React and any newly mounted model a couple of frames to settle before capturing
+      await nextFrame();
+      await nextFrame();
+      await nextFrame();
+    }
     await seekVideoForTime(t);
     st.advance(performance.now());
   };
@@ -76,6 +98,7 @@ export async function withExportSession<T>(opts: ExportSessionOptions, fn: (s: E
   } finally {
     anim.exportTime = null;
     anim.exporting = false;
+    useUI.setState({ time: prevTime });
     useRenderFlags.getState().setTransparent(false);
     st.setDpr(prev.dpr);
     st.setSize(prev.w, prev.h);

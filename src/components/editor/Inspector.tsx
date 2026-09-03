@@ -9,12 +9,13 @@ import { hasKeyframeAt, locate, sampleTrack } from "@/lib/animation";
 import { DEVICES, FAMILY_LABELS, getDevice, getFinish, type DeviceFamily } from "@/lib/devices";
 import { BG_PRESETS, CAMERA_PRESETS, EFFECT_DEFS, LIGHTINGS, SCENES, getBgPreset, getEffectDef, getScene } from "@/lib/presets";
 import { paintPreset } from "@/three/background";
-import { Button, ColorRow, IconButton, NumberRow, Section, Segmented, SelectRow, TextAreaRow, ToggleRow, type KeyState } from "@/components/ui";
+import { Button, ColorRow, Hint, IconButton, NumberRow, Section, Segmented, SelectRow, TextAreaRow, ToggleRow, type KeyState } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/cn";
 import { useMedia, ACCEPTED_TYPES, ACCEPTED_IMAGES } from "@/lib/media";
 import { useModelBounds } from "@/three/registry";
-import { useActiveShot } from "@/three/Device";
+import { useActiveShot, useRenderShot } from "@/three/Device";
+import { resolveShotView } from "@/lib/shotView";
 import { applyCameraPreset, importBackgroundImage, importFilesToShot, importLogo, importScreenBackground, resetBlur, resetCamera, setShotMedia, applySampleScreen } from "@/lib/actions";
 import { SAMPLE_SCREENS, drawSampleScreen } from "@/lib/screens";
 import { pickFiles } from "./hooks";
@@ -286,7 +287,15 @@ function SceneSection() {
         </div>
         <Button variant="outline" size="sm" onClick={() => setPicker("scene")}>Change</Button>
       </div>
-      <SelectRow label="Lighting" value={scene.lighting} onChange={(v) => update((p) => { p.scene.lighting = v; })} options={LIGHTINGS.map((l) => ({ value: l.id, label: l.name }))} />
+      <ShotSceneOverride />
+      <ShotOverrideRow
+        label="Lighting"
+        options={LIGHTINGS.map((l) => ({ value: l.id, label: l.name }))}
+        project={scene.lighting}
+        read={(sh) => sh.lighting}
+        write={(sh, v) => { sh.lighting = v as typeof scene.lighting; }}
+        setProject={(v) => update((p) => { p.scene.lighting = v as typeof scene.lighting; })}
+      />
       <AnimRow prop="scene.lightRotX" label="Light rotation X" min={-180} max={180} step={1} />
       <AnimRow prop="scene.lightRotY" label="Light rotation Y" min={0} max={360} step={1} />
       <AnimRow prop="scene.lightIntensity" label="Light intensity" min={0} max={3} step={0.01} />
@@ -424,9 +433,11 @@ function MockupSection() {
   const picker = useUI((s) => s.picker);
   const setPicker = useUI((s) => s.setPicker);
   const [open, setOpen] = useState(true);
-  const spec = getDevice(mockup.device);
-  const finish = getFinish(spec, mockup.finish);
-  const features = useModelBounds((s) => s.bounds[mockup.device]?.features);
+  const renderShot = useRenderShot();
+  const view = useEditor(useShallow((s) => resolveShotView(s.project, renderShot)));
+  const spec = getDevice(view.device);
+  const finish = getFinish(spec, view.finish);
+  const features = useModelBounds((s) => s.bounds[view.device]?.features);
   if (picker === "device") return <DevicePicker />;
   return (
     <Section title="Mockup" open={open} onToggle={() => setOpen((o) => !o)} tour="mockup">
@@ -435,12 +446,19 @@ function MockupSection() {
           <Icon name={spec.icon} size={16} />
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="label truncate text-fg">{spec.name}</span>
+          <span className="label flex items-center gap-1.5 truncate text-fg">{spec.name}{renderShot?.device && <Hint>this shot</Hint>}</span>
           <span className="label-sm text-muted">{spec.screenPx[0].toLocaleString()} × {spec.screenPx[1].toLocaleString()}</span>
         </div>
         <Button variant="outline" size="sm" onClick={() => setPicker("device")}>Change</Button>
       </div>
-      <SelectRow label="Finish" value={finish.id} onChange={(v) => update((p) => { p.mockup.finish = v; })} options={spec.finishes.map((f) => ({ value: f.id, label: f.name, swatch: f.color }))} />
+      <ShotOverrideRow
+        label="Finish"
+        options={spec.finishes.map((f) => ({ value: f.id, label: f.name, swatch: f.color }))}
+        project={finish.id}
+        read={(sh) => sh.finish}
+        write={(sh, v) => { sh.finish = v; }}
+        setProject={(v) => update((p) => { p.mockup.finish = v; })}
+      />
       <NumberRow label="Reflection" value={mockup.reflection} min={0} max={1} step={0.01} onChange={(v) => update((p) => { p.mockup.reflection = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
       {spec.model && (
         <NumberRow label="Body gloss" value={mockup.gloss ?? 1.3} min={0.2} max={3} step={0.05} onChange={(v) => update((p) => { p.mockup.gloss = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
@@ -483,9 +501,13 @@ function MockupSection() {
 }
 
 function DevicePicker() {
-  const current = useEditor((s) => s.project.mockup.device);
+  const projectDevice = useEditor((s) => s.project.mockup.device);
   const setDevice = useEditor((s) => s.setDevice);
+  const updateShot = useEditor((s) => s.updateShot);
   const setPicker = useUI((s) => s.setPicker);
+  const shot = useRenderShot();
+  const [forShot, setForShot] = useState(!!shot?.device);
+  const current = shot?.device ?? projectDevice;
   const families = useMemo(() => {
     const out = new Map<DeviceFamily, typeof DEVICES>();
     for (const d of DEVICES) if (!d.hidden) out.set(d.family, [...(out.get(d.family) ?? []), d]);
@@ -493,6 +515,19 @@ function DevicePicker() {
   }, []);
   return (
     <Section title="Mockup" right={<Button variant="ghost" size="sm" icon="arrow-left" onClick={() => setPicker(null)}>Back</Button>}>
+      {shot && (
+        <Segmented
+          size="sm"
+          value={forShot ? "shot" : "project"}
+          onChange={(v) => {
+            const next = v === "shot";
+            setForShot(next);
+            // switching to project scope drops the override so the shot follows the project again
+            if (!next && shot.device) updateShot(shot.id, (s) => { delete s.device; delete s.finish; });
+          }}
+          options={[{ value: "project", label: "Whole project" }, { value: "shot", label: shot.name }]}
+        />
+      )}
       {[...families.entries()].map(([family, list]) => (
         <div key={family} className="flex flex-col gap-1.5">
           <div className="label-sm pt-1 text-muted">{FAMILY_LABELS[family]}</div>
@@ -501,7 +536,11 @@ function DevicePicker() {
               <button
                 key={d.id}
                 type="button"
-                onClick={() => { setDevice(d.id); setPicker(null); }}
+                onClick={() => {
+                  if (forShot && shot) updateShot(shot.id, (s) => { s.device = d.id; delete s.finish; });
+                  else setDevice(d.id);
+                  setPicker(null);
+                }}
                 className={cn("flex flex-col items-center gap-1.5 rounded-md border bg-panel-2 px-2 pb-2.5 pt-2 transition-colors", d.id === current ? "border-accent" : "border-line hover:border-line-2")}
               >
                 <div className="relative flex h-16 w-full items-center justify-center">
@@ -517,6 +556,65 @@ function DevicePicker() {
         </div>
       ))}
     </Section>
+  );
+}
+
+/**
+ * A setting that belongs to the project but can be overridden for the shot on screen, the way
+ * Ultramock scopes device, environment and lighting per shot. Editing it changes the project value
+ * unless the shot already overrides it; the pin button switches between the two.
+ */
+function ShotOverrideRow({ label, options, project, read, write, setProject }: {
+  label: string;
+  options: { value: string; label: ReactNode; swatch?: string }[];
+  project: string;
+  read: (s: Shot) => string | undefined;
+  write: (s: Shot, v: string) => void;
+  setProject: (v: string) => void;
+}) {
+  const shot = useRenderShot();
+  const updateShot = useEditor((s) => s.updateShot);
+  const override = shot ? read(shot) : undefined;
+  const value = override ?? project;
+  return (
+    <div className="flex items-stretch gap-1">
+      <SelectRow
+        className="flex-1"
+        label={<span className="flex items-center gap-1.5">{label}{override !== undefined && <Hint>this shot</Hint>}</span>}
+        value={value}
+        options={options}
+        onChange={(v) => { if (override !== undefined && shot) updateShot(shot.id, (s) => write(s, v)); else setProject(v); }}
+      />
+      {shot && (
+        <IconButton
+          icon={override === undefined ? "pin" : "x"}
+          size={12}
+          label={override === undefined ? `Override ${label.toLowerCase()} for this shot` : "Use the project value"}
+          onClick={() => updateShot(shot.id, (s) => { if (override === undefined) write(s, project); else write(s, undefined as unknown as string); })}
+          className={cn("h-8 w-7 shrink-0 rounded-md bg-fill", override !== undefined && "text-accent")}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Per-shot environment: which 3D scene this shot uses. */
+function ShotSceneOverride() {
+  const shot = useRenderShot();
+  const updateShot = useEditor((s) => s.updateShot);
+  const projectScene = useEditor((s) => s.project.scene.preset);
+  if (!shot) return null;
+  const override = shot.scene;
+  return (
+    <ShotOverrideRow
+      label="Environment"
+      options={SCENES.map((s) => ({ value: s.id, label: s.name }))}
+      project={projectScene}
+      read={(sh) => sh.scene}
+      write={(sh, v) => { sh.scene = v as typeof projectScene; }}
+      setProject={(v) => useEditor.getState().setScenePreset(v as typeof projectScene)}
+      key={override ?? "project"}
+    />
   );
 }
 

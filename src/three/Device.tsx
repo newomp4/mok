@@ -18,6 +18,9 @@ import { DesktopModel } from "@/three/devices/Desktop";
 import { FlatModel } from "@/three/devices/Flat";
 import { GlbDevice } from "@/three/devices/GlbModel";
 import { useModelBounds } from "@/three/registry";
+import { useShallow } from "zustand/react/shallow";
+import { locate } from "@/lib/animation";
+import { resolveShotView, type ShotView } from "@/lib/shotView";
 import { Suspense } from "react";
 
 const DEG = Math.PI / 180;
@@ -27,14 +30,27 @@ export function useActiveShot() {
   return useEditor((s) => s.project.shots.find((x) => x.id === activeId) ?? s.project.shots[0] ?? null);
 }
 
+/** The shot the playhead sits on: what the viewport and an export are actually showing. */
+export function useRenderShot() {
+  const time = useUI((s) => s.time);
+  return useEditor((s) => locate(s.project, time).shot);
+}
+
+/** Device, finish, scene and lighting for the shot on screen, falling back to the project. */
+export function useShotView(): ShotView {
+  const shot = useRenderShot();
+  return useEditor(useShallow((s) => resolveShotView(s.project, shot)));
+}
+
 export function Device({ layout }: { layout: DeviceLayout }) {
-  const deviceId = useEditor((s) => s.project.mockup.device);
-  const finishId = useEditor((s) => s.project.mockup.finish);
+  const view = useShotView();
+  const deviceId = view.device;
+  const finishId = view.finish;
   const reflection = useEditor((s) => s.project.mockup.reflection);
   const gloss = useEditor((s) => s.project.mockup.gloss ?? 1.3);
   const borderRadius = useEditor((s) => s.project.mockup.borderRadius);
-  const scenePreset = useEditor((s) => s.project.scene.preset);
-  const shot = useActiveShot();
+  const scenePreset = view.scene;
+  const shot = useRenderShot() ?? null;
   const media = useMedia(shot?.media);
   const screenCfg = useEditor((s) => s.project.screen);
   const screenBgImage = useMedia(screenCfg.bg?.type === "image" ? screenCfg.bg.image : null);
@@ -174,8 +190,8 @@ export function Device({ layout }: { layout: DeviceLayout }) {
 }
 
 export function useDeviceLayout(): DeviceLayout {
-  const deviceId = useEditor((s) => s.project.mockup.device);
-  const shot = useActiveShot();
+  const deviceId = useShotView().device;
+  const shot = useRenderShot();
   const spec = getDevice(deviceId);
   const bounds = useModelBounds((s) => s.bounds[deviceId]);
   return useMemo(() => {

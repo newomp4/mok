@@ -12,7 +12,7 @@ import { getBgPreset, getLighting } from "@/lib/presets";
 import { useMedia } from "@/lib/media";
 import { paintImage, paintPreset } from "@/three/background";
 import { useRenderFlags, viewport } from "@/three/registry";
-import { Device, useDeviceLayout } from "@/three/Device";
+import { Device, useDeviceLayout, useShotView } from "@/three/Device";
 import { EnvScene } from "@/three/scenes/EnvScene";
 import { PostFX } from "@/three/effects/PostFX";
 import { CardLayer, FadeOverlay } from "@/three/CardLayer";
@@ -133,7 +133,7 @@ function CameraRig({ fitSize }: { fitSize: number }) {
 }
 
 function Lighting() {
-  const lighting = useEditor((s) => s.project.scene.lighting);
+  const lighting = useShotView().lighting;
   const preset = getLighting(lighting);
   const scene = useThree((s) => s.scene);
   const gl = useThree((s) => s.gl);
@@ -159,7 +159,7 @@ function Lighting() {
 
 function BackgroundLayer() {
   const bg = useEditor((s) => s.project.scene.background);
-  const preset = useEditor((s) => s.project.scene.preset);
+  const preset = useShotView().scene;
   const transparent = useRenderFlags((s) => s.transparent);
   const media = useMedia(bg.type === "image" ? bg.image : null);
   const scene = useThree((s) => s.scene);
@@ -233,7 +233,7 @@ function DeviceOnly({ children }: { children: React.ReactNode }) {
 
 export function SceneRoot() {
   const layout = useDeviceLayout();
-  const scenePreset = useEditor((s) => s.project.scene.preset);
+  const scenePreset = useShotView().scene;
   const contactShadow = useEditor((s) => s.project.scene.contactShadow);
   const shadowSoft = useEditor((s) => s.project.scene.shadowSoft ?? 0.5);
   const shadowOpacity = useEditor((s) => s.project.scene.shadowOpacity ?? 0.5);

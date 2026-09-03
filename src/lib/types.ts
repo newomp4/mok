@@ -119,6 +119,11 @@ export interface Shot {
   trimStart?: number;
   /** how this shot hands over to the next one */
   transitionOut?: Transition;
+  /** per-shot overrides: a sequence can cut between devices, scenes and lighting */
+  device?: string;
+  finish?: string;
+  scene?: ScenePresetId;
+  lighting?: LightingId;
 }
 
 export interface AudioTrack {

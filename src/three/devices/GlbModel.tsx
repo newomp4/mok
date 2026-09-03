@@ -467,6 +467,12 @@ export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceS
         for (const sm of screens) sm.visible = true;
         root.userData.hidden = hidden;
       }
+      if (screens[0]) {
+        // where the display sits and which way it faces, so a lit scene can put its glow there
+        const f = screenFrame(screens[0]);
+        anim.screenPos = [f.center.x, f.center.y, f.center.z];
+        anim.screenDir = [f.n.x, f.n.y, f.n.z];
+      }
       const features = detectFeatures(root, screens[0] ?? null, spec, scene);
       root.userData.features = features;
       const flags: ModelFeatures = { lid: !!features.lid, island: features.island.length > 0, caseParts: features.caseParts.length > 0, band: features.band.length > 0 };

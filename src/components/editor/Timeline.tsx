@@ -153,6 +153,9 @@ export function Timeline() {
       { label: "Duplicate", icon: "copy", shortcut: "⌘D", onSelect: () => duplicateShot(shotId) },
       { label: "Split at playhead", icon: "split-clip", shortcut: "⇧⌘D", disabled: !inside, onSelect: () => splitShot(shotId, ui.time - start) },
       { label: "Reverse", icon: "rewind", onSelect: () => reverseShot(shotId) },
+      ...((shot.device || shot.finish || shot.scene || shot.lighting)
+        ? [{ label: "Use the project look", icon: "rotate-ccw", onSelect: () => useEditor.getState().updateShot(shotId, (s) => { delete s.device; delete s.finish; delete s.scene; delete s.lighting; }) }]
+        : []),
       { divider: true, label: "" },
       { label: "Copy", icon: "clipboard", shortcut: "⌘C", onSelect: () => copyShot(shotId) },
       { label: "Paste after", icon: "clipboard", shortcut: "⌘V", disabled: !hasShotClipboard(), onSelect: () => pasteShot(shotId) },
@@ -249,6 +252,7 @@ export function Timeline() {
                   >
                     <IconButton icon={open ? "chevron-down" : "chevron-right"} size={11} label={open ? "Hide keyframes" : "Show keyframes"} onClick={(e) => { e.stopPropagation(); setExpanded((x) => ({ ...x, [shot.id]: !open })); }} className="h-5 w-5" disabled={!advanced} />
                     <Icon name={KIND_ICON[shotKind(shot)]} size={11} className="text-muted" />
+                    {(shot.device || shot.scene || shot.lighting || shot.finish) && <Icon name="pin" size={9} className="text-accent" />}
                     <ShotName shot={shot} editing={renaming === shot.id} onEditEnd={() => setRenaming(null)} onEditStart={() => setRenaming(shot.id)} />
                     <span className="num ml-auto text-[10px] text-muted">{shot.duration.toFixed(1)}s</span>
                     <IconButton icon="menu" size={11} label="Shot menu" onClick={(e) => { e.stopPropagation(); const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setMenu({ at: { x: r.left, y: r.bottom + 4 }, shotId: shot.id }); }} className="hidden h-5 w-5 group-hover:flex" />
