@@ -19,6 +19,7 @@ import { SAMPLE_SCREENS, drawSampleScreen } from "@/lib/screens";
 import { pickFiles } from "./hooks";
 import { defaultLogoStyle, defaultTextStyle, shotKind } from "@/lib/defaults";
 import { FONTS, cssFamily, ensureFont, getFont, nearestWeight } from "@/lib/fonts";
+import { anim } from "@/three/anim";
 
 /* ---------- animated value helpers ---------- */
 function useAnimRow(prop: AnimProp) {
@@ -548,6 +549,12 @@ function BlurSection() {
         <NumberRow label="Angle" value={blur.angle ?? 0} min={0} max={360} step={1} onChange={(v) => update((p) => { p.blur.angle = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
       )}
       <AnimRow prop="blur.strength" label="Strength" min={0} max={20} step={0.1} disabled={off} />
+      {blur.mode === "depth" && (
+        <>
+          <Segmented size="sm" value={(blur.focusDistance ?? 0) > 0 ? "manual" : "auto"} onChange={(v) => update((p) => { p.blur.focusDistance = v === "auto" ? 0 : Math.max(0.1, anim.focusDist); })} options={[{ value: "auto", label: "Auto focus" }, { value: "manual", label: "Manual" }]} />
+          {(blur.focusDistance ?? 0) > 0 && <AnimRow prop="blur.focusDistance" label="Focus distance" min={0.1} max={40} step={0.05} />}
+        </>
+      )}
       <AnimRow prop="blur.focusSize" label={blur.mode === "depth" ? "Focus range" : "Focus size"} min={0} max={1.5} step={0.01} disabled={off} />
       <AnimRow prop="blur.falloff" label="Falloff" min={0} max={1} step={0.01} disabled={off} />
       <ToggleRow label="Bokeh" checked={blur.bokeh} onChange={(v) => update((p) => { p.blur.bokeh = v; })} disabled={off} />

@@ -242,30 +242,59 @@ export function ViewportPane() {
   );
 }
 
-/** Small ring at the blur focus point: shows while the blur is being adjusted, then fades away. */
+/**
+ * Blur focus guides: a circle for radial, a line for directional, a pair for tilt shift and a
+ * crosshair for lens. Solid marks where the blur starts, dashed shows the falloff. They appear
+ * while you adjust the blur (or hold Alt) and fade out again, so they never sit in a capture.
+ */
 function FocusMarker() {
   const mode = useEditor((s) => s.project.blur.mode);
+  const angle = useEditor((s) => s.project.blur.angle ?? 0);
   const time = useUI((s) => s.time);
-  const pos = useEditor(useShallow((s) => {
+  const v = useEditor(useShallow((s) => {
     const loc = locate(s.project, time);
-    const fx = loc.shot?.keyframes["blur.focusX"], fy = loc.shot?.keyframes["blur.focusY"];
-    return { x: fx?.length ? sampleTrack(fx, loc.localT) : s.project.blur.focusX, y: fy?.length ? sampleTrack(fy, loc.localT) : s.project.blur.focusY };
+    const at = (prop: "blur.focusX" | "blur.focusY" | "blur.focusSize" | "blur.falloff") => {
+      const [, k] = prop.split(".") as [string, keyof typeof s.project.blur];
+      const track = loc.shot?.keyframes[prop];
+      return track?.length ? sampleTrack(track, loc.localT) : (s.project.blur[k] as number);
+    };
+    return { x: at("blur.focusX"), y: at("blur.focusY"), size: at("blur.focusSize"), falloff: at("blur.falloff") };
   }));
   const [visible, setVisible] = useState(false);
   useEffect(() => {
     let timer: number | null = null;
-    const show = () => { setVisible(true); if (timer) window.clearTimeout(timer); timer = window.setTimeout(() => setVisible(false), 1400); };
+    const show = () => { setVisible(true); if (timer) window.clearTimeout(timer); timer = window.setTimeout(() => setVisible(false), 1600); };
     const unsub = useEditor.subscribe((s) => s.project.blur, (a, b) => { if (a !== b) show(); });
+    const unsubShot = useEditor.subscribe((s) => s.project.shots, () => {});
     const onKey = (e: KeyboardEvent) => { if (e.key === "Alt") setVisible(true); };
     const onKeyUp = (e: KeyboardEvent) => { if (e.key === "Alt") show(); };
     document.addEventListener("keydown", onKey);
     document.addEventListener("keyup", onKeyUp);
-    return () => { unsub(); document.removeEventListener("keydown", onKey); document.removeEventListener("keyup", onKeyUp); if (timer) window.clearTimeout(timer); };
+    return () => { unsub(); unsubShot(); document.removeEventListener("keydown", onKey); document.removeEventListener("keyup", onKeyUp); if (timer) window.clearTimeout(timer); };
   }, []);
   if (mode === "off" || !visible) return null;
+  const cx = v.x * 100, cy = v.y * 100;
+  // the shader measures distance with x scaled by the aspect, so the guide is a circle in y units
+  const r1 = v.size * 100, r2 = (v.size + v.falloff) * 100;
+  const line = (offset: number, dashed: boolean) => (
+    <div key={`${offset}${dashed}`} className="absolute inset-x-[-20%] border-t" style={{ top: `${cy + offset}%`, borderColor: dashed ? "rgba(255,255,255,0.55)" : "rgba(255,255,255,0.9)", borderStyle: dashed ? "dashed" : "solid", transform: mode === "directional" ? `rotate(${-angle}deg)` : undefined, transformOrigin: `${cx}% 50%` }} />
+  );
   return (
-    <div className="pointer-events-none absolute z-10 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.35)]" style={{ left: `${pos.x * 100}%`, top: `${pos.y * 100}%` }}>
-      <div className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" />
+    <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden mix-blend-difference">
+      {mode === "radial" || mode === "depth" ? (
+        <>
+          {mode === "radial" && [r1, r2].map((r, i) => (
+            <div key={i} className="absolute rounded-full border" style={{ left: `${cx}%`, top: `${cy}%`, width: `${r * 2}%`, aspectRatio: "1", transform: "translate(-50%, -50%)", borderColor: i ? "rgba(255,255,255,0.5)" : "rgba(255,255,255,0.85)", borderStyle: i ? "dashed" : "solid" }} />
+          ))}
+          <div className="absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/90" style={{ left: `${cx}%`, top: `${cy}%` }}>
+            <div className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" />
+          </div>
+        </>
+      ) : mode === "linear" ? (
+        [line(-r1, false), line(r1, false), line(-r2, true), line(r2, true)]
+      ) : (
+        [line(0, false), line(-r2 / 2, true), line(r2 / 2, true)]
+      )}
     </div>
   );
 }

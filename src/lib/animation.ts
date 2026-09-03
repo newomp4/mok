@@ -47,7 +47,7 @@ export function sampleTrack(kfs: Keyframe[], t: number): number {
   return a.v + (b.v - a.v) * u;
 }
 
-const BASE_FALLBACK: Partial<Record<AnimProp, number>> = { "mockup.lid": 110 };
+const BASE_FALLBACK: Partial<Record<AnimProp, number>> = { "mockup.lid": 110, "blur.focusDistance": 0 };
 
 export function getBase(p: Project, prop: AnimProp): number {
   const [g, k] = prop.split(".") as [keyof Project, string];
@@ -76,7 +76,7 @@ export const ANIM_DEFAULT_KEYS: Record<AnimProp, true> = {
   "camera.x": true, "camera.y": true, "camera.z": true, "camera.fov": true, "camera.zoom": true,
   "camera.panX": true, "camera.panY": true, "mockup.rotX": true, "mockup.rotY": true, "mockup.rotZ": true, "mockup.lid": true,
   "scene.lightRotX": true, "scene.lightRotY": true, "scene.lightIntensity": true,
-  "blur.strength": true, "blur.focusSize": true, "blur.falloff": true, "blur.focusX": true, "blur.focusY": true,
+  "blur.strength": true, "blur.focusSize": true, "blur.falloff": true, "blur.focusX": true, "blur.focusY": true, "blur.focusDistance": true,
   "screen.brightness": true,
 };
 

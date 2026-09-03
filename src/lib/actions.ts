@@ -31,7 +31,7 @@ export function resetCamera() {
 
 export function resetBlur() {
   useEditor.getState().update((p) => {
-    p.blur = { mode: "off", strength: 10, focusSize: 0.52, falloff: 0, bokeh: true, focusX: 0.5, focusY: 0.5 };
+    p.blur = { mode: "off", strength: 10, focusSize: 0.52, falloff: 0, bokeh: true, focusX: 0.5, focusY: 0.5, focusDistance: 0 };
     for (const s of p.shots) for (const k of Object.keys(s.keyframes) as AnimProp[]) if (k.startsWith("blur.")) delete s.keyframes[k];
   });
 }

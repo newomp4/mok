@@ -72,7 +72,8 @@ export function PostFX() {
         const hit = device ? raycaster.intersectObject(device, true).find((h) => h.object.visible) : undefined;
         focusTarget.current = hit ? hit.distance : anim.camDist;
       }
-      const target = focusTarget.current ?? anim.camDist;
+      const manual = v["blur.focusDistance"] ?? 0;
+      const target = manual > 0.001 ? manual : (focusTarget.current ?? anim.camDist);
       if (anim.exporting || Math.abs(target - anim.focusDist) < 1e-3) anim.focusDist = target;
       else { anim.focusDist += (target - anim.focusDist) * 0.35; state.invalidate(); }
       // the CoC pass caches camera near/far; refresh it since the rig adapts them per frame

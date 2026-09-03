@@ -36,7 +36,7 @@ export const ANIM_PROPS = [
   "camera.x", "camera.y", "camera.z", "camera.fov", "camera.zoom", "camera.panX", "camera.panY",
   "mockup.rotX", "mockup.rotY", "mockup.rotZ", "mockup.lid",
   "scene.lightRotX", "scene.lightRotY", "scene.lightIntensity",
-  "blur.strength", "blur.focusSize", "blur.falloff", "blur.focusX", "blur.focusY",
+  "blur.strength", "blur.focusSize", "blur.falloff", "blur.focusX", "blur.focusY", "blur.focusDistance",
   "screen.brightness",
 ] as const;
 export type AnimProp = (typeof ANIM_PROPS)[number];
@@ -47,7 +47,7 @@ export const ANIM_LABELS: Record<AnimProp, string> = {
   "mockup.rotX": "Rotate X", "mockup.rotY": "Rotate Y", "mockup.rotZ": "Rotate Z", "mockup.lid": "Lid angle",
   "scene.lightRotX": "Light Rot X", "scene.lightRotY": "Light Rot Y", "scene.lightIntensity": "Light Intensity",
   "blur.strength": "Blur Strength", "blur.focusSize": "Focus Size", "blur.falloff": "Falloff",
-  "blur.focusX": "Focus X", "blur.focusY": "Focus Y", "screen.brightness": "Screen Brightness",
+  "blur.focusX": "Focus X", "blur.focusY": "Focus Y", "blur.focusDistance": "Focus Distance", "screen.brightness": "Screen Brightness",
 };
 
 export type FitMode = "cover" | "contain" | "stretch";
@@ -192,6 +192,8 @@ export interface Project {
   };
   blur: {
     mode: BlurMode;
+    /** lens blur: metres in front of the camera; 0 = autofocus on the surface under the focus point */
+    focusDistance?: number;
     /** direction of the directional blur, degrees */
     angle?: number;
     strength: number;
