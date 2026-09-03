@@ -7,6 +7,7 @@ import { useEditor } from "@/store/editor";
 import { useUI } from "@/store/ui";
 import { locate, totalDuration } from "@/lib/animation";
 import { getMedia } from "@/lib/media";
+import { ensureFont } from "@/lib/fonts";
 
 export interface ExportSessionOptions {
   width: number;
@@ -50,6 +51,12 @@ export async function withExportSession<T>(opts: ExportSessionOptions, fn: (s: E
   const wasPlaying = ui.playing;
   if (wasPlaying) ui.setPlaying(false);
   const prev = { w: st.size.width, h: st.size.height, dpr: st.viewport.dpr, frameloop: st.frameloop };
+  // a text shot on a web font would otherwise export in the fallback face
+  await Promise.all(
+    useEditor.getState().project.shots
+      .filter((sh) => sh.kind === "text" && sh.text)
+      .map((sh) => ensureFont(sh.text!.font, sh.text!.weight)),
+  );
   anim.exporting = true;
   st.setFrameloop("never");
   st.setDpr(1);

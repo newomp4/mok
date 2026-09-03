@@ -39,6 +39,16 @@ export function getFont(family: string): FontDef {
 
 const injected = new Set<string>();
 const loaded = new Map<string, Promise<void>>();
+const ready = new Set<string>();
+
+export function fontKey(family: string, weight: number): string {
+  return `${family}:${nearestWeight(family, weight)}`;
+}
+
+/** True once the face is available to canvas text (built-in families always are). */
+export function isFontReady(family: string, weight: number): boolean {
+  return getFont(family).builtin || ready.has(fontKey(family, weight));
+}
 
 /** CSS family string usable in canvas `ctx.font` and in inline styles. */
 export function cssFamily(family: string): string {
@@ -71,14 +81,16 @@ export function ensureFont(family: string, weight: number): Promise<void> {
   }
   const p = (async () => {
     const deadline = Date.now() + 8000;
+    let ok = false;
     // the stylesheet is async; poll document.fonts until the face resolves
     while (Date.now() < deadline) {
       try {
         const faces = await document.fonts.load(`${w} 32px "${family}"`);
-        if (faces.length > 0) return;
+        if (faces.length > 0) { ok = true; break; }
       } catch {}
       await new Promise((r) => setTimeout(r, 120));
     }
+    if (ok) ready.add(key);
   })();
   loaded.set(key, p);
   return p;

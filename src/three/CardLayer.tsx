@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { anim } from "@/three/anim";
 import { shotKind } from "@/lib/defaults";
 import { getMedia } from "@/lib/media";
-import { cssFamily, ensureFont, getFont } from "@/lib/fonts";
+import { cssFamily, ensureFont, fontKey, getFont, isFontReady } from "@/lib/fonts";
 import type { EnterExit, LogoStyle, Shot, TextStyle } from "@/lib/types";
 
 const DEG = Math.PI / 180;
@@ -13,6 +13,7 @@ const DEG = Math.PI / 180;
 export const CARD_Z = 0.6;
 
 const EFFECT_INDEX = { none: 0, liquidMetal: 1, gemSmoke: 2, heatmap: 3 } as const;
+const fontKeyOf = fontKey;
 
 const cardFrag = /* glsl */ `
 uniform sampler2D map;
@@ -114,7 +115,6 @@ function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxW: number): s
   return out;
 }
 
-const fontsReady = new Set<string>();
 const fontsPending = new Set<string>();
 
 function drawText(ctx: CanvasRenderingContext2D, W: number, H: number, st: TextStyle) {
@@ -218,8 +218,8 @@ export function CardLayer() {
     if (kind === "text" && shot.text) {
       const st = shot.text;
       const def = getFont(st.font);
-      fontKey = def.builtin ? "" : `${st.font}:${st.weight}`;
-      sig += `${st.text}|${st.font}|${st.weight}|${st.size}|${st.color}|${st.align}|${st.lineHeight}|${st.letterSpacing}|${fontKey && fontsReady.has(fontKey) ? "ready" : "fallback"}`;
+      fontKey = def.builtin ? "" : fontKeyOf(st.font, st.weight);
+      sig += `${st.text}|${st.font}|${st.weight}|${st.size}|${st.color}|${st.align}|${st.lineHeight}|${st.letterSpacing}|${isFontReady(st.font, st.weight) ? "ready" : "fallback"}`;
       bgMat.color.set(st.background);
     } else if (kind === "logo" && shot.logo) {
       const st = shot.logo;
@@ -238,9 +238,9 @@ export function CardLayer() {
       const ctx = canvas.getContext("2d")!;
       if (kind === "text" && shot.text) {
         drawText(ctx, W, H, shot.text);
-        if (fontKey && !fontsReady.has(fontKey) && !fontsPending.has(fontKey)) {
+        if (fontKey && !isFontReady(shot.text.font, shot.text.weight) && !fontsPending.has(fontKey)) {
           fontsPending.add(fontKey);
-          void ensureFont(shot.text.font, shot.text.weight).then(() => { fontsReady.add(fontKey); fontsPending.delete(fontKey); lastSig.current = ""; invalidate(); });
+          void ensureFont(shot.text.font, shot.text.weight).then(() => { fontsPending.delete(fontKey); lastSig.current = ""; invalidate(); });
         }
       } else if (kind === "logo" && shot.logo) {
         drawLogo(ctx, W, H, shot.logo);
