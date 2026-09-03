@@ -61,6 +61,7 @@ export function Timeline() {
   const addRef = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState<{ at: { x: number; y: number }; shotId: string } | null>(null);
   const [keyMenu, setKeyMenu] = useState<{ at: { x: number; y: number }; shotId: string; prop: AnimProp; t: number } | null>(null);
+  const [trackMenu, setTrackMenu] = useState<{ at: { x: number; y: number }; shotId: string; prop: AnimProp } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [transitionFor, setTransitionFor] = useState<string | null>(null);
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
@@ -332,6 +333,11 @@ export function Timeline() {
                   </div>
                   {lanes.map((prop) => (
                     <div key={prop} className="relative border-b border-line" style={{ height: LANE_H }}
+                      onContextMenu={(e) => {
+                        if ((e.target as HTMLElement).closest("[data-kf]")) return;
+                        e.preventDefault();
+                        setTrackMenu({ at: { x: e.clientX, y: e.clientY }, shotId: shot.id, prop });
+                      }}
                       onDoubleClick={(e) => {
                         // double-click a lane to drop a keyframe there
                         const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -393,6 +399,17 @@ export function Timeline() {
       </div>
       <ContextMenu at={menu?.at ?? null} items={menu ? menuItems(menu.shotId) : []} onClose={() => setMenu(null)} />
       <ContextMenu
+        at={trackMenu?.at ?? null}
+        onClose={() => setTrackMenu(null)}
+        items={trackMenu ? [
+          { label: ANIM_LABELS[trackMenu.prop], disabled: true },
+          { label: "Select whole track", icon: "diamond", onSelect: () => { const s2 = project.shots.find((x) => x.id === trackMenu.shotId); const list = s2?.keyframes[trackMenu.prop] ?? []; setSelected(list.map((k) => ({ shotId: trackMenu.shotId, prop: trackMenu.prop, t: k.t }))); } },
+          { label: "Add keyframe here", icon: "plus", onSelect: () => useEditor.getState().stampKeyframes([trackMenu.prop]) },
+          { divider: true, label: "" },
+          { label: "Clear track", icon: "trash", danger: true, onSelect: () => clearTrack(trackMenu.prop, trackMenu.shotId) },
+        ] : []}
+      />
+      <ContextMenu
         at={keyMenu?.at ?? null}
         onClose={() => setKeyMenu(null)}
         items={keyMenu ? [
@@ -449,8 +466,10 @@ function ShotName({ shot, editing, onEditStart, onEditEnd }: { shot: Shot; editi
 
 function ShotBlock({ shot, index, start, pps, active, playhead, onSelect, onExpand }: { shot: Shot; index: number; start: number; pps: number; active: boolean; playhead: number; onSelect: () => void; onExpand: () => void }) {
   const update = useEditor((s) => s.update);
+  const media = useMedia(shot.media);
   const reorderShot = useEditor((s) => s.reorderShot);
   const resize = useRef<{ x: number; d: number } | null>(null);
+  const trimLeft = useRef<{ x: number; d: number; trim: number; keys: Shot["keyframes"] } | null>(null);
   const move = useRef<{ x: number; moved: boolean } | null>(null);
   const [dx, setDx] = useState(0);
   const hasKeys = Object.values(shot.keyframes).some((k) => k && k.length > 0);
@@ -491,15 +510,45 @@ function ShotBlock({ shot, index, start, pps, active, playhead, onSelect, onExpa
       }}
       onDoubleClick={onExpand}
     >
-      {hasKeys && <Icon name="diamond" size={8} />}
-      {kind !== "media" && <Icon name={KIND_ICON[kind]} size={10} />}
-      <span className="label truncate">{shot.name}</span>
-      {shot.media?.kind === "video" && kind === "media" && <Icon name="video" size={10} className="ml-auto opacity-70" />}
+      {media && kind === "media" && (
+        // a single frame at the head of the clip, the way a clip reads in an NLE
+        <span className="pointer-events-none absolute inset-y-0 left-0 w-6 rounded-l-md opacity-80" style={{ backgroundImage: `url(${media.url})`, backgroundSize: "cover", backgroundPosition: "center top" }} />
+      )}
+      <span className="shrink-0" style={{ width: media && kind === "media" ? 20 : 0 }} />
+      {hasKeys && <Icon name="diamond" size={8} className="relative" />}
+      {kind !== "media" && <Icon name={KIND_ICON[kind]} size={10} className="relative" />}
+      <span className="label relative truncate">{shot.name}</span>
+      {shot.media?.kind === "video" && kind === "media" && <Icon name="video" size={10} className="relative ml-auto opacity-70" />}
       {(shot.speed ?? 1) !== 1 && <span className="num text-[9px] opacity-80">{shot.speed}×</span>}
       {tr && tr.type !== "cut" && <span className="ml-auto h-3 w-3 rounded-sm" style={{ background: `linear-gradient(90deg, transparent, ${tr.color})` }} title={`Fade ${tr.duration}s`} />}
       {playhead > start && playhead < start + shot.duration && null}
       <div
         data-resize=""
+        title="Trim the start"
+        className="absolute inset-y-0 left-0 w-2 cursor-ew-resize hover:bg-black/20"
+        onPointerDown={(e) => { e.stopPropagation(); (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); trimLeft.current = { x: e.clientX, d: shot.duration, trim: shot.trimStart ?? 0, keys: JSON.parse(JSON.stringify(shot.keyframes)) }; beginInteraction(); }}
+        onPointerMove={(e) => {
+          const t = trimLeft.current;
+          if (!t) return;
+          // trimming from the head shortens the shot and pulls its content and keyframes with it
+          const dt = clamp(Math.round(((e.clientX - t.x) / pps) * 100) / 100, -t.trim / (shot.speed ?? 1), t.d - 0.5);
+          update((p) => {
+            const sh = p.shots.find((x) => x.id === shot.id);
+            if (!sh) return;
+            sh.duration = Math.round((t.d - dt) * 100) / 100;
+            sh.trimStart = Math.max(0, Math.round((t.trim + dt * (sh.speed ?? 1)) * 100) / 100);
+            for (const [prop, list] of Object.entries(t.keys) as [AnimProp, { t: number }[]][]) {
+              if (!list?.length) continue;
+              sh.keyframes[prop] = list.map((k) => ({ ...k, t: Math.round((k.t - dt) * 100) / 100 })) as never;
+            }
+          });
+        }}
+        onPointerUp={() => { trimLeft.current = null; endInteraction(); }}
+        onClick={(e) => e.stopPropagation()}
+      />
+      <div
+        data-resize=""
+        title="Trim the end"
         className="absolute inset-y-0 right-0 w-2 cursor-ew-resize hover:bg-black/20"
         onPointerDown={(e) => { e.stopPropagation(); (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); resize.current = { x: e.clientX, d: shot.duration }; beginInteraction(); }}
         onPointerMove={(e) => {

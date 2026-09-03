@@ -7,7 +7,8 @@ import { useUI } from "@/store/ui";
 import { ANIM_LABELS, type AnimProp, type BlurMode, type EffectId, type EnterExit, type EnterExitEffect, type FitMode, type LogoEffect, type Shot, type TextStyle } from "@/lib/types";
 import { hasKeyframeAt, locate, sampleTrack } from "@/lib/animation";
 import { DEVICES, FAMILY_LABELS, getDevice, getFinish, type DeviceFamily } from "@/lib/devices";
-import { BG_PRESETS, CAMERA_PRESETS, EFFECT_DEFS, LIGHTINGS, SCENES, getEffectDef, getScene } from "@/lib/presets";
+import { BG_PRESETS, CAMERA_PRESETS, EFFECT_DEFS, LIGHTINGS, SCENES, getBgPreset, getEffectDef, getScene } from "@/lib/presets";
+import { paintPreset } from "@/three/background";
 import { Button, ColorRow, IconButton, NumberRow, Section, Segmented, SelectRow, TextAreaRow, ToggleRow, type KeyState } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/cn";
@@ -294,9 +295,7 @@ function SceneSection() {
         <>
           <SelectRow label="Background" value={bg.type} onChange={(v) => update((p) => { p.scene.background.type = v; })} options={[{ value: "color", label: "Color" }, { value: "preset", label: "Preset" }, { value: "image", label: "Image" }, { value: "transparent", label: "Transparent" }]} />
           {bg.type === "color" && <ColorRow label="BG color" value={bg.color} onChange={(v) => update((p) => { p.scene.background.color = v; })} />}
-          {bg.type === "preset" && (
-            <SelectRow label="BG preset" value={bg.preset} onChange={(v) => update((p) => { p.scene.background.preset = v; })} options={BG_PRESETS.map((b) => ({ value: b.id, label: b.name, swatch: `linear-gradient(135deg, ${b.colors[1]}, ${b.colors[3]})` }))} />
-          )}
+          {bg.type === "preset" && <BackgroundGrid current={bg.preset} onPick={(v) => update((p) => { p.scene.background.preset = v; })} />}
           {bg.type === "image" && (
             <div className="flex h-8 items-center justify-between rounded-md bg-fill px-2.5">
               <span className="label text-fg-2">BG image</span>
@@ -362,6 +361,42 @@ function ScenePicker() {
       </div>
     </Section>
   );
+}
+
+/** Background presets as a grid of real previews, painted with the same routine as the scene. */
+function BackgroundGrid({ current, onPick }: { current: string; onPick: (id: string) => void }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="label-sm px-0.5 pt-1 text-muted">Background preset</div>
+      <div className="grid grid-cols-3 gap-1.5">
+        {BG_PRESETS.map((b) => (
+          <button
+            key={b.id}
+            type="button"
+            title={b.name}
+            onClick={() => onPick(b.id)}
+            className={cn("group flex flex-col gap-1 overflow-hidden rounded-md border p-1 text-left transition-colors", b.id === current ? "border-accent" : "border-line hover:border-line-2")}
+          >
+            <BgThumb id={b.id} />
+            <span className="label-sm truncate px-0.5 text-fg-2 group-hover:text-fg">{b.name}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BgThumb({ id }: { id: string }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const c = ref.current;
+    if (!c) return;
+    const w = 132, h = 84;
+    c.width = w; c.height = h;
+    const ctx = c.getContext("2d");
+    if (ctx) paintPreset(ctx, w, h, getBgPreset(id), 0.2);
+  }, [id]);
+  return <canvas ref={ref} className="block h-9 w-full rounded-sm object-cover" />;
 }
 
 function shade(hex: string) {

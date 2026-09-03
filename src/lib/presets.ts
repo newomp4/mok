@@ -188,18 +188,21 @@ export interface BgPreset {
   style: "mesh" | "linear" | "radial";
 }
 export const BG_PRESETS: BgPreset[] = [
-  { id: "whisp", name: "Whisp", colors: ["#f4f4f6", "#d8dbe2", "#eceef2", "#c5c9d3"], style: "mesh" },
-  { id: "glaze", name: "Glaze", colors: ["#f6efe8", "#e5cdb8", "#f1e2d5", "#d7b79c"], style: "mesh" },
-  { id: "aurora", name: "Aurora", colors: ["#0c1224", "#1d3d62", "#0f2a3b", "#3a6b8a"], style: "mesh" },
-  { id: "dusk", name: "Dusk", colors: ["#2b1c3a", "#7a3b5c", "#3f2350", "#c2664f"], style: "mesh" },
-  { id: "mint", name: "Mint", colors: ["#e6f4ec", "#b9e2cb", "#d3ecdd", "#8fd1ae"], style: "mesh" },
-  { id: "peach", name: "Peach", colors: ["#fff1e8", "#ffcdb2", "#ffe1d0", "#ff9e7a"], style: "mesh" },
-  { id: "lilac", name: "Lilac", colors: ["#f1ecfa", "#cfbfea", "#e2d8f2", "#a992d8"], style: "mesh" },
-  { id: "ocean", name: "Ocean", colors: ["#e8f2fa", "#a9cbe6", "#cfe1f1", "#5f95c4"], style: "mesh" },
-  { id: "graphite", name: "Graphite", colors: ["#1e1e21", "#3a3a40", "#27272b", "#4d4d55"], style: "mesh" },
-  { id: "noir", name: "Noir", colors: ["#050505", "#161616", "#0a0a0a", "#222222"], style: "radial" },
-  { id: "paper", name: "Paper", colors: ["#f7f5f0", "#ebe6dc", "#f2eee6", "#ddd5c6"], style: "linear" },
-  { id: "ember", name: "Ember", colors: ["#1a0b08", "#6b2313", "#2e100a", "#d1502a"], style: "mesh" },
+  { id: "whisp", name: "Whisp", colors: ["#eef0f4", "#cfd6e4", "#f7f8fb", "#aeb8cc"], style: "mesh" },
+  { id: "glaze", name: "Glaze", colors: ["#f7efe6", "#e8c9a8", "#fdf7f1", "#c79a72"], style: "mesh" },
+  { id: "crystal", name: "Crystal", colors: ["#eaf1f7", "#b9d7ec", "#ffffff", "#8fbfe0"], style: "mesh" },
+  { id: "aurora", name: "Aurora", colors: ["#0a1020", "#1f4d7a", "#123049", "#48a2c8"], style: "mesh" },
+  { id: "dusk", name: "Dusk", colors: ["#2a1836", "#8a3f63", "#43254f", "#d8734f"], style: "mesh" },
+  { id: "mint", name: "Mint", colors: ["#e8f5ee", "#a9dfc4", "#f4fbf7", "#6cc79c"], style: "mesh" },
+  { id: "peach", name: "Peach", colors: ["#fff2ea", "#ffc6a8", "#fff8f3", "#ff9a6e"], style: "mesh" },
+  { id: "lilac", name: "Lilac", colors: ["#f2edfb", "#c9b6ee", "#faf7ff", "#9b7fdc"], style: "mesh" },
+  { id: "ocean", name: "Ocean", colors: ["#e9f2fa", "#9cc4e6", "#f6fafd", "#4d8fc4"], style: "mesh" },
+  { id: "spectrum", name: "Spectrum", colors: ["#141018", "#6d3ff0", "#1d1430", "#f2478f"], style: "mesh" },
+  { id: "sundrape", name: "Sundrape", colors: ["#1b0f16", "#e0573a", "#3a1a20", "#ffb765"], style: "mesh" },
+  { id: "graphite", name: "Graphite", colors: ["#1b1b1f", "#3d3d45", "#26262c", "#585864"], style: "mesh" },
+  { id: "noir", name: "Noir", colors: ["#050506", "#191920", "#0b0b0e", "#2a2a34"], style: "radial" },
+  { id: "paper", name: "Paper", colors: ["#f8f6f1", "#eae4d8", "#fdfcf9", "#d9d0be"], style: "linear" },
+  { id: "ember", name: "Ember", colors: ["#190a07", "#7a2712", "#31100a", "#e0632f"], style: "mesh" },
 ];
 export function getBgPreset(id: string): BgPreset {
   return BG_PRESETS.find((b) => b.id === id) ?? BG_PRESETS[0];

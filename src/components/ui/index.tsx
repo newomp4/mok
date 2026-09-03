@@ -369,15 +369,23 @@ export function NumberRow({
     const n = parseFloat(text);
     if (!Number.isNaN(n)) commit(n);
   };
+  const nudge = (dir: 1 | -1, big: boolean) => commit(value + dir * step * (big ? 10 : 1));
   return (
     <div className={cn("flex items-stretch gap-1", className)}>
       <div
         ref={ref}
+        tabIndex={disabled ? -1 : 0}
+        onKeyDown={(e) => {
+          if (disabled) return;
+          if (e.key === "ArrowUp" || e.key === "ArrowRight") { e.preventDefault(); nudge(1, e.shiftKey); }
+          else if (e.key === "ArrowDown" || e.key === "ArrowLeft") { e.preventDefault(); nudge(-1, e.shiftKey); }
+          else if (e.key === "Enter") { e.preventDefault(); setText(value.toFixed(d)); setEditing(true); }
+        }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onDoubleClick={() => { if (!disabled) { setText(value.toFixed(d)); setEditing(true); } }}
-        className={cn("relative flex h-8 flex-1 cursor-ew-resize items-center justify-between overflow-hidden rounded-md bg-fill px-2.5", disabled && "pointer-events-none opacity-40")}
+        className={cn("relative flex h-8 flex-1 cursor-ew-resize items-center justify-between overflow-hidden rounded-md bg-fill px-2.5 outline-none focus-visible:ring-2 focus-visible:ring-accent/60", disabled && "pointer-events-none opacity-40")}
       >
         <div className="pointer-events-none absolute inset-y-0 left-0 bg-fill-2" style={{ width: `${pct * 100}%` }} />
         <span className="label relative flex items-center gap-1.5 text-fg-2">{label}{hint && <Hint>{hint}</Hint>}</span>
