@@ -103,7 +103,7 @@ export function sampleTrack(kfs: Keyframe[], t: number): number {
   return a.v + (b.v - a.v) * u;
 }
 
-const BASE_FALLBACK: Partial<Record<AnimProp, number>> = { "mockup.lid": 110, "blur.focusDistance": 0 };
+const BASE_FALLBACK: Partial<Record<AnimProp, number>> = { "mockup.lid": 110, "blur.focusDistance": 0, "blur.angle": 0 };
 
 export function getBase(p: Project, prop: AnimProp): number {
   const [g, k] = prop.split(".") as [keyof Project, string];
@@ -132,7 +132,7 @@ export const ANIM_DEFAULT_KEYS: Record<AnimProp, true> = {
   "camera.x": true, "camera.y": true, "camera.z": true, "camera.fov": true, "camera.zoom": true,
   "camera.panX": true, "camera.panY": true, "mockup.rotX": true, "mockup.rotY": true, "mockup.rotZ": true, "mockup.lid": true,
   "scene.lightRotX": true, "scene.lightRotY": true, "scene.lightIntensity": true,
-  "blur.strength": true, "blur.focusSize": true, "blur.falloff": true, "blur.focusX": true, "blur.focusY": true, "blur.focusDistance": true,
+  "blur.strength": true, "blur.focusSize": true, "blur.falloff": true, "blur.focusX": true, "blur.focusY": true, "blur.focusDistance": true, "blur.angle": true,
   "screen.brightness": true,
 };
 
@@ -215,15 +215,24 @@ export function fadeAt(p: Project, t: number): { alpha: number; color: string } 
 
 /** Mirror a track in time so the motion plays backwards. */
 export function reverseTrack(kfs: Keyframe[], duration: number): Keyframe[] {
-  return kfs.map((k) => ({ ...k, t: Math.round((duration - k.t) * 1000) / 1000 })).sort((a, b) => a.t - b.t);
+  const out = kfs.map((k) => ({ ...k, t: Math.round((duration - k.t) * 1000) / 1000 })).sort((a, b) => a.t - b.t);
+  // easing describes the segment that STARTS at a keyframe, so reversing has to shift and mirror it
+  const eases = out.map((_, i) => kfs[kfs.length - 1 - i]);
+  return out.map((k, i) => {
+    const src = eases[i + 1] ?? eases[i];
+    const cp = src?.cp;
+    return { ...k, ease: src?.ease ?? k.ease, ...(cp ? { cp: [1 - cp[2], 1 - cp[3], 1 - cp[0], 1 - cp[1]] as typeof cp } : {}) };
+  });
 }
 
 /** Split a track at time t: everything before stays (ending on the sampled value), the rest restarts at 0. */
 export function splitTrack(kfs: Keyframe[], t: number): [Keyframe[], Keyframe[]] {
   const v = sampleTrack(kfs, t);
+  // the segment being cut is the one whose keyframe is the LAST at or before t
+  const cut = [...kfs].reverse().find((k) => k.t <= t);
   const a = kfs.filter((k) => k.t < t - 0.0005);
-  a.push({ t: Math.round(t * 1000) / 1000, v, ease: "smooth" });
-  const b: Keyframe[] = [{ t: 0, v, ease: kfs.find((k) => k.t <= t)?.ease ?? "smooth" }];
+  a.push({ t: Math.round(t * 1000) / 1000, v, ease: cut?.ease ?? "smooth", ...(cut?.cp ? { cp: [...cut.cp] as NonNullable<Keyframe["cp"]> } : {}) });
+  const b: Keyframe[] = [{ t: 0, v, ease: cut?.ease ?? "smooth", ...(cut?.cp ? { cp: [...cut.cp] as NonNullable<Keyframe["cp"]> } : {}) }];
   for (const k of kfs) if (k.t > t + 0.0005) b.push({ ...k, t: Math.round((k.t - t) * 1000) / 1000 });
   return [a, b];
 }

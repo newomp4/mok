@@ -5,11 +5,11 @@ import { useShallow } from "zustand/react/shallow";
 import { useEditor, redo, undo, beginInteraction, endInteraction } from "@/store/editor";
 import { useUI } from "@/store/ui";
 import { ANIM_LABELS, type AnimProp, type BlurMode, type EffectId, type EnterExit, type EnterExitEffect, type FitMode, type LogoEffect, type Shot, type TextStyle } from "@/lib/types";
-import { hasKeyframeAt, locate, sampleTrack } from "@/lib/animation";
+import { hasKeyframeAt, locate, sampleTrack, getBase } from "@/lib/animation";
 import { DEVICES, FAMILY_LABELS, getDevice, getFinish, type DeviceFamily } from "@/lib/devices";
 import { BG_PRESETS, CAMERA_PRESETS, EFFECT_DEFS, LIGHTINGS, SCENES, getBgPreset, getEffectDef, getScene } from "@/lib/presets";
 import { paintPreset } from "@/three/background";
-import { Button, ColorRow, Hint, IconButton, NumberRow, Section, Segmented, SelectRow, TextAreaRow, ToggleRow, type KeyState } from "@/components/ui";
+import { Button, ColorRow, Hint, IconButton, MenuList, NumberRow, Popover, Section, Segmented, SelectRow, TextAreaRow, ToggleRow, type KeyState, KeyButton } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/cn";
 import { useMedia, ACCEPTED_TYPES, ACCEPTED_IMAGES } from "@/lib/media";
@@ -20,7 +20,7 @@ import { applyCameraPreset, importBackgroundImage, importFilesToShot, importLogo
 import { SAMPLE_SCREENS, drawSampleScreen } from "@/lib/screens";
 import { pickFiles } from "./hooks";
 import { defaultLogoStyle, defaultTextStyle, shotKind } from "@/lib/defaults";
-import { FONTS, cssFamily, ensureFont, getFont, nearestWeight } from "@/lib/fonts";
+import { FONTS, cssFamily, ensureFont, getFont, nearestWeight, type FontDef } from "@/lib/fonts";
 import { anim } from "@/three/anim";
 
 /* ---------- animated value helpers ---------- */
@@ -31,8 +31,9 @@ function useAnimRow(prop: AnimProp) {
   const { value, keyState } = useEditor(useShallow((s) => {
     const loc = locate(s.project, time);
     const track = loc.shot?.keyframes[prop];
-    const [g, k] = prop.split(".") as [keyof typeof s.project, string];
-    const base = (s.project[g] as unknown as Record<string, number>)[k];
+    // getBase carries the fallback for properties a saved project predates, so a missing field
+    // shows its default rather than rendering the row with undefined
+    const base = getBase(s.project, prop);
     const value = track && track.length ? sampleTrack(track, loc.localT) : base;
     const keyState: KeyState = track && track.length ? (hasKeyframeAt(track, loc.localT) ? "key" : "track") : "none";
     return { value, keyState };
@@ -194,6 +195,69 @@ function EnterExitRows({ shot }: { shot: Shot }) {
   return <>{row("enter", "Enter")}{row("exit", "Exit")}</>;
 }
 
+const FONT_GROUPS: { id: FontDef["category"]; label: string }[] = [
+  { id: "sans", label: "Sans" }, { id: "serif", label: "Serif" }, { id: "display", label: "Display" }, { id: "mono", label: "Mono" },
+];
+
+/** Family picker: the list is long, so it filters by name and previews every row in its own face. */
+function FontPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const ref = useRef<HTMLButtonElement>(null);
+  const q = query.trim().toLowerCase();
+  const matches = FONTS.filter((f) => f.family.toLowerCase().includes(q));
+  const current = matches.find((f) => f.family === value);
+  const groups = FONT_GROUPS.map((g) => ({ ...g, fonts: matches.filter((f) => f.category === g.id && f.family !== value) })).filter((g) => g.fonts.length > 0);
+  // the search term lives with the open popover, so reopening always starts on the whole list
+  const close = () => { setOpen(false); setQuery(""); };
+  const row = (f: FontDef) => (
+    <button
+      key={f.family}
+      type="button"
+      onClick={() => { onChange(f.family); close(); }}
+      className={cn("flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] text-fg-2 transition-colors hover:bg-fill hover:text-fg", f.family === value && "bg-fill text-fg")}
+    >
+      <span className="flex-1 truncate" style={{ fontFamily: cssFamily(f.family) }}>{f.family}</span>
+      {f.family === value && <Icon name="check" size={11} />}
+    </button>
+  );
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        onClick={() => (open ? close() : setOpen(true))}
+        className={cn("flex h-8 w-full items-center justify-between rounded-md bg-fill px-2.5 transition-colors hover:bg-fill-2", open && "bg-fill-2")}
+      >
+        <span className="label text-fg-2">Font</span>
+        <span className="label flex items-center gap-1.5 text-fg">
+          <span style={{ fontFamily: cssFamily(value) }}>{value}</span>
+          <Icon name="chevron-down" size={11} className="text-muted" />
+        </span>
+      </button>
+      <Popover open={open} onClose={close} anchor={ref} align="end" width={ref.current?.offsetWidth}>
+        <input
+          autoFocus
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search fonts"
+          className="mb-1 h-7 w-full rounded-md bg-fill px-2 text-[12px] text-fg outline-none placeholder:text-muted focus:ring-1 focus:ring-accent"
+        />
+        <div className="scroll max-h-64 overflow-auto">
+          {current && row(current)}
+          {groups.map((g) => (
+            <div key={g.id}>
+              <div className="label-sm px-2 pb-1 pt-2 text-muted">{g.label}</div>
+              {g.fonts.map(row)}
+            </div>
+          ))}
+          {!current && groups.length === 0 && <div className="label-sm px-2 py-2 text-muted">No fonts match</div>}
+        </div>
+      </Popover>
+    </>
+  );
+}
+
 function TextEditor({ shot }: { shot: Shot }) {
   const updateShot = useEditor((s) => s.updateShot);
   const st = shot.text ?? defaultTextStyle();
@@ -204,7 +268,7 @@ function TextEditor({ shot }: { shot: Shot }) {
   return (
     <div className="flex flex-col gap-1">
       <TextAreaRow value={st.text} onChange={(v) => set((t) => { t.text = v; })} placeholder="Type your text" />
-      <SelectRow label="Font" value={st.font} onChange={(v) => set((t) => { t.font = v; t.weight = nearestWeight(v, t.weight); })} options={FONTS.map((f) => ({ value: f.family, label: <span style={{ fontFamily: cssFamily(f.family) }}>{f.family}</span>, sub: f.category }))} />
+      <FontPicker value={st.font} onChange={(v) => set((t) => { t.font = v; t.weight = nearestWeight(v, t.weight); })} />
       <SelectRow label="Weight" value={String(nearestWeight(st.font, st.weight))} onChange={(v) => set((t) => { t.weight = Number(v); })} options={font.weights.map((w) => ({ value: String(w), label: WEIGHT_NAMES[w] ?? String(w) }))} />
       <NumberRow label="Size" value={st.size} min={0.02} max={0.3} step={0.005} onChange={(v) => set((t) => { t.size = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
       <Segmented size="sm" value={st.align} onChange={(v) => set((t) => { t.align = v; })} options={[{ value: "left", label: "", icon: "align-left" }, { value: "center", label: "", icon: "align-center" }, { value: "right", label: "", icon: "align-right" }]} />
@@ -464,6 +528,7 @@ function MockupSection() {
         <NumberRow label="Body gloss" value={mockup.gloss ?? 1.3} min={0.2} max={3} step={0.05} onChange={(v) => update((p) => { p.mockup.gloss = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
       )}
       <NumberRow label="Border radius" value={mockup.borderRadius} min={0} max={0.25} step={0.001} disabled={spec.family !== "flat"} onChange={(v) => update((p) => { p.mockup.borderRadius = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+      {spec.family !== "flat" && <div className="label-sm px-0.5 leading-snug text-muted">Corner radius is fixed on the {spec.name}. It is adjustable on the Flat and Browser mockups.</div>}
       <AnimRow prop="mockup.rotY" label="Rotate Y" min={-180} max={180} step={1} />
       <AnimRow prop="mockup.rotX" label="Rotate X" min={-180} max={180} step={1} />
       <AnimRow prop="mockup.rotZ" label="Rotate Z" min={-180} max={180} step={1} />
@@ -484,10 +549,14 @@ function MockupSection() {
       <div className="label-sm px-0.5 pt-2 text-muted">Screen</div>
       {spec.family === "phone" && <ToggleRow label="Status bar" checked={!!screen.statusBar} onChange={(v) => update((p) => { p.screen.statusBar = v; })} hint="9:41" />}
       <AnimRow prop="screen.brightness" label="Brightness" min={0} max={2} step={0.01} />
-      <SelectRow label="Screen BG" value={screen.bg?.type ?? "color"} onChange={(v) => update((p) => { p.screen.bg = { type: v, color: p.screen.bg?.color ?? "#000000", image: p.screen.bg?.image ?? null }; })} options={[{ value: "color", label: "Color" }, { value: "image", label: "Image" }]} />
-      {(screen.bg?.type ?? "color") === "color" ? (
-        <ColorRow label="BG color" value={screen.bg?.color ?? "#000000"} onChange={(v) => update((p) => { p.screen.bg = { type: "color", color: v, image: p.screen.bg?.image ?? null }; })} />
-      ) : (
+      <SelectRow label="Screen BG" value={screen.bg?.type ?? "color"} onChange={(v) => update((p) => { p.screen.bg = { type: v, color: p.screen.bg?.color ?? "#000000", image: p.screen.bg?.image ?? null, preset: p.screen.bg?.preset ?? "whisp" }; })} options={[{ value: "color", label: "Colour" }, { value: "gradient", label: "Gradient" }, { value: "image", label: "Image" }]} />
+      {(screen.bg?.type ?? "color") === "color" && (
+        <ColorRow label="BG colour" value={screen.bg?.color ?? "#000000"} onChange={(v) => update((p) => { p.screen.bg = { type: "color", color: v, image: p.screen.bg?.image ?? null, preset: p.screen.bg?.preset }; })} />
+      )}
+      {screen.bg?.type === "gradient" && (
+        <BackgroundGrid current={screen.bg?.preset ?? "whisp"} onPick={(id) => update((p) => { p.screen.bg = { type: "gradient", color: p.screen.bg?.color ?? "#000000", image: p.screen.bg?.image ?? null, preset: id }; })} />
+      )}
+      {screen.bg?.type === "image" && (
         <div className="flex h-8 items-center justify-between rounded-md bg-fill px-2.5">
           <span className="label text-fg-2">BG image</span>
           <span className="flex items-center gap-1.5">
@@ -632,7 +701,7 @@ function CameraSection() {
           <AnimRow prop="camera.y" label="Y axis" hint="Drag" min={-89} max={89} step={1} />
           <AnimRow prop="camera.z" label="Z axis" min={-180} max={180} step={1} />
           <AnimRow prop="camera.fov" label="FOV" min={8} max={100} step={1} />
-          <AnimRow prop="camera.zoom" label="Zoom" hint="Scroll" min={0.2} max={6} step={0.01} />
+          <AnimRow prop="camera.zoom" label="Zoom" hint="Scroll" min={0.2} max={12} step={0.01} />
           <AnimRow prop="camera.panX" label="Pan X" hint="Space drag" min={-1} max={1} step={0.01} />
           <AnimRow prop="camera.panY" label="Pan Y" hint="Space drag" min={-1} max={1} step={0.01} />
         </>
@@ -661,7 +730,13 @@ function FocusPicker({ depth = false }: { depth?: boolean }) {
   };
   return (
     <div className="flex flex-col gap-1">
-      <div className="label-sm flex items-center justify-between px-0.5 pt-1 text-muted"><span>{depth ? "Focal point" : "Focus position"}</span><span className="normal-case">⌥ click the viewport</span></div>
+      <div className="label-sm flex items-center justify-between px-0.5 pt-1 text-muted">
+        <span>{depth ? "Focal point" : "Focus position"}</span>
+        <span className="flex items-center gap-1.5">
+          <span className="normal-case">⌥ click the viewport</span>
+          <KeyButton state={fx.keyState === "none" ? fy.keyState : fx.keyState} onClick={() => { fx.onKey(); fy.onKey(); }} />
+        </span>
+      </div>
       <div
         className="relative h-24 cursor-crosshair overflow-hidden rounded-md border border-line bg-panel-2"
         onPointerDown={(e) => { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); dragging[1](true); beginInteraction(); set(e); }}
@@ -684,8 +759,8 @@ function BlurSection() {
   return (
     <Section title="Blur" open={open} onToggle={() => setOpen((o) => !o)} tour="blur" right={<IconButton icon="rotate-ccw" size={12} label="Reset blur" onClick={resetBlur} className="h-6 w-6" />}>
       <SelectRow label="Mode" value={blur.mode} onChange={(v: BlurMode) => update((p) => { p.blur.mode = v; })} options={[{ value: "off", label: "None" }, { value: "radial", label: "Radial" }, { value: "directional", label: "Directional" }, { value: "linear", label: "Tilt shift" }, { value: "depth", label: "Lens" }]} />
-      {blur.mode === "directional" && (
-        <NumberRow label="Angle" value={blur.angle ?? 0} min={0} max={360} step={1} onChange={(v) => update((p) => { p.blur.angle = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+      {(blur.mode === "directional" || blur.mode === "linear") && (
+        <AnimRow prop="blur.angle" label="Angle" min={0} max={360} step={1} unit="°" />
       )}
       <AnimRow prop="blur.strength" label="Strength" min={0} max={20} step={0.1} disabled={off} />
       {blur.mode === "depth" && (
@@ -707,6 +782,7 @@ function EffectsSection() {
   const effects = useEditor((s) => s.project.effects);
   const update = useEditor((s) => s.update);
   const [menu, setMenu] = useState(false);
+  const addRef = useRef<HTMLButtonElement>(null);
   const available = EFFECT_DEFS.filter((d) => !effects.some((e) => e.id === d.id));
   const add = (id: EffectId) => {
     const def = getEffectDef(id);
@@ -717,19 +793,16 @@ function EffectsSection() {
     <Section
       title="Effects"
       right={
-        <div className="relative">
-          <IconButton icon="plus" size={13} label="Add effect" onClick={() => setMenu((m) => !m)} className="h-6 w-6" active={menu} />
-          {menu && (
-            <div className="fade-in absolute right-0 top-7 z-30 w-44 rounded-lg border border-line bg-panel p-1 shadow-xl">
-              {available.length === 0 && <div className="label-sm px-2 py-2 text-muted">All effects added</div>}
-              {available.map((d) => (
-                <button key={d.id} type="button" onClick={() => add(d.id)} className="label flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-fg-2 hover:bg-fill hover:text-fg">
-                  <Icon name={d.icon} size={13} className="text-muted" />{d.name}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <>
+          <IconButton ref={addRef} icon="plus" size={13} label="Add effect" onClick={() => setMenu((m) => !m)} className="h-6 w-6" active={menu} />
+          <Popover open={menu} onClose={() => setMenu(false)} anchor={addRef} align="end" className="w-44">
+            {available.length === 0 ? (
+              <div className="label-sm px-2 py-2 text-muted">All effects added</div>
+            ) : (
+              <MenuList items={available.map((d) => ({ label: d.name, icon: d.icon, onSelect: () => add(d.id) }))} onClose={() => setMenu(false)} />
+            )}
+          </Popover>
+        </>
       }
     >
       {effects.length === 0 && <div className="label-sm py-1 text-muted">No effects. Add vignette, grain, bloom and more with +.</div>}

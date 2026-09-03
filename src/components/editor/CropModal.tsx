@@ -38,15 +38,24 @@ export function CropModal() {
   const ratio = aspect === "free" ? null : aspect === "screen" ? screenAspect : Number(aspect);
   const imgAspect = media.width / Math.max(1, media.height);
 
-  /** enforce the aspect (in image-normalised units) by adjusting height */
+  /** enforce the aspect (in image-normalised units) by adjusting the axis the handle did not drag */
   const fit = (r: Rect, anchor: Handle): Rect => {
     let { x, y, w, h } = r;
     w = clamp(w, 0.02, 1); h = clamp(h, 0.02, 1);
     if (ratio) {
       // width/height in pixels: (w * W) / (h * H) = ratio -> h = w * W / (H * ratio)
-      const hh = (w * imgAspect) / ratio;
-      if (hh <= 1) { if (anchor.includes("n")) y = y + h - hh; h = hh; }
-      else { h = 1; w = (h * ratio) / imgAspect; if (anchor.includes("w")) x = x + r.w - w; }
+      if (anchor === "n" || anchor === "s") {
+        // the top and bottom handles only change the height, so the width follows it about the box centre
+        const w0 = w, h0 = h;
+        w = clamp((h0 * ratio) / imgAspect, 0.02, 1);
+        h = (w * imgAspect) / ratio;
+        x = x + (w0 - w) / 2;
+        if (anchor === "n") y = y + h0 - h;
+      } else {
+        const hh = (w * imgAspect) / ratio;
+        if (hh <= 1) { if (anchor.includes("n")) y = y + h - hh; h = hh; }
+        else { h = 1; w = (h * ratio) / imgAspect; if (anchor.includes("w")) x = x + r.w - w; }
+      }
     }
     x = clamp(x, 0, 1 - w); y = clamp(y, 0, 1 - h);
     return { x, y, w, h };
@@ -113,9 +122,9 @@ export function CropModal() {
     <Modal open onClose={() => setCropShot(null)} title="Crop image" width={760}>
       <div className="flex flex-col gap-3 p-4">
         <div className="flex items-center justify-center rounded-md bg-panel-2 p-3">
-          <div ref={box} className="relative select-none" style={{ maxHeight: "58vh", aspectRatio: `${imgAspect}`, width: imgAspect >= 1 ? "100%" : undefined, height: imgAspect < 1 ? "58vh" : undefined }} onPointerMove={move} onPointerUp={up} onPointerCancel={up}>
+          <div ref={box} className="relative select-none" style={{ aspectRatio: `${imgAspect}`, width: "100%", maxWidth: `calc(58vh * ${imgAspect})` }} onPointerMove={move} onPointerUp={up} onPointerCancel={up}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={media.url} alt="" className="block h-full w-full" draggable={false} />
+            <img src={media.url} alt="" className="block h-full w-full object-contain" draggable={false} />
             {/* mask */}
             <div className="pointer-events-none absolute inset-0 bg-black/55" style={{ clipPath: `polygon(0 0, 100% 0, 100% 100%, 0 100%, 0 0, ${rect.x * 100}% ${rect.y * 100}%, ${rect.x * 100}% ${(rect.y + rect.h) * 100}%, ${(rect.x + rect.w) * 100}% ${(rect.y + rect.h) * 100}%, ${(rect.x + rect.w) * 100}% ${rect.y * 100}%, ${rect.x * 100}% ${rect.y * 100}%)` }} />
             <div className="absolute cursor-move border border-white shadow-[0_0_0_1px_rgba(0,0,0,0.4)]" style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.w * 100}%`, height: `${rect.h * 100}%` }} onPointerDown={down("move")}>
@@ -140,9 +149,10 @@ export function CropModal() {
   );
 }
 
-/** Largest centred rect of the given aspect inside the current one. */
+/** Largest rect of the given aspect inside the image, kept over the current selection's centre. */
 function fitTo(r: Rect, ratio: number, imgAspect: number): Rect {
-  let w = r.w, h = (w * imgAspect) / ratio;
-  if (h > r.h) { h = r.h; w = (h * ratio) / imgAspect; }
-  return { x: r.x + (r.w - w) / 2, y: r.y + (r.h - h) / 2, w, h };
+  let w = 1, h = imgAspect / ratio;
+  if (h > 1) { h = 1; w = ratio / imgAspect; }
+  const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+  return { x: clamp(cx - w / 2, 0, 1 - w), y: clamp(cy - h / 2, 0, 1 - h), w, h };
 }

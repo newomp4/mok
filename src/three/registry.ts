@@ -5,7 +5,9 @@ import type { EffectComposer } from "postprocessing";
 
 /** Non-reactive handles to the live R3F root, used by the export pipeline. */
 export const viewport = {
-  state: null as RootState | null,
+  /** live getter for the R3F root; calling it returns the current state, never a stale snapshot */
+  get: null as null | (() => RootState),
+  get state(): RootState | null { return viewport.get ? viewport.get() : null; },
   composer: null as EffectComposer | null,
   /** debug: mesh inventory of the currently loaded glTF device */
   glbInfo: null as null | (() => unknown),

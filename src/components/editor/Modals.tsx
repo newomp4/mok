@@ -5,7 +5,7 @@ import { useUI } from "@/store/ui";
 import { Button, IconButton, Kbd, Modal, Segmented, ToggleRow } from "@/components/ui";
 import { APP_VERSION, CHANGELOG } from "@/lib/version";
 import { Icon } from "@/components/icons";
-import { deleteProject, listProjects, loadProject } from "@/lib/persistence";
+import { deleteProject, listProjects, loadProject, listingFailed } from "@/lib/persistence";
 import type { ProjectMeta } from "@/lib/types";
 import { getDevice } from "@/lib/devices";
 import { MOD } from "@/lib/cn";
@@ -129,7 +129,8 @@ function ProjectsModal() {
   const toast = useUI((s) => s.showToast);
   const current = useEditor((s) => s.project.id);
   const [items, setItems] = useState<ProjectMeta[]>([]);
-  const refresh = () => void listProjects().then(setItems);
+  const [unreadable, setUnreadable] = useState(false);
+  const refresh = () => void listProjects().then((list) => { setItems(list); setUnreadable(listingFailed()); });
   useEffect(() => { if (modal === "projects") refresh(); }, [modal]);
   const open = async (id: string) => {
     const p = await loadProject(id);
@@ -151,7 +152,13 @@ function ProjectsModal() {
         <Button variant="ghost" size="sm" icon="download" onClick={() => void exportProjectToFile()}>Export .mok</Button>
       </div>
       <div className="scroll max-h-[55vh] overflow-auto p-2">
-        {items.length === 0 && <div className="label-sm px-2 py-6 text-center text-muted">No saved projects yet. Press {MOD} S to save the current one.</div>}
+        {items.length === 0 && (
+          // an empty list and an unreadable one look the same, and telling someone they have no
+          // projects when the browser is simply blocking storage is the wrong thing to say
+          <div className="label-sm px-2 py-6 text-center text-muted">
+            {unreadable ? "This browser is blocking storage, so saved projects cannot be listed here." : `No saved projects yet. Press ${MOD} S to save the current one.`}
+          </div>
+        )}
         {items.map((m) => (
           <div key={m.id} className="group flex items-center gap-3 rounded-md px-2 py-2 hover:bg-fill">
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-panel-2 text-fg-2"><Icon name={getDevice(m.device).icon} size={15} /></div>

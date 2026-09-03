@@ -14,7 +14,7 @@ export interface Finish {
 }
 
 export interface CameraBump {
-  kind: "pill" | "plateau" | "bar" | "square";
+  kind: "pill" | "plateau" | "bar" | "square" | "lenses";
   lenses: number;
   w: number;
   h: number;
@@ -111,8 +111,11 @@ export const DEVICES: DeviceSpec[] = [
     id: "ipad-pro-13-glb", name: "iPad Pro 13\"", family: "tablet",
     screenPx: [2752, 2064], screenMm: [262.5, 196.9], screenRadius: 18,
     body: { w: 281.6, h: 215.5, d: 5.1, r: 20 },
-    model: { url: "/models/ipad-pro-13.glb", screenMesh: "EjCaatfcGdAQBho", size: 300, rotation: [0, -Math.PI / 2, 0] },
-    finishes: [{ id: "silver", name: "Silver", color: "#dfe0e2" }],
+    model: { url: "/models/ipad-pro-13.glb", screenMesh: "EjCaatfcGdAQBho", size: 300, rotation: [0, -Math.PI / 2, 0], finishMaterials: ["ZOeABjzhcCnMIQN", "fetMGkTMYCEbhfc", "aFKyVsKnRxtPSIc", "zTliqrIZmHqtGYA", "tNTInhtuVhcfLey", "wADiXiaDqUQHYtm", "QaBMMLWYwWUThNS", "llEXDLHtmQUlhoH", "CvlwRpQyJJzldbv", "AtpoqQwyXHyfcDR", "peAefkBsoaxeaGR", "rlLxXLyqFuSJzQX", "JiwoEoDQOLnLqCc", "lPecWudGlMcwHNs", "UoLXHLITItJlNkC", "qNcPOaKIPnbkQEP", "FrqgcMaoWnXCxPQ", "hHkyTAHrTokEUgD", "tEopPPwRRYPaaeg", "jKxlebhoFEjFmnf", "pHNdlddhxBhpfDc", "rJLLQibgXjvbmhN", "ZGneimAgCRnJijf"] },
+    finishes: [
+      { id: "silver", name: "Silver", color: "#dfe0e2" },
+      { id: "space-black", name: "Space Black", color: "#3a3a3c" },
+    ],
     fitSize: 2.9, icon: "tablet", placement: "stand",
   },
   {
@@ -120,8 +123,11 @@ export const DEVICES: DeviceSpec[] = [
     screenPx: [3024, 1964], screenMm: [301, 195.5], screenRadius: 7,
     body: { w: 312.6, h: 221.2, d: 11.2, r: 11 },
     lid: { thickness: 4.3, angle: 100, screenTop: 7 },
-    model: { url: "/models/macbook-pro-14.glb", screenMesh: "abgVijaHVNRUvcc", size: 312.6, hide: ["NgmQYtxXWDmCavo"] },
-    finishes: [{ id: "space-gray", name: "Space Gray", color: "#7d7e80" }],
+    model: { url: "/models/macbook-pro-14.glb", screenMesh: "abgVijaHVNRUvcc", size: 312.6, hide: ["NgmQYtxXWDmCavo", "PSIiVLWbMOjTmDb"], finishMaterials: ["yVmFXNTCIwNkqVT", "hPcehRUjcLAosED", "HpEeGHRuOqfcIZU", "pZbDFXVUkfRwjmQ", "NQXltfOcKPZPQdI", "BMKLbAPYqPmfArt", "kOcboIDeohDRqCf", "LJSCtLIrHNHZnIH", "zqeFZcIteZtOShc", "HPAOpCInJKBtaOC", "XNDkEZQapqqDHpk", "zaEqorbaeeADKgU", "JjuwNKnMBUdtRLb"] },
+    finishes: [
+      { id: "silver", name: "Silver", color: "#dfe0e3" },
+      { id: "space-black", name: "Space Black", color: "#35353a" },
+    ],
     fitSize: 3.4, icon: "laptop", placement: "sit",
   },
   {
@@ -129,16 +135,22 @@ export const DEVICES: DeviceSpec[] = [
     screenPx: [3456, 2234], screenMm: [344, 222.5], screenRadius: 7,
     body: { w: 355.7, h: 248.1, d: 12.4, r: 11 },
     lid: { thickness: 4.4, angle: 100, screenTop: 7 },
-    model: { url: "/models/macbook-pro-16.glb", screenMesh: "Object_123", size: 355.7, hide: ["Object_66"] },
-    finishes: [{ id: "space-black", name: "Space Black", color: "#2a2a2c" }],
+    model: { url: "/models/macbook-pro-16.glb", screenMesh: "Object_123", size: 355.7, hide: ["Object_66"], finishMaterials: ["lmWQsEjxpsebDlK", "CRQixVLpahJzhJc", "iyDJFXmHelnMTbD", "YYwBgwvcyZVOOAA", "sIfSZcqgDlKMJPf", "LpqXZqhaGCeSzdu", "gMtYExgrEUqPfln", "SLGkCohDDelqXBu", "zhGRTuGrQoJflBD", "nDsMUuDKliqGFdU"] },
+    finishes: [
+      { id: "space-black", name: "Space Black", color: "#2f2f31" },
+      { id: "silver", name: "Silver", color: "#dedfe1" },
+    ],
     fitSize: 3.85, icon: "laptop", placement: "sit",
   },
   {
     id: "apple-watch-ultra-glb", name: "Apple Watch Ultra 2", family: "watch",
     screenPx: [410, 502], screenMm: [36, 44], screenRadius: 12,
     body: { w: 44, h: 49, d: 14.4, r: 13 },
-    model: { url: "/models/watch-ultra-2.glb", screenMesh: "dEKwzvajmGpjRpl,NONHYSHLUQzoyez,VHnHbLOyhEXLvWA", size: 130 },
-    finishes: [{ id: "natural", name: "Natural Titanium", color: "#c9c5bd" }],
+    model: { url: "/models/watch-ultra-2.glb", screenMesh: "dEKwzvajmGpjRpl,NONHYSHLUQzoyez,VHnHbLOyhEXLvWA", size: 130, finishMaterials: ["edhWAPEBZsqCLTg", "LMTUXYhSYYJrnsy_0", "GXPSJdzybTrBefY", "CdZJpyOXLDMygZg", "vqobCvtAVyNLbeh", "YtajTVWccmKRZBL", "PmrTDgoSkxCPUel"] },
+    finishes: [
+      { id: "natural", name: "Natural Titanium", color: "#c9c5bd" },
+      { id: "black", name: "Black Titanium", color: "#2b2b2d" },
+    ],
     fitSize: 1.15, icon: "watch", placement: "float",
   },
   {
@@ -199,6 +211,75 @@ export const DEVICES: DeviceSpec[] = [
     free: true,
     icon: "browser",
     placement: "float",
+  },
+  {
+    id: "pixel-9-pro",
+    name: "Pixel 9 Pro",
+    family: "phone",
+    screenPx: [1280, 2856],
+    screenMm: [64.6, 143.9],
+    screenRadius: 14,
+    body: { w: 72.4, h: 152.8, d: 8.5, r: 15 },
+    edge: 2.2,
+    island: { w: 8, h: 8, top: 8 },
+    bump: { kind: "bar", lenses: 3, w: 64, h: 20, top: 16, left: 4.2, depth: 3.2 },
+    buttons: true,
+    finishes: [
+      { id: "obsidian", name: "Obsidian", color: "#232326", back: "#2b2b2f", ...ALU },
+      { id: "porcelain", name: "Porcelain", color: "#eae5dc", back: "#f2eee7", ...ALU },
+      { id: "hazel", name: "Hazel", color: "#7f8377", back: "#8d9184", ...ALU },
+      { id: "rose-quartz", name: "Rose Quartz", color: "#f0cfd0", back: "#f6dedf", ...ALU },
+    ],
+    fitSize: 1.55,
+    free: true,
+    icon: "phone",
+    placement: "stand",
+  },
+  {
+    id: "pixel-9-pro-xl",
+    hidden: true,
+    name: "Pixel 9 Pro XL",
+    family: "phone",
+    screenPx: [1344, 2992],
+    screenMm: [69.5, 154.7],
+    screenRadius: 15,
+    body: { w: 76.6, h: 162.8, d: 8.5, r: 16 },
+    edge: 2.2,
+    island: { w: 8, h: 8, top: 8 },
+    bump: { kind: "bar", lenses: 3, w: 68, h: 21, top: 17, left: 4.3, depth: 3.2 },
+    buttons: true,
+    finishes: [
+      { id: "obsidian", name: "Obsidian", color: "#232326", back: "#2b2b2f", ...ALU },
+      { id: "porcelain", name: "Porcelain", color: "#eae5dc", back: "#f2eee7", ...ALU },
+      { id: "hazel", name: "Hazel", color: "#7f8377", back: "#8d9184", ...ALU },
+    ],
+    fitSize: 1.6,
+    icon: "phone",
+    placement: "stand",
+  },
+  {
+    id: "galaxy-s25-ultra",
+    name: "Galaxy S25 Ultra",
+    family: "phone",
+    screenPx: [1440, 3120],
+    screenMm: [71.9, 155.7],
+    screenRadius: 6,
+    body: { w: 77.6, h: 162.8, d: 8.2, r: 7 },
+    edge: 2,
+    island: { w: 8, h: 8, top: 8 },
+    // the Ultra has no camera plateau at all: the lenses sit straight on the back glass
+    bump: { kind: "lenses", lenses: 3, w: 20, h: 62, top: 14, left: 9, depth: 1.1 },
+    buttons: true,
+    finishes: [
+      { id: "titanium-black", name: "Titanium Black", color: "#26262a", back: "#2e2e33", ...ALU },
+      { id: "titanium-silverblue", name: "Titanium Silverblue", color: "#c3ccd6", back: "#d0d8e0", ...ALU },
+      { id: "titanium-whitesilver", name: "Titanium Whitesilver", color: "#e4e4e2", back: "#eeeeec", ...ALU },
+      { id: "titanium-gray", name: "Titanium Gray", color: "#8e8e92", back: "#9b9b9f", ...ALU },
+    ],
+    fitSize: 1.6,
+    free: true,
+    icon: "phone",
+    placement: "stand",
   },
   {
     id: "iphone-17",

@@ -1,5 +1,5 @@
 "use client";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 import type { DeviceSpec } from "@/lib/devices";
 import { S, roundedPlaneGeometry } from "@/three/geometry";
@@ -19,6 +19,9 @@ export function FlatModel({ spec, mats, screen, size, radius, finish }: {
     return { body, scr, t };
   }, [w, h, rMm, spec.body.d]);
   const edgeMat = useMemo(() => new THREE.MeshStandardMaterial({ color: mats.frame.color, roughness: 0.5, metalness: 0.1 }), [mats.frame.color]);
+  // the corner radius rebuilds both meshes on every slider step; drop the old buffers with them
+  useEffect(() => () => { geos.body.dispose(); geos.scr.dispose(); }, [geos]);
+  useEffect(() => () => { edgeMat.dispose(); }, [edgeMat]);
   return (
     <group>
       {edge && <mesh geometry={geos.body} material={edgeMat} castShadow receiveShadow />}

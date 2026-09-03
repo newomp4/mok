@@ -24,8 +24,13 @@ export function applyCameraPreset(id: string) {
 
 export function resetCamera() {
   useEditor.getState().update((p) => {
-    p.camera = { x: -18, y: 14, z: 0, fov: 24, zoom: 1, panX: 0, panY: 0 };
-    for (const s of p.shots) for (const k of Object.keys(s.keyframes) as AnimProp[]) if (k.startsWith("camera.")) delete s.keyframes[k];
+    p.camera = { x: -22, y: -18, z: 0, fov: 24, zoom: 1.12, panX: 0.02, panY: -0.02 };
+    p.mockup.rotX = 0; p.mockup.rotY = 0; p.mockup.rotZ = 0;
+    for (const s of p.shots) {
+      for (const k of Object.keys(s.keyframes) as AnimProp[]) {
+        if (k.startsWith("camera.") || k === "mockup.rotX" || k === "mockup.rotY" || k === "mockup.rotZ") delete s.keyframes[k];
+      }
+    }
   });
 }
 
@@ -44,8 +49,10 @@ export function applyMotionPreset(id: string, shotId?: string) {
   ed.update((p) => {
     const shot = p.shots.find((s) => s.id === targetId);
     if (!shot) return;
-    shot.duration = m.duration;
-    const kfs = m.build(m.duration, p.camera, { x: p.mockup.rotX, y: p.mockup.rotY, z: p.mockup.rotZ });
+    // the preset fills the shot you have; it never shortens a longer one (Ultramock fixed the same thing)
+    const span = Math.max(shot.duration, m.duration);
+    shot.duration = span;
+    const kfs = m.build(span, p.camera, { x: p.mockup.rotX, y: p.mockup.rotY, z: p.mockup.rotZ });
     for (const [prop, list] of Object.entries(kfs) as [AnimProp, Keyframe[]][]) shot.keyframes[prop] = list;
   });
   const p = useEditor.getState().project;
@@ -210,6 +217,20 @@ export async function importFilesToShot(files: File[], shotId?: string | null): 
   if (!files.length) return null;
   const ui = useUI.getState();
   if (files[0].type.startsWith("audio/")) { await addAudioFile(files[0]); return null; }
+  // several files at once become a sequence: the first replaces the target, the rest follow it
+  if (files.length > 1) {
+    const first = await importFilesToShot([files[0]], shotId);
+    const ed = useEditor.getState();
+    let after = shotId ?? ui.activeShotId ?? ed.project.shots[0]?.id ?? null;
+    for (const f of files.slice(1)) {
+      if (f.type.startsWith("audio/")) continue;
+      const id = ed.addShot("media", after ?? undefined);
+      await importFilesToShot([f], id);
+      after = id;
+    }
+    ui.showToast(`${files.length} files added as ${files.length} shots`);
+    return first;
+  }
   const targetId = shotId ?? ui.activeShotId;
   const target = useEditor.getState().project.shots.find((s) => s.id === targetId);
   if (target && shotKind(target) === "logo") { await importLogo(files[0], target.id); return null; }
@@ -223,6 +244,8 @@ export async function importFilesToShot(files: File[], shotId?: string | null): 
         const shot = p.shots.find((s) => s.id === (shotId ?? ui.activeShotId)) ?? p.shots[0];
         if (shot && ref.duration && ref.duration > 0.5) shot.duration = Math.min(30, Math.round(ref.duration * 10) / 10);
       });
+      // a video is a timeline job, so show the timeline rather than leaving it collapsed
+      if (!ui.timelineOpen) ui.setTimelineOpen(true);
     }
     const label = `${ref.kind === "video" ? "Video" : "Image"} added · ${ref.width} × ${ref.height}`;
     if (previous && target) {
@@ -266,12 +289,18 @@ export async function applySampleScreen(id: string, shotId?: string | null) {
   if (!screen) return;
   const targetId = shotId ?? ui.activeShotId ?? ed.project.shots[0]?.id;
   const shot = ed.project.shots.find((x) => x.id === targetId);
-  // a screen that matches the device's orientation is drawn at its native resolution so it fits
-  // exactly; a mismatched one keeps its own proportions and is fitted by the shot's fit mode
+  // The samples are laid out for a phone- or laptop-shaped screen. A device close to those
+  // proportions gets the sample at its native resolution so it fits the glass exactly; anything
+  // squarer — a watch, a portrait tablet — would crop the layout, so it is drawn at the proportions
+  // it was designed for and the shot's fit mode places it.
   const landscape = screen.shape === "landscape";
+  const design = landscape ? 1.6 : 0.46;
   let [w, h] = spec.screenPx;
   if (spec.family === "flat") [w, h] = landscape ? [1600, 1000] : [1206, 2622];
-  else if ((w > h) !== landscape) { const long = Math.max(w, h); [w, h] = landscape ? [long, Math.round(long * 0.625)] : [Math.round(long * 0.46), long]; }
+  else if (Math.abs(w / h - design) / design > 0.15) {
+    const long = Math.max(w, h);
+    [w, h] = landscape ? [long, Math.round(long / design)] : [Math.round(long * design), long];
+  }
   // cap the long edge but keep the aspect, or the sample would be stretched on the screen
   const cap = 2560;
   const scale = Math.min(1, cap / Math.max(w, h));

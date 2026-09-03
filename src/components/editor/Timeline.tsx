@@ -8,6 +8,7 @@ import { MOTION_PRESETS } from "@/lib/presets";
 import { Button, IconButton, Popover, Segmented, MenuList, ContextMenu, NumberRow, ColorRow, type MenuItem } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { cn, clamp } from "@/lib/cn";
+import { useShallow } from "zustand/react/shallow";
 import { applyMotionPreset, importFilesToShot, addAudioFile, importLogo, addShotFromCamera } from "@/lib/actions";
 import { pickFiles } from "./hooks";
 import { ACCEPTED_AUDIO, ACCEPTED_IMAGES, ACCEPTED_TYPES, useMedia } from "@/lib/media";
@@ -31,11 +32,27 @@ function snapDetail(t: number, pps: number, playhead: number): { t: number; snap
     const d = Math.abs(c - t);
     if (d < bestD) { best = c; bestD = d; snapped = c; }
   }
-  return { t: Math.round(best * 100) / 100, snapped };
+  // a snapped time has to land exactly on its target: the coarse rounding would leave it a few
+  // milliseconds off the playhead, far more than the tolerance keyframe lookups use
+  return { t: snapped ?? Math.round(best * 100) / 100, snapped };
 }
 
 function snapTime(t: number, pps: number, playhead: number): number {
   return snapDetail(t, pps, playhead).t;
+}
+
+/** A keyframe may lead in from before its shot, but never from before zero: the lane clips
+ *  anything at a negative x, and a diamond you cannot scroll to is a diamond you cannot pick up. */
+function keepInView(t: number, start: number): number {
+  return Math.max(t, -start);
+}
+
+/** Where a proportional (alt) group drag puts one keyframe — the pivot and scale the store uses. */
+function scaledKeyTime(abs: number[], t: number, dt: number): number {
+  const pivot = Math.min(...abs);
+  const span = Math.max(...abs) - pivot;
+  if (span <= 1e-6) return t + dt;
+  return pivot + (t - pivot) * Math.max(0.02, (span + dt) / span);
 }
 
 const KIND_ICON: Record<string, string> = { media: "shot", text: "type", logo: "logo" };
@@ -52,7 +69,18 @@ export function Timeline() {
   const pasteShot = useEditor((s) => s.pasteShot);
   const splitShot = useEditor((s) => s.splitShot);
   const setAudio = useEditor((s) => s.setAudio);
-  const ui = useUI();
+  // subscribing to the whole UI store re-rendered the timeline on every playback frame; the
+  // playhead is left out of the selection and read in leaves (or from getState in handlers),
+  // so a 60 Hz tick never reconciles the shot and keyframe tree
+  const ui = useUI(useShallow((s) => ({
+    playing: s.playing, loop: s.loop, recording: s.recording, activeShotId: s.activeShotId,
+    timelineMode: s.timelineMode, timelineZoom: s.timelineZoom, timelineHeight: s.timelineHeight,
+    autoMotion: s.autoMotion, guides: s.guides, selectedKeys: s.selectedKeys,
+    setTime: s.setTime, setPlaying: s.setPlaying, toggleLoop: s.toggleLoop, setRecording: s.setRecording,
+    setActiveShot: s.setActiveShot, setTimelineMode: s.setTimelineMode, setTimelineZoom: s.setTimelineZoom,
+    setTimelineHeight: s.setTimelineHeight, setAutoMotion: s.setAutoMotion, setGuides: s.setGuides,
+    setSelectedKeys: s.setSelectedKeys, setTimelineOpen: s.setTimelineOpen, showToast: s.showToast,
+  })));
   const total = totalDuration(project);
   const pps = 96 * ui.timelineZoom;
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -97,14 +125,17 @@ export function Timeline() {
     const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
-      const z = clamp(ui.timelineZoom * Math.exp(-e.deltaY * 0.01), 0.4, 8);
-      const before = 8 + ui.time * 96 * ui.timelineZoom - el.scrollLeft;
-      useUI.getState().setTimelineZoom(z);
-      requestAnimationFrame(() => { el.scrollLeft = 8 + ui.time * 96 * z - before; });
+      // reading the zoom and the playhead here keeps the listener out of the dependency array,
+      // so a playing timeline does not re-register it once a frame
+      const { time, timelineZoom, setTimelineZoom } = useUI.getState();
+      const z = clamp(timelineZoom * Math.exp(-e.deltaY * 0.01), 0.4, 8);
+      const before = 8 + time * 96 * timelineZoom - el.scrollLeft;
+      setTimelineZoom(z);
+      requestAnimationFrame(() => { el.scrollLeft = 8 + time * 96 * z - before; });
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [ui.timelineZoom, ui.time]);
+  }, []);
 
   const ticks = useMemo(() => {
     const out: number[] = [];
@@ -140,18 +171,32 @@ export function Timeline() {
     addShot(kind, ui.activeShotId ?? undefined);
   };
 
+  // whether the playhead is far enough inside the shot the open menu belongs to for a split to
+  // take. It has to follow the playhead while the menu stands, but the timeline stays off the
+  // playback tick by subscribing to the boolean rather than the time, and only while a menu is open
+  const splitInside = useUI((s) => {
+    if (!menu) return false;
+    const shot = project.shots.find((x) => x.id === menu.shotId);
+    if (!shot) return false;
+    const start = shotStart(project, menu.shotId);
+    return s.time > start + 0.2 && s.time < start + shot.duration - 0.2;
+  });
+
   const menuItems = (shotId: string): MenuItem[] => {
     const shot = project.shots.find((s) => s.id === shotId);
     if (!shot) return [];
     const start = shotStart(project, shotId);
-    const inside = ui.time > start + 0.2 && ui.time < start + shot.duration - 0.2;
     const kind = shotKind(shot);
     return [
+      { label: "Duration", icon: "clock", right: <ShotDuration shot={shot} /> },
+      { divider: true, label: "" },
       { label: "Rename", icon: "text-cursor", onSelect: () => setRenaming(shotId) },
       ...(kind === "media" ? [{ label: "Upload media…", icon: "upload", onSelect: () => void pickFiles(ACCEPTED_TYPES).then((f) => importFilesToShot(f, shotId)) }] : []),
       ...(kind === "logo" ? [{ label: "Replace logo…", icon: "image", onSelect: () => void pickFiles(ACCEPTED_IMAGES).then(([f]) => f && importLogo(f, shotId)) }] : []),
       { label: "Duplicate", icon: "copy", shortcut: "⌘D", onSelect: () => duplicateShot(shotId) },
-      { label: "Split at playhead", icon: "split-clip", shortcut: "⇧⌘D", disabled: !inside, onSelect: () => splitShot(shotId, ui.time - start) },
+      // a playing playhead can cross the shot's edge between the render that enabled this item and
+      // the click, so the cut lands at the nearest point that still leaves two halves to keep
+      { label: "Split at playhead", icon: "split-clip", shortcut: "⇧⌘D", disabled: !splitInside, onSelect: () => splitShot(shotId, clamp(useUI.getState().time - start, 0.2, shot.duration - 0.2)) },
       { label: "Reverse", icon: "rewind", onSelect: () => reverseShot(shotId) },
       ...((shot.device || shot.finish || shot.scene || shot.lighting)
         ? [{ label: "Use the project look", icon: "rotate-ccw", onSelect: () => useEditor.getState().updateShot(shotId, (s) => { delete s.device; delete s.finish; delete s.scene; delete s.lighting; }) }]
@@ -170,6 +215,10 @@ export function Timeline() {
 
   // resizable height
   const heightDrag = useRef<{ y: number; h: number } | null>(null);
+
+  const keyMenuKf = keyMenu
+    ? project.shots.find((s) => s.id === keyMenu.shotId)?.keyframes[keyMenu.prop]?.find((k) => Math.abs(k.t - keyMenu.t) < 0.0005)
+    : undefined;
 
   return (
     <div className="relative flex shrink-0 flex-col overflow-hidden rounded-lg border border-line bg-panel" style={{ height: ui.timelineHeight }} data-tour="timeline">
@@ -202,7 +251,7 @@ export function Timeline() {
           <Icon name="record" size={8} className={ui.recording ? "text-accent" : "text-muted"} />Record keyframes
         </button>
         <div className="num flex h-6 items-center gap-1 rounded-md bg-fill px-2 text-[11px]">
-          <span className="text-fg">{formatTime(ui.time)}</span>
+          <TimeReadout />
           <span className="text-muted">/</span>
           <span className="text-muted">{formatTime(total)}</span>
         </div>
@@ -280,7 +329,7 @@ export function Timeline() {
           onPointerDown={(e) => {
             // a drag starting on empty track space marquee-selects keyframes
             const t = e.target as HTMLElement;
-            if (e.button !== 0 || t.closest("[data-kf]") || t.closest("[data-shot]") || t.closest("[data-ruler]")) return;
+            if (e.button !== 0 || t.closest("[data-kf]") || t.closest("[data-shot]") || t.closest("[data-ruler]") || t.closest("[data-clip]")) return;
             const el = scrollRef.current!;
             const r = el.getBoundingClientRect();
             const x = e.clientX - r.left + el.scrollLeft, y = e.clientY - r.top + el.scrollTop;
@@ -333,7 +382,6 @@ export function Timeline() {
                       start={start}
                       pps={pps}
                       active={ui.activeShotId === shot.id}
-                      playhead={ui.time}
                       onSelect={() => { ui.setActiveShot(shot.id); ui.setTime(start + 0.0001); }}
                       onExpand={() => setExpanded((x) => ({ ...x, [shot.id]: !open }))}
                     />
@@ -349,9 +397,11 @@ export function Timeline() {
                         setTrackMenu({ at: { x: e.clientX, y: e.clientY }, shotId: shot.id, prop });
                       }}
                       onDoubleClick={(e) => {
-                        // double-click a lane to drop a keyframe there
+                        // double-click a lane to drop a keyframe there; the stamp lands in whichever
+                        // shot the playhead resolves to, and the very end of a shot already reads as
+                        // the next one, so the seek has to stay just inside this shot
                         const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                        const t = clamp(((e.clientX - r.left) - 8) / pps - start, 0, shot.duration);
+                        const t = clamp(((e.clientX - r.left) - 8) / pps - start, 0, shot.duration - 0.0001);
                         ui.setTime(start + t);
                         requestAnimationFrame(() => useEditor.getState().stampKeyframes([prop]));
                       }}
@@ -372,20 +422,32 @@ export function Timeline() {
                               const key = { shotId: shot.id, prop, t: k.t };
                               if (additive) setSelected(isSel ? selected.filter((s) => !(s.shotId === shot.id && s.prop === prop && Math.abs(s.t - k.t) < 0.0005)) : [...selected, key]);
                               else if (!isSel) setSelected([key]);
-                              ui.setTime(start + k.t);
+                              // a keyframe can sit outside the sequence, and the playhead cannot
+                              ui.setTime(clamp(start + k.t, 0, total));
                             }}
-                            preview={(dt) => {
-                              // a group drag moves everything by the raw delta; a single one snaps
-                              if (selected.length > 1 && isSel) { setSnapAt(null); return k.t + dt; }
-                              const d = snapDetail(k.t + dt, pps, ui.time - start);
-                              setSnapAt(d.snapped === null ? null : start + d.snapped);
-                              return clampKeyTime(d.t, shot.duration);
+                            preview={(dt, alt) => {
+                              // a group drag moves everything by the raw delta, alt scales it around
+                              // the earliest keyframe the way the store does; a single one snaps
+                              if (selected.length > 1 && isSel) {
+                                setSnapAt(null);
+                                const abs = selected.map((s) => shotStart(project, s.shotId) + s.t);
+                                // the store holds a plain group drag at the start of the project and
+                                // clamps every keyframe to its shot's margin, so the ghost does too
+                                const at = alt ? scaledKeyTime(abs, start + k.t, dt) : start + k.t + Math.max(dt, -Math.min(...abs));
+                                return clampKeyTime(at - start, shot.duration);
+                              }
+                              const d = snapDetail(k.t + dt, pps, useUI.getState().time - start);
+                              const nt = keepInView(clampKeyTime(d.t, shot.duration), start);
+                              // the guide promises where the diamond will land, so a snap the clamps
+                              // pull back off its target has nothing left to point at
+                              setSnapAt(d.snapped !== null && Math.abs(nt - d.snapped) < 0.0005 ? start + d.snapped : null);
+                              return nt;
                             }}
                             onMove={(dt, alt) => {
                               setSnapAt(null);
                               const many = selected.length > 1 && isSel;
                               if (many) { useEditor.getState().moveSelectedKeyframes(dt, alt); return; }
-                              const nt = clampKeyTime(snapTime(k.t + dt, pps, ui.time - start), shot.duration);
+                              const nt = keepInView(clampKeyTime(snapTime(k.t + dt, pps, useUI.getState().time - start), shot.duration), start);
                               update((p) => {
                                 const s = p.shots.find((x) => x.id === shot.id);
                                 if (!s) return;
@@ -413,10 +475,7 @@ export function Timeline() {
               <div className="pointer-events-none absolute z-30 rounded-sm border border-accent bg-accent/15" style={{ left: marquee.x0, top: marquee.y0, width: marquee.x1 - marquee.x0, height: marquee.y1 - marquee.y0 }} />
             )}
             {/* playhead */}
-            <div className="pointer-events-none absolute top-0 z-20 h-full" style={{ left: 8 + ui.time * pps }}>
-              <div className="num -translate-x-1/2 rounded-sm bg-fg px-1 text-[9px] text-inverse-fg">{ui.time.toFixed(2)}</div>
-              <div className="h-full w-px bg-fg" />
-            </div>
+            <Playhead pps={pps} />
           </div>
         </div>
       </div>
@@ -437,9 +496,10 @@ export function Timeline() {
         onClose={() => setKeyMenu(null)}
         items={keyMenu ? [
           { label: "Easing", disabled: true },
-          ...EASES.map((e) => ({ label: e.label, checked: project.shots.find((s) => s.id === keyMenu.shotId)?.keyframes[keyMenu.prop]?.find((k) => Math.abs(k.t - keyMenu.t) < 0.0005)?.ease === e.id, onSelect: () => update((p) => { const s = p.shots.find((x) => x.id === keyMenu.shotId); const k = s?.keyframes[keyMenu.prop]?.find((kk) => Math.abs(kk.t - keyMenu.t) < 0.0005); if (k) k.ease = e.id; }) })),
+          // a keyframe carrying a custom curve is on no named ease, so no preset may read as checked
+          ...EASES.map((e) => ({ label: e.label, checked: !keyMenuKf?.cp && keyMenuKf?.ease === e.id, onSelect: () => update((p) => { const s = p.shots.find((x) => x.id === keyMenu.shotId); const k = s?.keyframes[keyMenu.prop]?.find((kk) => Math.abs(kk.t - keyMenu.t) < 0.0005); if (k) { k.ease = e.id; delete k.cp; } }) })),
           { divider: true, label: "" },
-          { label: "Apply easing to whole track", icon: "diamond", onSelect: () => update((p) => { const s = p.shots.find((x) => x.id === keyMenu.shotId); const list = s?.keyframes[keyMenu.prop]; const cur = list?.find((kk) => Math.abs(kk.t - keyMenu.t) < 0.0005)?.ease; if (list && cur) for (const kk of list) kk.ease = cur; }) },
+          { label: "Apply easing to whole track", icon: "diamond", onSelect: () => update((p) => { const s = p.shots.find((x) => x.id === keyMenu.shotId); const list = s?.keyframes[keyMenu.prop]; const src = list?.find((kk) => Math.abs(kk.t - keyMenu.t) < 0.0005); if (list && src) for (const kk of list) { kk.ease = src.ease; if (src.cp) kk.cp = [...src.cp] as typeof src.cp; else delete kk.cp; } }) },
           { label: "Copy keyframe", icon: "clipboard", shortcut: "⌘C", onSelect: () => useEditor.getState().copyKeyframes([{ shotId: keyMenu.shotId, prop: keyMenu.prop, t: keyMenu.t }]) },
           { label: "Delete keyframe", icon: "trash", danger: true, onSelect: () => update((p) => { const s = p.shots.find((x) => x.id === keyMenu.shotId); if (!s) return; const list = (s.keyframes[keyMenu.prop] ?? []).filter((kk) => Math.abs(kk.t - keyMenu.t) > 0.0005); if (list.length) s.keyframes[keyMenu.prop] = list; else delete s.keyframes[keyMenu.prop]; }) },
         ] : []}
@@ -467,6 +527,66 @@ function PresetThumb({ id }: { id: string }) {
   );
 }
 
+/** The playhead moves every frame, so its readouts subscribe on their own. */
+function TimeReadout() {
+  const time = useUI((s) => s.time);
+  return <span className="text-fg">{formatTime(time)}</span>;
+}
+
+function Playhead({ pps }: { pps: number }) {
+  const time = useUI((s) => s.time);
+  return (
+    <div className="pointer-events-none absolute top-0 z-20 h-full" style={{ left: 8 + time * pps }}>
+      <div className="num -translate-x-1/2 rounded-sm bg-fg px-1 text-[9px] text-inverse-fg">{time.toFixed(2)}</div>
+      <div className="h-full w-px bg-fg" />
+    </div>
+  );
+}
+
+/** Type a shot's length in seconds instead of dragging its right edge out on the block. */
+function ShotDuration({ shot }: { shot: Shot }) {
+  const [text, setText] = useState(shot.duration.toFixed(2));
+  // only a field the user actually typed into may write back; otherwise closing the menu, or a
+  // Split landing while the menu is open, would push this field's stale text over the new length
+  const typed = useRef(false);
+  useEffect(() => { typed.current = false; setText(shot.duration.toFixed(2)); }, [shot.duration]);
+  const commit = () => {
+    if (!typed.current) return;
+    typed.current = false;
+    // the length is read back from the store rather than the prop: a commit can run from the
+    // teardown below, where the prop is one render behind a length this field has already written
+    const cur = useEditor.getState().project.shots.find((s) => s.id === shot.id)?.duration ?? shot.duration;
+    const v = Number(text.trim());
+    const valid = text.trim() !== "" && Number.isFinite(v);
+    const d = valid ? Math.round(clamp(v, 0.5, 180) * 100) / 100 : cur;
+    setText(d.toFixed(2));
+    if (d === cur) return;
+    beginInteraction();
+    useEditor.getState().updateShot(shot.id, (s) => { s.duration = d; });
+    endInteraction();
+  };
+  // the menu closes on pointerdown, which tears the field out of the DOM before it can blur, so
+  // the typed value is committed as the input goes away rather than lost with it
+  const latest = useRef(commit);
+  latest.current = commit;
+  useEffect(() => () => latest.current(), []);
+  return (
+    <span className="num flex items-center gap-1 text-[11px] text-muted">
+      <input
+        className="h-5 w-11 rounded bg-fill px-1 text-right text-fg outline-none focus:ring-1 focus:ring-accent"
+        value={text}
+        // the menu row is itself a button, so the field takes focus by hand and swallows the click
+        onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); e.currentTarget.focus(); e.currentTarget.select(); }}
+        onClick={(e) => e.stopPropagation()}
+        onChange={(e) => { typed.current = true; setText(e.target.value); }}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") { typed.current = false; setText(shot.duration.toFixed(2)); e.currentTarget.blur(); } }}
+      />
+      s
+    </span>
+  );
+}
+
 function ShotName({ shot, editing, onEditStart, onEditEnd }: { shot: Shot; editing: boolean; onEditStart: () => void; onEditEnd: () => void }) {
   const update = useEditor((s) => s.update);
   const [text, setText] = useState(shot.name);
@@ -487,7 +607,7 @@ function ShotName({ shot, editing, onEditStart, onEditEnd }: { shot: Shot; editi
   return <button type="button" onDoubleClick={onEditStart} className="label truncate text-fg" title="Double-click to rename">{shot.name}</button>;
 }
 
-function ShotBlock({ shot, index, start, pps, active, playhead, onSelect, onExpand }: { shot: Shot; index: number; start: number; pps: number; active: boolean; playhead: number; onSelect: () => void; onExpand: () => void }) {
+function ShotBlock({ shot, index, start, pps, active, onSelect, onExpand }: { shot: Shot; index: number; start: number; pps: number; active: boolean; onSelect: () => void; onExpand: () => void }) {
   const update = useEditor((s) => s.update);
   const media = useMedia(shot.media);
   const reorderShot = useEditor((s) => s.reorderShot);
@@ -544,7 +664,6 @@ function ShotBlock({ shot, index, start, pps, active, playhead, onSelect, onExpa
       {shot.media?.kind === "video" && kind === "media" && <Icon name="video" size={10} className="relative ml-auto opacity-70" />}
       {(shot.speed ?? 1) !== 1 && <span className="num text-[9px] opacity-80">{shot.speed}×</span>}
       {tr && tr.type !== "cut" && <span className="ml-auto h-3 w-3 rounded-sm" style={{ background: `linear-gradient(90deg, transparent, ${tr.color})` }} title={`Fade ${tr.duration}s`} />}
-      {playhead > start && playhead < start + shot.duration && null}
       <div
         data-resize=""
         title="Trim the start"
@@ -577,7 +696,7 @@ function ShotBlock({ shot, index, start, pps, active, playhead, onSelect, onExpa
         onPointerMove={(e) => {
           if (!resize.current) return;
           const raw = resize.current.d + (e.clientX - resize.current.x) / pps;
-          const end = snapTime(start + raw, pps, playhead);
+          const end = snapTime(start + raw, pps, useUI.getState().time);
           const d = clamp(Math.round((end - start) * 100) / 100, 0.5, 180);
           update((p) => { const s = p.shots.find((x) => x.id === shot.id); if (s) s.duration = d; });
         }}
@@ -655,6 +774,7 @@ function AudioBlock({ track, pps, total }: { track: AudioTrack; pps: number; tot
   return (
     <div className="relative border-b border-line" style={{ height: ROW_H }}>
       <div
+        data-clip=""
         className="absolute top-1 flex h-[22px] cursor-grab items-center gap-1.5 overflow-hidden rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2 text-emerald-700 dark:text-emerald-300"
         style={{ left: 8 + track.start * pps, width: Math.max(24, len * pps) }}
         onPointerDown={(e) => { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); drag.current = { x: e.clientX, start: track.start }; beginInteraction(); }}
@@ -703,7 +823,7 @@ function Waveform({ loaded }: { loaded: ReturnType<typeof useMedia> }) {
   );
 }
 
-function KeyframeDiamond({ id, x, t, start, selected, custom, onSelect, onMove, preview, pps, onContextMenu }: { id: string; x: number; t: number; start: number; selected: boolean; custom?: boolean; onSelect: (additive: boolean) => void; onMove: (dt: number, alt: boolean) => void; preview?: (dt: number) => number; pps: number; onContextMenu?: (at: { x: number; y: number }) => void }) {
+function KeyframeDiamond({ id, x, t, start, selected, custom, onSelect, onMove, preview, pps, onContextMenu }: { id: string; x: number; t: number; start: number; selected: boolean; custom?: boolean; onSelect: (additive: boolean) => void; onMove: (dt: number, alt: boolean) => void; preview?: (dt: number, alt: boolean) => number; pps: number; onContextMenu?: (at: { x: number; y: number }) => void }) {
   const drag = useRef<{ x: number; moved: boolean } | null>(null);
   const [ghost, setGhost] = useState<number | null>(null);
   return (
@@ -719,7 +839,7 @@ function KeyframeDiamond({ id, x, t, start, selected, custom, onSelect, onMove, 
         if (!drag.current) return;
         if (Math.abs(e.clientX - drag.current.x) > 3) drag.current.moved = true;
         // the diamond follows the cursor so you can see where it will land
-        if (drag.current.moved && preview) setGhost(preview((e.clientX - drag.current.x) / pps));
+        if (drag.current.moved && preview) setGhost(preview((e.clientX - drag.current.x) / pps, e.altKey));
       }}
       onPointerUp={(e) => {
         const d = drag.current;

@@ -35,7 +35,7 @@ export function CameraBump({ spec, mats }: { spec: DeviceSpec; mats: FinishMater
   }, [bump]);
   const lenses = useMemo(() => {
     if (!bump) return { lenses: [] as { x: number; y: number; r: number }[], flash: null as { x: number; y: number } | null, dots: [] as { x: number; y: number; r: number }[] };
-    const big = spec.family === "tablet" ? 6.2 : bump.kind === "bar" ? 6.6 : 7.6;
+    const big = spec.family === "tablet" ? 6.2 : bump.kind === "bar" ? 6.6 : bump.kind === "lenses" ? 8.2 : 7.6;
     if (bump.kind === "pill") {
       return { lenses: [{ x: 0, y: bump.h / 4 + 0.5, r: big }, { x: 0, y: -bump.h / 4 - 0.5, r: big }], flash: { x: bump.w / 2 + 6, y: bump.h / 4 + 2 }, dots: [{ x: bump.w / 2 + 6, y: -1.5, r: 1 }] };
     }
@@ -47,7 +47,29 @@ export function CameraBump({ spec, mats }: { spec: DeviceSpec; mats: FinishMater
         dots: [{ x: bump.w / 2 - 10, y: -bump.h / 4 - 1, r: 2.6 }, { x: bump.w / 2 - 20, y: -bump.h / 4 - 1, r: 1 }],
       };
     }
-    if (bump.kind === "bar") return { lenses: [{ x: -bump.w / 2 + bump.h / 2, y: 0, r: big }], flash: { x: bump.w / 2 - 8, y: 0 }, dots: [{ x: 0, y: 0, r: 1 }] };
+    if (bump.kind === "bar") {
+      // a Pixel-style bar carries its lenses spread along it; a one-lens bar keeps it at the end
+      if (bump.lenses > 1) {
+        const gap = big * 2.4;
+        const cx = -((bump.lenses - 1) * gap) / 2 - 4;
+        return {
+          lenses: Array.from({ length: bump.lenses }, (_, i) => ({ x: cx + i * gap, y: 0, r: big })),
+          flash: { x: bump.w / 2 - 9, y: 0 },
+          dots: [{ x: bump.w / 2 - 17, y: 0, r: 1.6 }],
+        };
+      }
+      return { lenses: [{ x: -bump.w / 2 + bump.h / 2, y: 0, r: big }], flash: { x: bump.w / 2 - 8, y: 0 }, dots: [{ x: 0, y: 0, r: 1 }] };
+    }
+    if (bump.kind === "lenses") {
+      // bare rings on the back glass, stacked down the corner, with the flash below them
+      const gap = big * 2.5;
+      const cy = ((bump.lenses - 1) * gap) / 2;
+      return {
+        lenses: Array.from({ length: bump.lenses }, (_, i) => ({ x: 0, y: cy - i * gap, r: big })),
+        flash: { x: 0, y: cy - bump.lenses * gap },
+        dots: [{ x: 0, y: cy - bump.lenses * gap - 7, r: 1.6 }],
+      };
+    }
     return { lenses: [{ x: 0, y: 0, r: big }], flash: { x: bump.w / 2 + 5, y: 0 }, dots: [] };
   }, [bump, spec.family]);
   const lensElement = useMemo(() => new THREE.MeshPhysicalMaterial({ color: "#12101c", metalness: 0.4, roughness: 0.04, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 2.2 }), []);
@@ -59,7 +81,7 @@ export function CameraBump({ spec, mats }: { spec: DeviceSpec; mats: FinishMater
   const top = bump.depth * S;
   return (
     <group position={[x, y, -d / 2 + 0.01 * S]} rotation={[0, Math.PI, 0]}>
-      <mesh geometry={geo} material={bump.kind === "plateau" ? mats.frame : mats.back} castShadow />
+      {bump.kind !== "lenses" && <mesh geometry={geo} material={bump.kind === "plateau" ? mats.frame : mats.back} castShadow />}
       {lenses.lenses.map((l, i) => (
         <group key={i} position={[l.x * S, l.y * S, top]}>
           <mesh geometry={lensGeoCache} material={mats.lensRing} rotation={[Math.PI / 2, 0, 0]} scale={[l.r * S, 1.7 * S, l.r * S]} position={[0, 0, 0.85 * S]} />

@@ -23,7 +23,7 @@ export class ScreenSurface {
   chrome: ScreenChrome = { kind: "none" };
   private lastVideoTime = -1;
   private placeholderKey = "";
-  bg: { color: string; image: HTMLImageElement | null } = { color: "#000000", image: null };
+  bg: { color: string; image: HTMLImageElement | HTMLCanvasElement | null } = { color: "#000000", image: null };
   statusBar = false;
   private probe: HTMLCanvasElement | null = null;
   private avg: HTMLCanvasElement | null = null;
@@ -64,7 +64,7 @@ export class ScreenSurface {
     if (changed) this.draw(true);
   }
 
-  setBackground(color: string, image: HTMLImageElement | null) {
+  setBackground(color: string, image: HTMLImageElement | HTMLCanvasElement | null) {
     if (color === this.bg.color && image === this.bg.image) return;
     this.bg = { color, image };
     this.draw(true);
@@ -107,8 +107,10 @@ export class ScreenSurface {
     ctx.fillRect(0, top, width, areaH);
     if (this.bg.image) {
       const bi = this.bg.image;
-      const bs = Math.max(width / bi.naturalWidth, areaH / bi.naturalHeight);
-      const bw = bi.naturalWidth * bs, bh = bi.naturalHeight * bs;
+      const iw = "naturalWidth" in bi ? bi.naturalWidth : bi.width;
+      const ih = "naturalHeight" in bi ? bi.naturalHeight : bi.height;
+      const bs = Math.max(width / iw, areaH / ih);
+      const bw = iw * bs, bh = ih * bs;
       ctx.drawImage(bi, (width - bw) / 2, top + (areaH - bh) / 2, bw, bh);
     }
     let dw = width, dh = areaH, dx = 0, dy = top;

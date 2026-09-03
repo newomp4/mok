@@ -57,23 +57,37 @@ export function Chip({ children, tone = "muted", className }: { children: ReactN
 }
 
 /* ---------- click outside ---------- */
+// every enabled layer registers here in the order it opened, so Escape can be handled by
+// the innermost one alone instead of collapsing a dropdown and the popover holding it
+const layers: object[] = [];
+
 export function useClickOutside(refs: React.RefObject<HTMLElement | null>[], onOutside: () => void, enabled = true) {
+  // callers pass a fresh array and a fresh callback on every render; reading them through
+  // a ref keeps a layer at the stack position it was opened at
+  const latest = useRef({ refs, onOutside });
+  latest.current = { refs, onOutside };
   useEffect(() => {
     if (!enabled) return;
+    const layer = {};
+    layers.push(layer);
     const handler = (e: PointerEvent) => {
       const t = e.target as Node;
-      if (refs.some((r) => r.current && r.current.contains(t))) return;
+      if (latest.current.refs.some((r) => r.current && r.current.contains(t))) return;
       if (t instanceof Element && t.closest("[data-popover-layer]")) return;
-      onOutside();
+      latest.current.onOutside();
     };
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") onOutside(); };
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || layers[layers.length - 1] !== layer) return;
+      latest.current.onOutside();
+    };
     document.addEventListener("pointerdown", handler, true);
     document.addEventListener("keydown", key);
     return () => {
+      layers.splice(layers.indexOf(layer), 1);
       document.removeEventListener("pointerdown", handler, true);
       document.removeEventListener("keydown", key);
     };
-  }, [refs, onOutside, enabled]);
+  }, [enabled]);
 }
 
 /* ---------- Popover ---------- */
@@ -89,7 +103,9 @@ export function Popover({
   useLayoutEffect(() => {
     if (!open || !anchor.current) return;
     const compute = () => {
-      const r = anchor.current!.getBoundingClientRect();
+      const el = anchor.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
       const pw = panel.current?.offsetWidth ?? 0;
       const ph = panel.current?.offsetHeight ?? 0;
       let left = align === "start" ? r.left : align === "end" ? r.right - pw : r.left + r.width / 2 - pw / 2;
@@ -97,13 +113,20 @@ export function Popover({
       let top = side === "bottom" ? r.bottom + offset : r.top - offset - ph;
       if (side === "bottom" && top + ph > window.innerHeight - 8) top = Math.max(8, window.innerHeight - ph - 8);
       if (top < 8) top = 8;
-      setPos({ left, top });
+      setPos((prev) => (prev && prev.left === left && prev.top === top ? prev : { left, top }));
     };
     compute();
     const ro = new ResizeObserver(compute);
     if (panel.current) ro.observe(panel.current);
     window.addEventListener("resize", compute);
-    return () => { ro.disconnect(); window.removeEventListener("resize", compute); };
+    // the anchor usually sits in a scroll container such as the inspector column, and the
+    // panel is fixed-positioned in a portal, so it has to be re-placed as that container moves
+    window.addEventListener("scroll", compute, true);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", compute);
+      window.removeEventListener("scroll", compute, true);
+    };
   }, [open, anchor, align, side, offset]);
   if (!open) return null;
   return createPortal(
@@ -327,6 +350,8 @@ export function NumberRow({
   const [text, setText] = useState("");
   const ref = useRef<HTMLDivElement>(null);
   const drag = useRef<{ x: number; v: number; moved: boolean } | null>(null);
+  const dragEnd = useRef(onDragEnd);
+  dragEnd.current = onDragEnd;
   const d = digits ?? (step >= 1 ? 0 : step >= 0.1 ? 1 : step >= 0.01 ? 2 : 3);
   const pct = max > min ? clamp((value - min) / (max - min), 0, 1) : 0;
 
@@ -352,13 +377,22 @@ export function NumberRow({
     const fine = e.shiftKey ? 0.1 : 1;
     commit(drag.current.v + (dx / width) * range * sens * fine);
   };
-  const onPointerUp = (e: React.PointerEvent) => {
+  const cancelDrag = useCallback(() => {
     if (!drag.current) return;
     const moved = drag.current.moved;
     drag.current = null;
     document.body.style.cursor = "";
-    if (moved) onDragEnd?.();
-    else {
+    if (moved) dragEnd.current?.();
+  }, []);
+  // a row can be torn out from under a live drag (playback moving the playhead into a shot
+  // whose inspector hides this section), and a detached element never gets its pointerup,
+  // so the interaction the drag opened would stay open forever
+  useEffect(() => () => cancelDrag(), [cancelDrag]);
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (!drag.current) return;
+    const moved = drag.current.moved;
+    cancelDrag();
+    if (!moved) {
       setText(value.toFixed(d));
       setEditing(true);
     }
@@ -377,13 +411,15 @@ export function NumberRow({
         tabIndex={disabled ? -1 : 0}
         onKeyDown={(e) => {
           if (disabled) return;
-          if (e.key === "ArrowUp" || e.key === "ArrowRight") { e.preventDefault(); nudge(1, e.shiftKey); }
-          else if (e.key === "ArrowDown" || e.key === "ArrowLeft") { e.preventDefault(); nudge(-1, e.shiftKey); }
+          if (e.key === "ArrowUp" || e.key === "ArrowRight") { e.preventDefault(); e.stopPropagation(); nudge(1, e.shiftKey); }
+          else if (e.key === "ArrowDown" || e.key === "ArrowLeft") { e.preventDefault(); e.stopPropagation(); nudge(-1, e.shiftKey); }
           else if (e.key === "Enter") { e.preventDefault(); setText(value.toFixed(d)); setEditing(true); }
         }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={cancelDrag}
+        onLostPointerCapture={cancelDrag}
         onDoubleClick={() => { if (!disabled) { setText(value.toFixed(d)); setEditing(true); } }}
         className={cn("relative flex h-8 flex-1 cursor-ew-resize items-center justify-between overflow-hidden rounded-md bg-fill px-2.5 outline-none focus-visible:ring-2 focus-visible:ring-accent/60", disabled && "pointer-events-none opacity-40")}
       >
@@ -409,9 +445,17 @@ export function NumberRow({
 }
 
 /* ---------- Color row ---------- */
-export function ColorRow({ label, value, onChange }: { label: ReactNode; value: string; onChange: (v: string) => void }) {
+export function ColorRow({ label, value, onChange, onDragStart, onDragEnd }: { label: ReactNode; value: string; onChange: (v: string) => void; onDragStart?: () => void; onDragEnd?: () => void }) {
   const [text, setText] = useState(value);
+  const picking = useRef<number | null>(null);
   useEffect(() => setText(value), [value]);
+  // the native picker fires continuously while dragging; collapse that into one history step
+  const live = (v: string) => {
+    if (picking.current === null) onDragStart?.();
+    else window.clearTimeout(picking.current);
+    picking.current = window.setTimeout(() => { picking.current = null; onDragEnd?.(); }, 400);
+    onChange(v);
+  };
   return (
     <div className="flex h-8 items-center justify-between rounded-md bg-fill px-2.5">
       <span className="label text-fg-2">{label}</span>
@@ -424,7 +468,7 @@ export function ColorRow({ label, value, onChange }: { label: ReactNode; value: 
           onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
         />
         <label className="relative h-4 w-4 cursor-pointer overflow-hidden rounded border border-black/10" style={{ background: value }}>
-          <input type="color" value={value} onChange={(e) => onChange(e.target.value)} className="absolute inset-0 cursor-pointer opacity-0" />
+          <input type="color" value={value} onChange={(e) => live(e.target.value)} className="absolute inset-0 cursor-pointer opacity-0" />
         </label>
       </span>
     </div>

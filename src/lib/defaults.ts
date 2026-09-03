@@ -56,7 +56,7 @@ export function createProject(): Project {
     },
     mockup: { device: "iphone-17-pro-glb", finish: "model", reflection: 0.99, gloss: 1.4, borderRadius: 0.04, rotX: 0, rotY: 8, rotZ: 0, lid: 110, notch: true, caseKeyboard: true, bandColor: null },
     camera: { x: -22, y: -18, z: 0, fov: 24, zoom: 1.12, panX: 0.02, panY: -0.02 },
-    blur: { mode: "radial", strength: 6, focusSize: 0.42, falloff: 0.4, bokeh: true, focusX: 0.5, focusY: 0.4, focusDistance: 0 },
+    blur: { mode: "radial", strength: 6, focusSize: 0.42, falloff: 0.4, bokeh: true, focusX: 0.5, focusY: 0.4, focusDistance: 0, angle: 0 },
     screen: { brightness: 1, bg: { type: "color", color: "#000000", image: null }, statusBar: false },
     effects: [],
     shots: [createShot("Shot 1", 3), createShot("Shot 2", 3)],
@@ -75,6 +75,7 @@ export function normalizeProject(p: Project): Project {
   p.screen.bg ??= { type: "color", color: "#000000", image: null };
   p.screen.statusBar ??= false;
   p.blur.focusDistance ??= 0;
+  p.blur.angle ??= 0;
   p.scene.shadowSoft ??= 0.5;
   p.scene.shadowOpacity ??= 0.5;
   p.audio ??= null;

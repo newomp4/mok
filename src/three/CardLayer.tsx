@@ -101,6 +101,18 @@ export function enterExitAt(shot: Shot, t: number): { opacity: number; dx: numbe
 
 function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxW: number): string[] {
   const out: string[] = [];
+  // a single token (a url, a hashtag) can be wider than the card, so break it rather than let it
+  // run off both edges
+  const push = (line: string) => {
+    let rest = line;
+    while (rest.length > 1 && ctx.measureText(rest).width > maxW) {
+      let n = 1;
+      while (n < rest.length && ctx.measureText(rest.slice(0, n + 1)).width <= maxW) n++;
+      out.push(rest.slice(0, n));
+      rest = rest.slice(n);
+    }
+    out.push(rest);
+  };
   for (const para of text.split("\n")) {
     const words = para.split(/\s+/).filter(Boolean);
     if (!words.length) { out.push(""); continue; }
@@ -108,9 +120,9 @@ function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxW: number): s
     for (let i = 1; i < words.length; i++) {
       const test = `${line} ${words[i]}`;
       if (ctx.measureText(test).width <= maxW) line = test;
-      else { out.push(line); line = words[i]; }
+      else { push(line); line = words[i]; }
     }
-    out.push(line);
+    push(line);
   }
   return out;
 }
@@ -119,14 +131,27 @@ const fontsPending = new Set<string>();
 
 function drawText(ctx: CanvasRenderingContext2D, W: number, H: number, st: TextStyle) {
   ctx.clearRect(0, 0, W, H);
-  const px = Math.max(4, st.size * H);
-  ctx.font = `${st.weight} ${px}px ${cssFamily(st.font)}`;
   ctx.textBaseline = "middle";
   ctx.textAlign = st.align;
-  try { (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${st.letterSpacing}em`; } catch {}
   ctx.fillStyle = st.color;
   const pad = W * 0.08;
-  const lines = wrapLines(ctx, st.text, W - pad * 2);
+  const maxW = W - pad * 2;
+  const maxH = H * 0.84;
+  // em letter spacing resolves against the font that is set when it is assigned, so both move together
+  const setSize = (size: number) => {
+    ctx.font = `${st.weight} ${size}px ${cssFamily(st.font)}`;
+    try { (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${st.letterSpacing}em`; } catch {}
+  };
+  // shrink to fit: the canvas is exactly the frame, so a block that is too tall would simply be
+  // drawn past the top and bottom edges
+  let px = Math.max(4, st.size * H);
+  setSize(px);
+  let lines = wrapLines(ctx, st.text, maxW);
+  while (px > 4 && lines.length * px * st.lineHeight > maxH) {
+    px = Math.max(4, px * 0.94);
+    setSize(px);
+    lines = wrapLines(ctx, st.text, maxW);
+  }
   const lh = px * st.lineHeight;
   const total = lh * lines.length;
   const x = st.align === "left" ? pad : st.align === "right" ? W - pad : W / 2;
@@ -158,6 +183,43 @@ function drawLogo(ctx: CanvasRenderingContext2D, W: number, H: number, st: LogoS
   if (w > W * 0.9) { w = W * 0.9; h = w / ar; }
   ctx.drawImage(el, W / 2 - w / 2, H / 2 - h / 2, w, h);
   return true;
+}
+
+// NeutralToneMapping, mirrored from three's tone mapping chunk
+const TONE_START = 0.76;
+const TONE_KNEE = 0.24;
+const TONE_DESAT = 0.15;
+const TONE_MAX = 0.98;
+
+/**
+ * Sets a colour so it survives the frame-wide tone mapping pass unchanged. The composer runs
+ * NeutralToneMapping over the composed image rather than per material, so `toneMapped: false` has
+ * nothing left to switch off and these full-frame layers have to invert the curve themselves.
+ * Highlights are compressed towards a desaturated peak and not all of them are reachable; a colour
+ * that is out of reach becomes the brightest version of the same hue that the curve can still hit.
+ */
+export function setToneMapped(target: THREE.Color, hex: string) {
+  target.set(hex);
+  let { r, g, b } = target;
+  const peak = Math.max(r, g, b);
+  if (peak > TONE_START) {
+    // brightest peak that still leaves every channel of this hue reachable, from solving the
+    // curve's desaturation term for the colour's min/peak ratio
+    const ratio = Math.min(r, g, b) / peak;
+    const q = ratio / (TONE_DESAT * Math.max(1e-6, 1 - ratio)) + 2 * TONE_KNEE;
+    const reach = 1 - (q - Math.sqrt(Math.max(0, q * q - 4 * TONE_KNEE * TONE_KNEE))) / 2;
+    const out = Math.min(peak, reach, TONE_MAX);
+    const inPeak = TONE_START - TONE_KNEE + (TONE_KNEE * TONE_KNEE) / (1 - out);
+    const k = TONE_DESAT * (inPeak - out) + 1;
+    const desat = 1 - 1 / k;
+    const scale = out / peak;
+    const un = (v: number) => (v * scale - out * desat) * k * inPeak / out;
+    r = un(r); g = un(g); b = un(b);
+  }
+  // the curve also subtracts a toe offset from every channel, which is what crushes near-blacks
+  const low = Math.min(r, g, b);
+  const toe = low >= 0.04 ? 0.04 : Math.sqrt(Math.max(0, low)) / 2.5 - low;
+  target.setRGB(r + toe, g + toe, b + toe);
 }
 
 /**
@@ -194,8 +256,7 @@ export function CardLayer() {
   useFrame((state) => {
     const shot = anim.shot;
     const kind = shotKind(shot);
-    const active = !!shot && kind !== "media";
-    anim.card = active;
+    const active = anim.card;
     const bg = bgRef.current, content = contentRef.current;
     if (!bg || !content) return;
     bg.visible = active;
@@ -220,12 +281,12 @@ export function CardLayer() {
       const def = getFont(st.font);
       fontKey = def.builtin ? "" : fontKeyOf(st.font, st.weight);
       sig += `${st.text}|${st.font}|${st.weight}|${st.size}|${st.color}|${st.align}|${st.lineHeight}|${st.letterSpacing}|${isFontReady(st.font, st.weight) ? "ready" : "fallback"}`;
-      bgMat.color.set(st.background);
+      setToneMapped(bgMat.color, st.background);
     } else if (kind === "logo" && shot.logo) {
       const st = shot.logo;
       const loaded = st.media ? getMedia(st.media.id) : null;
-      sig += `${st.media?.id ?? "none"}|${loaded ? "loaded" : "pending"}|${st.scale}`;
-      bgMat.color.set(st.background);
+      sig += `${st.media?.id ?? "none"}|${loaded ? "loaded" : "pending"}|${st.scale}|${st.background}`;
+      setToneMapped(bgMat.color, st.background);
       effect = EFFECT_INDEX[st.effect] ?? 0;
     }
     if (sig !== lastSig.current) {
@@ -269,6 +330,7 @@ export function FadeOverlay() {
   const ref = useRef<THREE.Mesh>(null);
   const mat = useMemo(() => new THREE.MeshBasicMaterial({ color: "#000000", transparent: true, opacity: 0, toneMapped: false, depthTest: false, depthWrite: false }), []);
   const geo = useMemo(() => new THREE.PlaneGeometry(1, 1), []);
+  const raw = useMemo(() => new THREE.Color(), []);
   useEffect(() => () => { mat.dispose(); geo.dispose(); }, [mat, geo]);
   useFrame((state) => {
     const m = ref.current;
@@ -283,7 +345,11 @@ export function FadeOverlay() {
     m.scale.set(viewH * aspect * 1.05, viewH * 1.05, 1);
     m.position.set(0, 0, -z);
     mat.opacity = a;
-    mat.color.set(anim.fadeColor);
+    setToneMapped(mat.color, anim.fadeColor);
+    // the compensation is what makes a fade to white actually land on white, but applied flat it
+    // would brighten every step of the way there, so it eases in as the fade closes
+    raw.set(anim.fadeColor);
+    mat.color.lerpColors(raw, mat.color, a * a);
   }, -9);
   return <mesh ref={ref} geometry={geo} material={mat} renderOrder={1000} frustumCulled={false} visible={false} />;
 }

@@ -39,14 +39,16 @@ export function ExportButton() {
 
   const imgDims = useMemo((): [number, number] => {
     if (imageState.size === "custom") return [even(imageState.customW, 7680), even(imageState.customH, 7680)];
-    const long = EXPORT_SIZES.find((s) => s.id === imageState.size)?.long ?? 1920;
-    return exportSizeFor(project.aspect, long, ui.viewport, fixed ? undefined : imageState.orientation);
+    const size = EXPORT_SIZES.find((s) => s.id === imageState.size);
+    if (size?.px) return size.px;
+    return exportSizeFor(project.aspect, size?.long ?? 1920, ui.viewport, fixed ? undefined : imageState.orientation);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.aspect, ui.viewport, imageState.size, imageState.orientation, imageState.customW, imageState.customH, fixed]);
   const vidDims = useMemo((): [number, number] => {
     if (videoState.size === "custom") return [even(videoState.customW, 3840), even(videoState.customH, 3840)];
-    const long = EXPORT_SIZES.find((s) => s.id === videoState.size)?.long ?? 1920;
-    return exportSizeFor(project.aspect, long, ui.viewport, fixed ? undefined : videoState.orientation);
+    const size = EXPORT_SIZES.find((s) => s.id === videoState.size);
+    if (size?.px) return size.px;
+    return exportSizeFor(project.aspect, size?.long ?? 1920, ui.viewport, fixed ? undefined : videoState.orientation);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.aspect, ui.viewport, videoState.size, videoState.orientation, videoState.customW, videoState.customH, fixed]);
 
@@ -113,7 +115,7 @@ export function ExportButton() {
             <Label>Orientation</Label>
             <Segmented size="sm" value={fixed ? fixedOrientation : imageState.orientation} onChange={(v) => { imageState.orientation = v; rerender(); }} options={orientationOptions.map((o) => ({ ...o, disabled: fixed && o.value !== fixedOrientation }))} />
             <Label>Size</Label>
-            <SelectRow label="Size" value={imageState.size} onChange={(v) => { imageState.size = v; rerender(); }} options={[...EXPORT_SIZES.map((s) => ({ value: s.id, label: s.label, sub: `${exportSizeFor(project.aspect, s.long, ui.viewport, fixed ? undefined : imageState.orientation).join(" × ")}` })), { value: "custom", label: "Custom…", sub: "up to 7680" }]} />
+            <SelectRow label="Size" value={imageState.size} onChange={(v) => { imageState.size = v; rerender(); }} options={[...EXPORT_SIZES.filter((s) => !s.video).map((s) => ({ value: s.id, label: s.label, sub: s.px ? s.px.join(" × ") : `${exportSizeFor(project.aspect, s.long, ui.viewport, fixed ? undefined : imageState.orientation).join(" × ")}` })), { value: "custom", label: "Custom…", sub: "up to 7680" }]} />
             {imageState.size === "custom" && (
               <div className="grid grid-cols-2 gap-1.5">
                 <NumberRow label="W" value={imageState.customW} min={16} max={7680} step={2} onChange={(v) => { imageState.customW = v; rerender(); }} />
@@ -128,7 +130,7 @@ export function ExportButton() {
             <Label>Orientation</Label>
             <Segmented size="sm" value={fixed ? fixedOrientation : videoState.orientation} onChange={(v) => { videoState.orientation = v; rerender(); }} options={orientationOptions.map((o) => ({ ...o, disabled: fixed && o.value !== fixedOrientation }))} />
             <Label>Size</Label>
-            <SelectRow label="Size" value={videoState.size} onChange={(v) => { videoState.size = v; rerender(); }} options={[...EXPORT_SIZES.filter((s) => s.id !== "4320").map((s) => ({ value: s.id, label: s.label, sub: `${exportSizeFor(project.aspect, s.long, ui.viewport, fixed ? undefined : videoState.orientation).join(" × ")}` })), { value: "custom", label: "Custom…", sub: "up to 3840" }]} />
+            <SelectRow label="Size" value={videoState.size} onChange={(v) => { videoState.size = v; rerender(); }} options={[...EXPORT_SIZES.filter((s) => s.id !== "4320" && !(s.store && !s.video)).map((s) => ({ value: s.id, label: s.label, sub: s.px ? s.px.join(" × ") : `${exportSizeFor(project.aspect, s.long, ui.viewport, fixed ? undefined : videoState.orientation).join(" × ")}` })), { value: "custom", label: "Custom…", sub: "up to 3840" }]} />
             {videoState.size === "custom" && (
               <div className="grid grid-cols-2 gap-1.5">
                 <NumberRow label="W" value={videoState.customW} min={16} max={3840} step={2} onChange={(v) => { videoState.customW = v; rerender(); }} />

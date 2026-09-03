@@ -92,7 +92,9 @@ export const useUI = create<UIState>()(subscribeWithSelector((set, get) => ({
   activeShotId: null,
   theme: "light",
   timelineOpen: true,
-  timelineMode: "advanced",
+  timelineMode: (() => {
+    try { return localStorage.getItem("mok:timelineMode") === "simple" ? "simple" : "advanced"; } catch { return "advanced"; }
+  })() as "simple" | "advanced",
   timelineZoom: 1,
   picker: null,
   cameraTab: "manual",
@@ -137,7 +139,7 @@ export const useUI = create<UIState>()(subscribeWithSelector((set, get) => ({
   },
   toggleTheme: () => get().setTheme(get().theme === "dark" ? "light" : "dark"),
   setTimelineOpen: (timelineOpen) => set({ timelineOpen }),
-  setTimelineMode: (timelineMode) => set({ timelineMode }),
+  setTimelineMode: (timelineMode) => { set({ timelineMode }); try { localStorage.setItem("mok:timelineMode", timelineMode); } catch {} },
   setTimelineZoom: (timelineZoom) => set({ timelineZoom }),
   setPicker: (picker) => set({ picker }),
   setCameraTab: (cameraTab) => set({ cameraTab }),

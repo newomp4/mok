@@ -5,7 +5,7 @@ import { ViewportPane } from "./ViewportPane";
 import { Inspector } from "./Inspector";
 import { Timeline } from "./Timeline";
 import { Modals } from "./Modals";
-import { useAutosave, useBootstrap, usePasteImport, useShortcuts } from "./hooks";
+import { useAutosave, useBootstrap, usePasteImport, useShortcuts, useMediaPrune } from "./hooks";
 import { Modal, ProgressBar, Button } from "@/components/ui";
 import { useAudioPlayback } from "@/lib/audio";
 import { Tour } from "./Tour";
@@ -35,6 +35,7 @@ function ExportProgress() {
 export default function Editor() {
   useBootstrap();
   useAutosave();
+  useMediaPrune();
   usePasteImport();
   useShortcuts();
   useAudioPlayback();

@@ -1,16 +1,20 @@
-import { Effect, KawaseBlurPass, KernelSize, LensDistortionEffect, Resolution } from "postprocessing";
+import { Effect, EffectAttribute, KawaseBlurPass, KernelSize, LensDistortionEffect, Resolution } from "postprocessing";
 import * as THREE from "three";
 
 const focusFrag = /* glsl */ `
 uniform sampler2D map;
 uniform vec4 params;   // focusX, focusY, size, falloff
 uniform float mode;    // 0 = radial, 1 = linear (tilt shift), 2 = directional
+uniform float active;  // mask gain, 0 while the strength is zero
 uniform float uAspect;
 uniform vec2 dir;      // directional blur vector (texel units × strength)
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+  // the blurred copy is half resolution, so at zero strength the frame has to pass straight
+  // through rather than pick up the softness of the downsample
+  if (active <= 0.0) { outputColor = inputColor; return; }
   vec2 p = (uv - params.xy) * vec2(uAspect, 1.0);
   float d = mode < 0.5 ? length(p) : (mode < 1.5 ? abs(p.y) : length(p));
-  float m = smoothstep(params.z, params.z + max(params.w, 0.001), d);
+  float m = smoothstep(params.z, params.z + max(params.w, 0.001), d) * active;
   vec4 b;
   if (mode > 1.5) {
     // 1-D blur along dir, masked by the focus like the other modes
@@ -31,6 +35,7 @@ export class FocusBlurEffect extends Effect {
   renderTarget: THREE.WebGLRenderTarget;
   blurPass: KawaseBlurPass;
   resolution: Resolution;
+  blurring = true;
 
   constructor() {
     super("FocusBlurEffect", focusFrag, {
@@ -38,6 +43,7 @@ export class FocusBlurEffect extends Effect {
         ["map", new THREE.Uniform(null)],
         ["params", new THREE.Uniform(new THREE.Vector4(0.5, 0.5, 0.4, 0.2))],
         ["mode", new THREE.Uniform(0)],
+        ["active", new THREE.Uniform(1)],
         ["uAspect", new THREE.Uniform(1)],
         ["dir", new THREE.Uniform(new THREE.Vector2(0, 0))],
       ]),
@@ -60,9 +66,15 @@ export class FocusBlurEffect extends Effect {
     const k = bokeh ? KernelSize.HUGE : KernelSize.LARGE;
     if (this.blurPass.kernelSize !== k) this.blurPass.kernelSize = k;
     this.blurPass.scale = Math.max(0.0001, (strength / 10) * (bokeh ? 1.2 : 1.6));
+    // ease the mask in over the first sliver of strength so the half-resolution copy does not
+    // land on the frame the instant the slider leaves zero
+    const gain = Math.min(1, strength / 0.25);
+    this.blurring = gain > 0;
+    this.uniforms.get("active")!.value = gain;
   }
 
   update(renderer: THREE.WebGLRenderer, inputBuffer: THREE.WebGLRenderTarget) {
+    if (!this.blurring) return;
     this.blurPass.render(renderer, inputBuffer, this.renderTarget);
   }
 
@@ -152,27 +164,97 @@ export function createLensDistortion(): LensDistortionEffect {
 }
 
 const ghostFrag = /* glsl */ `
+uniform sampler2D map;
 uniform vec2 offset;
 uniform float opacity;
-void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
-  vec4 g = texture2D(inputBuffer, clamp(uv + offset, 0.0, 1.0));
-  outputColor = vec4(max(inputColor.rgb, g.rgb * opacity), inputColor.a);
+uniform float softened;
+uniform float ignoreDepth;
+void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
+  vec2 guv = clamp(uv + offset, 0.0, 1.0);
+  vec4 g = mix(texture2D(inputBuffer, guv), texture2D(map, guv), softened);
+  // the echo is a copy of the mockup set down a step behind it, so it may only show where the
+  // surface under this pixel is further away than the one the copy was taken from. That keeps the
+  // echo off the device and on the backdrop instead of lighting the device up.
+  float src = readDepth(guv);
+  // measured against how far the copied surface sits from the backdrop, so the test does not care
+  // which near / far planes the camera rig picked this frame
+  float span = max(1.0 - src, 1e-4) * 0.35;
+  // text and logo cards draw with the depth test off, so nothing in the frame is behind anything
+  // else; there the echo simply lays over the whole card instead of vanishing
+  float a = opacity * (ignoreDepth > 0.5 ? 1.0 : smoothstep(0.0, span, depth - src));
+  // a transparent render has no backdrop to blend into, so the echo brings its own coverage
+  outputColor = vec4(mix(inputColor.rgb, g.rgb, a), max(inputColor.a, g.a * a));
 }`;
 
-/** Double-exposure echo of the frame, offset in a direction. */
+/** Double-exposure echo of the frame, offset in a direction, softened by its own blur and kept behind the mockup. */
 export class GhostEffect extends Effect {
+  renderTarget: THREE.WebGLRenderTarget;
+  blurPass: KawaseBlurPass;
+  resolution: Resolution;
+  blurring = false;
+
   constructor() {
     super("GhostEffect", ghostFrag, {
+      // the composite reads the scene depth to decide what the echo is allowed to sit behind
+      attributes: EffectAttribute.DEPTH,
       uniforms: new Map<string, THREE.Uniform>([
+        ["map", new THREE.Uniform(null)],
         ["offset", new THREE.Uniform(new THREE.Vector2(0.014, 0.014))],
         ["opacity", new THREE.Uniform(0.35)],
+        ["softened", new THREE.Uniform(0)],
+        ["ignoreDepth", new THREE.Uniform(0)],
       ]),
     });
+    this.renderTarget = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false });
+    this.renderTarget.texture.name = "Ghost.Target";
+    this.uniforms.get("map")!.value = this.renderTarget.texture;
+    this.blurPass = new KawaseBlurPass({ kernelSize: KernelSize.MEDIUM, resolutionScale: 0.5 });
+    this.resolution = new Resolution(this, Resolution.AUTO_SIZE, Resolution.AUTO_SIZE, 0.5);
+    this.resolution.addEventListener("change", () => this.setSize(this.resolution.baseWidth, this.resolution.baseHeight));
   }
-  set(offset: number, angleDeg: number, opacity: number) {
+
+  set(offset: number, angleDeg: number, opacity: number, blur: number) {
     const a = (angleDeg * Math.PI) / 180;
     (this.uniforms.get("offset")!.value as THREE.Vector2).set(Math.cos(a) * offset, Math.sin(a) * offset);
     this.uniforms.get("opacity")!.value = opacity;
+    // A crisp echo samples the frame directly; the half-resolution copy only comes into play once
+    // there is some blur to justify it. The crossfade between the two is ramped over the first
+    // slider step so the echo does not pop the moment the value leaves zero, the same way the
+    // focus blur ramps its own gain in.
+    this.blurring = blur > 0.001;
+    this.uniforms.get("softened")!.value = Math.min(1, blur / 0.06);
+    this.blurPass.scale = Math.max(0.0001, blur * 3);
+  }
+
+  /** True on shots that render no depth (text / logo cards), where the echo cannot be placed behind anything. */
+  set ignoreDepth(v: boolean) { this.uniforms.get("ignoreDepth")!.value = v ? 1 : 0; }
+
+  update(renderer: THREE.WebGLRenderer, inputBuffer: THREE.WebGLRenderTarget) {
+    if (!this.blurring) return;
+    this.blurPass.render(renderer, inputBuffer, this.renderTarget);
+  }
+
+  setSize(width: number, height: number) {
+    const r = this.resolution;
+    r.setBaseSize(width, height);
+    this.renderTarget.setSize(r.width, r.height);
+    this.blurPass.resolution.copy(r);
+  }
+
+  initialize(renderer: THREE.WebGLRenderer, alpha: boolean, frameBufferType: THREE.TextureDataType) {
+    this.blurPass.initialize(renderer, alpha, frameBufferType);
+    if (frameBufferType !== undefined) {
+      this.renderTarget.texture.type = frameBufferType;
+      if (renderer !== null && renderer.outputColorSpace === THREE.SRGBColorSpace) {
+        this.renderTarget.texture.colorSpace = THREE.SRGBColorSpace;
+      }
+    }
+  }
+
+  dispose() {
+    this.renderTarget.dispose();
+    this.blurPass.dispose();
+    super.dispose();
   }
 }
 
@@ -182,6 +264,8 @@ uniform vec2 halfSize;  // 0..1 (of width / height)
 uniform float radius;   // fraction of the shorter side
 uniform float refraction;
 uniform float tint;
+uniform float dispersion;
+uniform float shine;
 uniform float uAspect;
 float sdRoundRect(vec2 p, vec2 b, float r) {
   vec2 q = abs(p) - b + vec2(r);
@@ -199,14 +283,20 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   float e = 0.002;
   vec2 grad = normalize(vec2(sdRoundRect(p + vec2(e, 0.0), b, r) - sdRoundRect(p - vec2(e, 0.0), b, r), sdRoundRect(p + vec2(0.0, e), b, r) - sdRoundRect(p - vec2(0.0, e), b, r)) + 1e-6);
   vec2 shift = (grad * (0.35 * edge + 0.08) + p * 0.06) * refraction * 0.06 / asp;
-  vec3 col = texture2D(inputBuffer, clamp(uv - shift, 0.0, 1.0)).rgb;
+  // thick glass bends the wavelengths apart where it bends hardest, so the rainbow lives in
+  // the edge band and the centre stays a single crisp sample
+  float disp = dispersion * edge;
+  vec3 col;
+  col.r = texture2D(inputBuffer, clamp(uv - shift * (1.0 + disp), 0.0, 1.0)).r;
+  col.g = texture2D(inputBuffer, clamp(uv - shift, 0.0, 1.0)).g;
+  col.b = texture2D(inputBuffer, clamp(uv - shift * (1.0 - disp), 0.0, 1.0)).b;
   // subtle brightening + a highlight along the top-left edge, shadow along bottom-right
   float light = dot(grad, normalize(vec2(-0.6, 0.8)));
   col = mix(col, col * (1.0 + 0.35 * tint) + vec3(0.06) * tint, 0.5);
-  col += vec3(0.28) * edge * max(light, 0.0) * (0.4 + tint);
+  col += vec3(0.28) * edge * max(light, 0.0) * (0.4 + tint) * shine;
   col -= vec3(0.12) * edge * max(-light, 0.0);
   float rim = 1.0 - smoothstep(0.0, 0.0035, -d);
-  col += vec3(0.35) * rim;
+  col += vec3(0.35) * rim * shine;
   outputColor = vec4(col, inputColor.a);
 }`;
 
@@ -220,16 +310,25 @@ export class LiquidGlassEffect extends Effect {
         ["radius", new THREE.Uniform(0.12)],
         ["refraction", new THREE.Uniform(0.5)],
         ["tint", new THREE.Uniform(0.12)],
+        ["dispersion", new THREE.Uniform(0.35)],
+        ["shine", new THREE.Uniform(1)],
         ["uAspect", new THREE.Uniform(1)],
       ]),
     });
   }
-  set(x: number, y: number, w: number, h: number, radius: number, refraction: number, tint: number) {
+  set(x: number, y: number, w: number, h: number, radius: number, refraction: number, tint: number, dispersion: number, shine: number) {
     (this.uniforms.get("center")!.value as THREE.Vector2).set(x, 1 - y);
     (this.uniforms.get("halfSize")!.value as THREE.Vector2).set(w / 2, h / 2);
     this.uniforms.get("radius")!.value = radius;
     this.uniforms.get("refraction")!.value = refraction;
     this.uniforms.get("tint")!.value = tint;
+    this.uniforms.get("dispersion")!.value = dispersion;
+    this.uniforms.get("shine")!.value = shine;
+  }
+  /** Places the pane straight in frame space (uv, y up), which is how cover mode tracks the mockup. */
+  setRect(centerX: number, centerY: number, halfW: number, halfH: number) {
+    (this.uniforms.get("center")!.value as THREE.Vector2).set(centerX, centerY);
+    (this.uniforms.get("halfSize")!.value as THREE.Vector2).set(halfW, halfH);
   }
   setSize(width: number, height: number) { this.uniforms.get("uAspect")!.value = width / Math.max(1, height); }
 }

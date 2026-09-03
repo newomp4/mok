@@ -1,13 +1,14 @@
 export type AspectId =
   | "fill" | "21:9" | "16:9" | "3:2" | "4:3" | "1:1" | "4:5" | "3:4" | "2:3" | "9:16"
-  | "as-iphone" | "as-ipad" | "as-mac" | "as-video-h" | "as-video-v";
+  | "as-iphone" | "as-ipad" | "as-mac" | "as-video-h" | "as-video-v"
+  | "ps-phone" | "ps-tablet-7" | "ps-tablet-10" | "ps-feature";
 
 export interface AspectDef {
   id: AspectId;
   label: string;
   /** width / height, null = fill viewport */
   ratio: number | null;
-  group: "ratio" | "appstore";
+  group: "ratio" | "appstore" | "playstore";
   /** fixed pixel size for app-store presets */
   px?: [number, number];
   sub?: string;
@@ -41,18 +42,18 @@ export const ANIM_PROPS = [
   "camera.x", "camera.y", "camera.z", "camera.fov", "camera.zoom", "camera.panX", "camera.panY",
   "mockup.rotX", "mockup.rotY", "mockup.rotZ", "mockup.lid",
   "scene.lightRotX", "scene.lightRotY", "scene.lightIntensity",
-  "blur.strength", "blur.focusSize", "blur.falloff", "blur.focusX", "blur.focusY", "blur.focusDistance",
+  "blur.strength", "blur.focusSize", "blur.falloff", "blur.focusX", "blur.focusY", "blur.focusDistance", "blur.angle",
   "screen.brightness",
 ] as const;
 export type AnimProp = (typeof ANIM_PROPS)[number];
 
 export const ANIM_LABELS: Record<AnimProp, string> = {
-  "camera.x": "Camera X", "camera.y": "Camera Y", "camera.z": "Camera Roll", "camera.fov": "FOV",
+  "camera.x": "Camera X", "camera.y": "Camera Y", "camera.z": "Camera roll", "camera.fov": "FOV",
   "camera.zoom": "Zoom", "camera.panX": "Pan X", "camera.panY": "Pan Y",
   "mockup.rotX": "Rotate X", "mockup.rotY": "Rotate Y", "mockup.rotZ": "Rotate Z", "mockup.lid": "Lid angle",
-  "scene.lightRotX": "Light Rot X", "scene.lightRotY": "Light Rot Y", "scene.lightIntensity": "Light Intensity",
-  "blur.strength": "Blur Strength", "blur.focusSize": "Focus Size", "blur.falloff": "Falloff",
-  "blur.focusX": "Focus X", "blur.focusY": "Focus Y", "blur.focusDistance": "Focus Distance", "screen.brightness": "Screen Brightness",
+  "scene.lightRotX": "Light rotation X", "scene.lightRotY": "Light rotation Y", "scene.lightIntensity": "Light intensity",
+  "blur.strength": "Blur strength", "blur.focusSize": "Focus size", "blur.falloff": "Falloff", "blur.angle": "Blur angle",
+  "blur.focusX": "Focus X", "blur.focusY": "Focus Y", "blur.focusDistance": "Focus distance", "screen.brightness": "Screen brightness",
 };
 
 export type FitMode = "cover" | "contain" | "stretch";
@@ -219,7 +220,7 @@ export interface Project {
   screen: {
     brightness: number;
     /** what shows behind media that does not fill the screen (contain fit) */
-    bg?: { type: "color" | "image"; color: string; image: MediaRef | null };
+    bg?: { type: "color" | "image" | "gradient"; color: string; image: MediaRef | null; preset?: string };
     /** paint an iOS-style status bar over the screen (phones) */
     statusBar?: boolean;
   };

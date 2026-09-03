@@ -2,6 +2,7 @@
 import { useEffect } from "react";
 import { useEditor } from "@/store/editor";
 import { useUI } from "@/store/ui";
+import { totalDuration } from "./animation";
 import { ensureMedia, getMedia, useMedia } from "./media";
 import type { AudioTrack } from "./types";
 
@@ -10,14 +11,30 @@ export function audioLength(track: AudioTrack): number {
   return Math.max(0, (track.media.duration ?? 0) - track.trimStart);
 }
 
+/**
+ * The audible span of the track and its two ramps, both clamped to the video: a clip that runs
+ * past the end of the timeline fades out at the end instead of somewhere nobody hears, and fades
+ * that together outlast the clip shrink in proportion so they meet at one peak rather than overlap.
+ */
+function audioEnvelope(track: AudioTrack, total: number) {
+  const len = Math.min(audioLength(track), Math.max(0, total - track.start));
+  let fadeIn = Math.max(0, Math.min(track.fadeIn, len));
+  let fadeOut = Math.max(0, Math.min(track.fadeOut, len));
+  if (fadeIn + fadeOut > len) {
+    const k = len / (fadeIn + fadeOut);
+    fadeIn *= k;
+    fadeOut *= k;
+  }
+  return { len, end: track.start + len, fadeIn, fadeOut };
+}
+
 /** Gain (0..1) of the track at timeline second t, including fades and range. */
-export function audioGainAt(track: AudioTrack, t: number): number {
-  const len = audioLength(track);
-  const end = track.start + len;
+export function audioGainAt(track: AudioTrack, t: number, total: number): number {
+  const { end, fadeIn, fadeOut } = audioEnvelope(track, total);
   if (t < track.start || t > end) return 0;
   let g = track.volume;
-  if (track.fadeIn > 0) g *= Math.min(1, (t - track.start) / track.fadeIn);
-  if (track.fadeOut > 0) g *= Math.min(1, (end - t) / track.fadeOut);
+  if (fadeIn > 0) g *= Math.min(1, (t - track.start) / fadeIn);
+  if (fadeOut > 0) g *= Math.min(1, (end - t) / fadeOut);
   return Math.max(0, Math.min(1, g));
 }
 
@@ -34,11 +51,12 @@ export function useAudioPlayback() {
     const sync = () => {
       const ui = useUI.getState();
       const t = ui.time;
-      const tr = useEditor.getState().project.audio;
+      const project = useEditor.getState().project;
+      const tr = project.audio;
       if (!tr) return;
-      const len = audioLength(tr);
-      const inRange = t >= tr.start && t < tr.start + len;
-      el.volume = audioGainAt(tr, t);
+      const total = totalDuration(project);
+      const inRange = t >= tr.start && t < audioEnvelope(tr, total).end;
+      el.volume = audioGainAt(tr, t, total);
       if (ui.playing && inRange && !ui.exporting) {
         const target = tr.trimStart + (t - tr.start);
         if (Math.abs(el.currentTime - target) > 0.25) el.currentTime = target;
@@ -73,13 +91,16 @@ export async function renderAudioMix(total: number, sampleRate = 48000): Promise
   const src = off.createBufferSource();
   src.buffer = decoded;
   const gain = off.createGain();
-  const len = Math.min(audioLength(track), Math.max(0, total - track.start));
-  const end = track.start + len;
+  const { len, end, fadeIn, fadeOut } = audioEnvelope(track, total);
   const g = gain.gain;
-  g.setValueAtTime(track.fadeIn > 0 ? 0 : track.volume, Math.max(0, track.start));
-  if (track.fadeIn > 0) g.linearRampToValueAtTime(track.volume, track.start + Math.min(track.fadeIn, len));
-  if (track.fadeOut > 0) {
-    g.setValueAtTime(track.volume, Math.max(track.start, end - Math.min(track.fadeOut, len)));
+  g.setValueAtTime(fadeIn > 0 ? 0 : track.volume, Math.max(0, track.start));
+  const peak = track.start + fadeIn;
+  if (fadeIn > 0) g.linearRampToValueAtTime(track.volume, peak);
+  if (fadeOut > 0) {
+    // When the fades were shrunk to fit, rounding can put end - fadeOut an ulp before the peak.
+    // The automation list is sorted by time, so an anchor scheduled ahead of the ramp's end would
+    // swallow the fade-in and jump the gain straight to full volume.
+    g.setValueAtTime(track.volume, Math.max(peak, end - fadeOut));
     g.linearRampToValueAtTime(0, end);
   }
   src.connect(gain).connect(off.destination);

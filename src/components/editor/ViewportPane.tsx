@@ -17,6 +17,11 @@ import { locate, sampleTrack } from "@/lib/animation";
 import { useShallow } from "zustand/react/shallow";
 import { ACCEPTED_TYPES } from "@/lib/media";
 import { shotKind } from "@/lib/defaults";
+import { getDevice } from "@/lib/devices";
+
+// the wheel zooms in as far as the inspector's Zoom row does, so the two never disagree, and keeps
+// its own generous reach on the way out
+const ZOOM_MAX = 12, DIST_MAX = 6;
 
 let interactTimer: number | null = null;
 function markInteracting() {
@@ -65,15 +70,38 @@ function LoadingPill() {
   );
 }
 
+/** The mockups offered on an empty canvas, so the first choice is not silently made for you. */
+const STARTER_DEVICES = ["iphone-17-pro-glb", "macbook-pro-14-glb", "ipad-pro-13-glb", "pixel-9-pro", "galaxy-s25-ultra", "browser"];
+
 function UploadHint() {
   const shot = useActiveShot();
   const dragging = useUI((s) => s.dragging);
   const toast = useUI((s) => s.toast);
+  const device = useEditor((s) => s.project.mockup.device);
+  const setDevice = useEditor((s) => s.setDevice);
   if (shot?.media || dragging || toast || shotKind(shot) !== "media") return null;
   return (
-    <div className="pointer-events-auto absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-3 rounded-full bg-black/85 py-1.5 pl-4 pr-1.5 text-[12px] text-white shadow-lg backdrop-blur">
-      <span>Upload media to get started — or paste / drop.</span>
-      <button type="button" onClick={() => void pickFiles(ACCEPTED_TYPES).then((f) => importFilesToShot(f))} className="label rounded-full bg-white px-3 py-1.5 text-black">Upload</button>
+    <div className="pointer-events-auto absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 flex-col items-center gap-2">
+      <div className="flex items-center gap-1 rounded-full bg-black/85 p-1 shadow-lg backdrop-blur">
+        {STARTER_DEVICES.map((id) => {
+          const spec = getDevice(id);
+          return (
+            <button
+              key={id}
+              type="button"
+              title={spec.name}
+              onClick={() => setDevice(id)}
+              className={cn("flex h-7 w-7 items-center justify-center rounded-full transition-colors", id === device ? "bg-white text-black" : "text-white/70 hover:bg-white/15 hover:text-white")}
+            >
+              <Icon name={spec.icon} size={14} />
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex items-center gap-3 rounded-full bg-black/85 py-1.5 pl-4 pr-1.5 text-[12px] text-white shadow-lg backdrop-blur">
+        <span>Pick a mockup, then upload media — or paste / drop.</span>
+        <button type="button" onClick={() => void pickFiles(ACCEPTED_TYPES).then((f) => importFilesToShot(f))} className="label rounded-full bg-white px-3 py-1.5 text-black">Upload</button>
+      </div>
     </div>
   );
 }
@@ -147,6 +175,7 @@ export function ViewportPane() {
   const onPointerMove = (e: React.PointerEvent) => {
     const d = drag.current;
     if (!d) return;
+    markInteracting();
     const dx = e.clientX - d.x, dy = e.clientY - d.y;
     const ed = useEditor.getState();
     if (d.mode === "pan") {
@@ -183,17 +212,40 @@ export function ViewportPane() {
       // one mouse notch is ~100 units; a trackpad flings far more, so cap each event
       const raw = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
       const delta = clamp(raw, -120, 120);
-      // linear in camera distance, at Ultramock's measured rate (100 wheel units ≈ a sixth of the fit distance)
+      // linear in camera distance, at Ultramock's measured rate (100 wheel units ≈ a sixth of the fit distance).
+      // The bounds are the Zoom row's own range turned into distances, so scrolling stops exactly where
+      // the slider does instead of snapping back off a value the slider can reach.
       const dist = 1 / zoom;
-      const next = clamp(dist + delta * (e.ctrlKey ? 0.0035 : 0.0017), 0.12, 6);
+      const next = clamp(dist + delta * (e.ctrlKey ? 0.0035 : 0.0017), 1 / ZOOM_MAX, DIST_MAX);
       zoom = 1 / next;
       ed.setValue("camera.zoom", Math.round(zoom * 1000) / 1000);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
-    return () => { el.removeEventListener("wheel", onWheel); if (timer) window.clearTimeout(timer); };
+    // a resize (toggling the timeline, a new aspect) can tear this down mid-gesture, so close the
+    // interaction the wheel opened rather than dropping its pending end and leaving history paused
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      if (timer !== null) { window.clearTimeout(timer); timer = null; endInteraction(); }
+    };
   }, [frame.w, frame.h]);
 
   const [dropZone, setDropZone] = useState<"replace" | "new" | "audio" | null>(null);
+  // a drag that ends outside the window fires no dragleave here, which used to leave the overlay up
+  useEffect(() => {
+    const clear = () => { setDragging(false); setDropZone(null); };
+    // nothing outside the viewport accepts a file, and the browser's default for one is to navigate
+    // the tab to it, tearing the editor down — so swallow file drags wherever they are not handled.
+    // Text drags are left alone, or they could not be dropped into inputs.
+    const hasFiles = (e: DragEvent) => !!e.dataTransfer?.types.includes("Files");
+    const onOver = (e: DragEvent) => { if (hasFiles(e)) e.preventDefault(); };
+    const onDropAnywhere = (e: DragEvent) => { if (hasFiles(e)) e.preventDefault(); clear(); };
+    window.addEventListener("dragover", onOver);
+    window.addEventListener("dragend", clear);
+    window.addEventListener("drop", onDropAnywhere);
+    const onLeave = (e: DragEvent) => { if (!e.relatedTarget) clear(); };
+    window.addEventListener("dragleave", onLeave);
+    return () => { window.removeEventListener("dragover", onOver); window.removeEventListener("dragend", clear); window.removeEventListener("drop", onDropAnywhere); window.removeEventListener("dragleave", onLeave); };
+  }, [setDragging]);
   const onDrop = (e: React.DragEvent, zone: "replace" | "new" | "audio" | null) => {
     e.preventDefault();
     setDragging(false);
@@ -291,13 +343,17 @@ function FocusMarker() {
   useEffect(() => {
     let timer: number | null = null;
     const show = () => { setVisible(true); if (timer) window.clearTimeout(timer); timer = window.setTimeout(() => setVisible(false), 1600); };
-    const unsub = useEditor.subscribe((s) => s.project.blur, (a, b) => { if (a !== b) show(); });
-    const unsubShot = useEditor.subscribe((s) => s.project.shots, () => {});
+    // every edit rebuilds project.blur, so watching the object itself would pop the guides up over
+    // unrelated changes — key on the values that actually place them instead
+    const unsub = useEditor.subscribe((s) => {
+      const b = s.project.blur;
+      return `${b.mode}|${b.strength}|${b.focusX}|${b.focusY}|${b.focusSize}|${b.falloff}|${b.angle ?? 0}|${b.focusDistance ?? 0}|${b.bokeh}`;
+    }, show);
     const onKey = (e: KeyboardEvent) => { if (e.key === "Alt") setVisible(true); };
     const onKeyUp = (e: KeyboardEvent) => { if (e.key === "Alt") show(); };
     document.addEventListener("keydown", onKey);
     document.addEventListener("keyup", onKeyUp);
-    return () => { unsub(); unsubShot(); document.removeEventListener("keydown", onKey); document.removeEventListener("keyup", onKeyUp); if (timer) window.clearTimeout(timer); };
+    return () => { unsub(); document.removeEventListener("keydown", onKey); document.removeEventListener("keyup", onKeyUp); if (timer) window.clearTimeout(timer); };
   }, []);
   if (mode === "off" || !visible) return null;
   const cx = v.x * 100, cy = v.y * 100;

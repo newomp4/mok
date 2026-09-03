@@ -114,7 +114,9 @@ export function findScreenMesh(root: THREE.Object3D, hint?: string): THREE.Mesh 
     if (loose) return loose;
   }
   root.updateWorldMatrix(true, true);
-  const whole = new THREE.Box3().setFromObject(root);
+  // measured in the device's own frame: a world box grows with whatever rotation the mockup happens
+  // to be holding, and the size threshold below would move with it
+  const whole = new THREE.Box3().setFromObject(root).applyMatrix4(deviceInverse(root));
   const wholeSize = new THREE.Vector3();
   whole.getSize(wholeSize);
   const maxDim = Math.max(wholeSize.x, wholeSize.y, wholeSize.z);
@@ -165,15 +167,21 @@ function averageFaceNormal(mesh: THREE.Mesh): THREE.Vector3 {
 export function planarizeScreenUVs(mesh: THREE.Mesh, root: THREE.Object3D, targetAspect?: number, extra: [number, number, number, number] = [0, 0, 0, 0]) {
   root.updateWorldMatrix(true, true);
   const f = meshFrame(mesh);
-  // The plane normal comes from PCA (robust); the in-plane axes are locked to the world so the
-  // content is never rotated by an asymmetric vertex distribution (e.g. an island cut-out).
+  // The plane normal comes from PCA (robust); the in-plane axes are locked to the device's own
+  // right and up, so the content is never rotated by an asymmetric vertex distribution (e.g. an
+  // island cut-out), nor by the mockup rotation the user happens to have set while it loads.
+  const dev = deviceInverse(mesh).invert();
+  const dx = new THREE.Vector3(1, 0, 0).transformDirection(dev);
+  const dy = new THREE.Vector3(0, 1, 0).transformDirection(dev);
+  const dz = new THREE.Vector3(0, 0, 1).transformDirection(dev);
   const n = f.axes[2].clone();
-  if (n.z < 0) n.negate(); // face the camera (+z) whenever the plane is not lying flat
-  let u = new THREE.Vector3(1, 0, 0).addScaledVector(n, -n.x); // world X projected onto the plane
-  if (u.lengthSq() < 1e-4) u = new THREE.Vector3(0, 0, 1).addScaledVector(n, -n.z);
+  if (n.dot(dz) < 0) n.negate(); // face the camera (+z) whenever the plane is not lying flat
+  let u = dx.clone().addScaledVector(n, -dx.dot(n)); // the device's right, projected onto the plane
+  if (u.lengthSq() < 1e-4) u = dz.clone().addScaledVector(n, -dz.dot(n));
   u.normalize();
   const vv = new THREE.Vector3().crossVectors(n, u).normalize(); // in-plane "up"
-  if (vv.y < -0.05 || (Math.abs(vv.y) <= 0.05 && vv.z > 0)) { vv.negate(); u.negate(); } // keep v pointing up (and cross consistent)
+  const vy = vv.dot(dy), vz = vv.dot(dz);
+  if (vy < -0.05 || (Math.abs(vy) <= 0.05 && vz > 0)) { vv.negate(); u.negate(); } // keep v pointing up (and cross consistent)
   if (new THREE.Vector3().crossVectors(u, vv).dot(n) < 0) u.negate(); // (u × v) must equal the facing normal
   const pos = mesh.geometry.attributes.position as THREE.BufferAttribute;
   const p = new THREE.Vector3();
@@ -221,22 +229,53 @@ export interface DeviceFeatures {
   band: THREE.Mesh[];
 }
 
-/** Orthonormal frame of the screen: n faces the camera (+z), up is the in-plane vertical, right = up × n. */
+/**
+ * The inverse of the transform the user's own rotation applies, so geometry measured in world space
+ * can be expressed in the device's own frame. Without this, loading a model while the mockup is
+ * yawed bakes that yaw into the model's alignment and into the published screen frame.
+ */
+function deviceInverse(o: THREE.Object3D): THREE.Matrix4 {
+  let n: THREE.Object3D | null = o;
+  while (n && n.name !== "device") n = n.parent;
+  const m = new THREE.Matrix4();
+  if (n) { n.updateWorldMatrix(true, false); m.copy(n.matrixWorld).invert(); }
+  return m;
+}
+
+/** Orthonormal frame of the screen in the device's own space: n faces the camera (+z), up is the in-plane vertical, right = up × n. */
+/** Maps a point from the device's own frame into `root`'s local space. */
+function deviceLocal(root: THREE.Object3D): THREE.Matrix4 {
+  let n: THREE.Object3D | null = root;
+  while (n && n.name !== "device") n = n.parent;
+  const m = new THREE.Matrix4();
+  if (n) { n.updateWorldMatrix(true, false); root.updateWorldMatrix(true, false); m.copy(root.matrixWorld).invert().multiply(n.matrixWorld); }
+  return m;
+}
+
 function screenFrame(screen: THREE.Mesh) {
+  const inv = deviceInverse(screen);
   const f = meshFrame(screen);
-  const n = f.axes[2].clone();
+  const n = f.axes[2].clone().transformDirection(inv).normalize();
   if (n.z < 0) n.negate();
   const up = new THREE.Vector3(0, 1, 0).projectOnPlane(n);
   if (up.lengthSq() < 1e-6) up.set(0, 0, -1).projectOnPlane(n);
   up.normalize();
   const right = new THREE.Vector3().crossVectors(up, n).normalize();
   // geometric centre (the vertex mean is skewed by dense cut-outs such as the Dynamic Island)
-  const center = new THREE.Box3().setFromObject(screen).getCenter(new THREE.Vector3());
-  return { center, n, up, right };
+  const center = meshBox(screen, inv).center;
+  return { center, n, up, right, inv };
 }
 
-function meshBox(m: THREE.Mesh): { box: THREE.Box3; center: THREE.Vector3; size: THREE.Vector3 } {
-  const box = new THREE.Box3().setFromObject(m);
+/** Axis-aligned box of an object in the space `inv` maps the world into (the device's own, here). */
+function meshBox(m: THREE.Object3D, inv: THREE.Matrix4): { box: THREE.Box3; center: THREE.Vector3; size: THREE.Vector3 } {
+  const box = new THREE.Box3();
+  const local = new THREE.Matrix4();
+  m.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    box.union(new THREE.Box3().copy(mesh.geometry.boundingBox!).applyMatrix4(local.multiplyMatrices(inv, mesh.matrixWorld)));
+  });
   return { box, center: box.getCenter(new THREE.Vector3()), size: box.getSize(new THREE.Vector3()) };
 }
 
@@ -250,7 +289,7 @@ export function detectFeatures(root: THREE.Object3D, screen: THREE.Mesh | null, 
   const out: DeviceFeatures = { lid: null, island: [], caseParts: [], tilt: 0, band: [] };
   if (!screen) return out;
   root.updateWorldMatrix(true, true);
-  const { center: sc, n, up, right } = screenFrame(screen);
+  const { center: sc, n, up, right, inv } = screenFrame(screen);
   const H = spec.screenMm[1] * S, W = spec.screenMm[0] * S;
   const meshes: THREE.Mesh[] = [];
   root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m !== screen && m.visible) meshes.push(m); });
@@ -260,13 +299,13 @@ export function detectFeatures(root: THREE.Object3D, screen: THREE.Mesh | null, 
     // deck top: the largest near-horizontal mesh
     let deckY = -Infinity, deckArea = 0;
     for (const m of meshes) {
-      const { size, center } = meshBox(m);
+      const { size, center } = meshBox(m, inv);
       if (size.y < H * 0.05 && size.x * size.z > deckArea) { deckArea = size.x * size.z; deckY = center.y; }
     }
     const lid: THREE.Mesh[] = [];
     let minUp = Infinity;
     for (const m of [screen, ...meshes]) {
-      const { box, center } = meshBox(m);
+      const { box, center } = meshBox(m, inv);
       const { w } = rel(center);
       if (Math.abs(w) > H * 0.12 || center.y < deckY + H * 0.1) continue;
       lid.push(m);
@@ -278,11 +317,13 @@ export function detectFeatures(root: THREE.Object3D, screen: THREE.Mesh | null, 
     if (lid.length >= 2 && Number.isFinite(minUp)) {
       const yawGroup = root.getObjectByName("autoYaw") as THREE.Group | undefined;
       if (yawGroup) {
-        const hinge = sc.clone().add(up.clone().multiplyScalar(minUp));
+        // the pivot is parked in the scene before it is re-parented, so it is handed world values
+        const dev = inv.clone().invert();
+        const hinge = sc.clone().add(up.clone().multiplyScalar(minUp)).applyMatrix4(dev);
         const pivot = new THREE.Group();
         pivot.name = "lidPivot";
         pivot.position.copy(hinge);
-        pivot.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, n));
+        pivot.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, n).premultiply(dev));
         scene.add(pivot);
         pivot.updateMatrixWorld(true);
         yawGroup.attach(pivot);
@@ -295,7 +336,7 @@ export function detectFeatures(root: THREE.Object3D, screen: THREE.Mesh | null, 
 
   if (spec.family === "phone") {
     for (const m of meshes) {
-      const { size, center } = meshBox(m);
+      const { size, center } = meshBox(m, inv);
       const { u, v, w } = rel(center);
       const along = Math.abs(size.x * right.x + size.y * right.y + size.z * right.z);
       const tall = Math.abs(size.x * up.x + size.y * up.y + size.z * up.z);
@@ -305,7 +346,7 @@ export function detectFeatures(root: THREE.Object3D, screen: THREE.Mesh | null, 
 
   if (spec.family === "tablet") {
     for (const m of meshes) {
-      const { w } = rel(meshBox(m).center);
+      const { w } = rel(meshBox(m, inv).center);
       if (Math.abs(w) > H * 0.08) out.caseParts.push(m);
     }
     if (out.caseParts.length < 3) out.caseParts = [];
@@ -313,12 +354,11 @@ export function detectFeatures(root: THREE.Object3D, screen: THREE.Mesh | null, 
   }
 
   if (spec.family === "watch") {
-    const sb = new THREE.Box3().setFromObject(screen);
-    const ssz = sb.getSize(new THREE.Vector3());
+    const { box: sb, size: ssz } = meshBox(screen, inv);
     // bands reach well beyond the case (loops even wrap around its centre), so test the whole box
     const caseBox = sb.clone().expandByVector(ssz.clone().multiplyScalar(0.6));
     for (const m of meshes) {
-      const { box } = meshBox(m);
+      const { box } = meshBox(m, inv);
       if (!caseBox.containsBox(box)) out.band.push(m);
     }
   }
@@ -327,8 +367,10 @@ export function detectFeatures(root: THREE.Object3D, screen: THREE.Mesh | null, 
 
 export function hideScreenOverlays(root: THREE.Object3D, screen: THREE.Mesh): THREE.Mesh[] {
   root.updateWorldMatrix(true, true);
-  const sb = new THREE.Box3().setFromObject(screen);
-  const ss = new THREE.Vector3(); sb.getSize(ss);
+  // every box here is measured in the device's own frame, so whichever mockup rotation happens to
+  // be in force while the model loads cannot change which meshes read as covering the screen
+  const inv = deviceInverse(screen);
+  const { box: sb, size: ss } = meshBox(screen, inv);
   const sArea = [ss.x, ss.y, ss.z].sort((a, c) => c - a).slice(0, 2).reduce((a, c) => a * c, 1);
   const hidden: THREE.Mesh[] = [];
   root.traverse((o) => {
@@ -336,8 +378,7 @@ export function hideScreenOverlays(root: THREE.Object3D, screen: THREE.Mesh): TH
     if (!m.isMesh || m === screen) return;
     const mats = (Array.isArray(m.material) ? m.material : [m.material]) as THREE.Material[];
     if (!mats.some((x) => x.transparent || (x as THREE.MeshPhysicalMaterial).transmission > 0)) return;
-    const b = new THREE.Box3().setFromObject(m);
-    const bs = new THREE.Vector3(); b.getSize(bs);
+    const { box: b, size: bs } = meshBox(m, inv);
     const area = [bs.x, bs.y, bs.z].sort((a, c) => c - a).slice(0, 2).reduce((a, c) => a * c, 1);
     const inter = b.clone().intersect(sb);
     if (inter.isEmpty()) return;
@@ -388,24 +429,6 @@ export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceS
   const bandColor = useEditor((s) => s.project.mockup.bandColor ?? null);
   const scene = useThree((s) => s.scene);
 
-  // publish the real footprint (after rotation + auto-yaw) so floors, shadows and framing use it
-  const yawApplied = (root.getObjectByName("autoYaw") as THREE.Group | undefined)?.rotation.y ?? 0;
-  useEffect(() => {
-    const r = model.rotation ?? [0, 0, 0];
-    const probe = new THREE.Group();
-    probe.rotation.set(r[0], r[1], r[2]);
-    const parent = root.parent;
-    probe.add(root);
-    probe.updateWorldMatrix(true, true);
-    const b = new THREE.Box3();
-    root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m.visible) b.expandByObject(m); });
-    probe.remove(root);
-    if (parent) parent.add(root);
-    const sz = new THREE.Vector3();
-    b.getSize(sz);
-    useModelBounds.getState().set(spec.id, { minY: b.min.y, maxY: b.max.y, width: sz.x, height: sz.y });
-  }, [root, model.rotation, spec.id, yawApplied, caseKeyboard]);
-
   // laptop lid follows the (keyframeable) lid angle
   useFrame(() => {
     const f = root.userData.features as DeviceFeatures | undefined;
@@ -429,16 +452,17 @@ export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceS
         m.material = Array.isArray(m.material) ? fixed : fixed[0];
         m.userData.mirrored = true;
       });
-      // baked shadow catchers: large, flat, horizontal quads lying at the very bottom of the model
-      const whole = new THREE.Box3().setFromObject(root);
-      const wsz = new THREE.Vector3(); whole.getSize(wsz);
+      // baked shadow catchers: large, flat, horizontal quads lying at the very bottom of the model.
+      // Measured in the device's own frame, since the user may already have the mockup rolled and a
+      // world-space box would then no longer see the ground quad as flat or as sitting at the bottom.
+      const inv = deviceInverse(root);
+      const { box: whole, size: wsz } = meshBox(root, inv);
       const explicitHide = new Set(model.hide ?? []);
       root.traverse((o) => {
         const m = o as THREE.Mesh;
         if (!m.isMesh) return;
         if (explicitHide.has(m.name)) { m.visible = false; return; }
-        const b = new THREE.Box3().setFromObject(m);
-        const sz = new THREE.Vector3(); b.getSize(sz);
+        const { box: b, size: sz } = meshBox(m, inv);
         const tris = (m.geometry.index?.count ?? m.geometry.attributes.position.count) / 3;
         const flat = sz.y < wsz.y * 0.004;
         const atBottom = b.min.y < whole.min.y + wsz.y * 0.02;
@@ -453,7 +477,8 @@ export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceS
         const r = model.rotation ?? [0, 0, 0];
         root.rotation.set(r[0], r[1], r[2]);
         root.updateWorldMatrix(true, true);
-        const n = meshFrame(screens[0]).axes[2].clone();
+        // measure in the device's own frame: the user may already have the mockup rotated
+        const n = meshFrame(screens[0]).axes[2].clone().transformDirection(inv).normalize();
         if (n.z < 0) n.negate();
         const yaw = Math.atan2(n.x, n.z);
         const yawGroup = root.getObjectByName("autoYaw");
@@ -469,9 +494,10 @@ export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceS
       }
       if (screens[0]) {
         // where the display sits and which way it faces, so a lit scene can put its glow there
-        const f = screenFrame(screens[0]);
-        anim.screenPos = [f.center.x, f.center.y, f.center.z];
-        anim.screenDir = [f.n.x, f.n.y, f.n.z];
+        // published in the device's own frame; the scene re-applies the live yaw itself
+        const { center: c, n: d } = screenFrame(screens[0]);
+        anim.screenPos = [c.x, c.y, c.z];
+        anim.screenDir = [d.x, d.y, d.z];
       }
       const features = detectFeatures(root, screens[0] ?? null, spec, scene);
       root.userData.features = features;
@@ -493,8 +519,12 @@ export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceS
       const vb = new THREE.Box3();
       root.traverse((o) => { const mm = o as THREE.Mesh; if (mm.isMesh && mm.visible) vb.expandByObject(mm); });
       if (!vb.isEmpty()) {
+        // the centre is taken in the device's frame first: rotating a world box and then taking its
+        // centre is not the same point for an asymmetric model, so the offset used to drift with
+        // whatever rotation the mockup was holding when the case was toggled
+        vb.applyMatrix4(deviceInverse(root));
         const c = vb.getCenter(new THREE.Vector3());
-        const local = root.worldToLocal(c.clone());
+        const local = c.clone().applyMatrix4(deviceLocal(root));
         yawGroup.position.sub(local);
       }
     }
@@ -542,15 +572,20 @@ export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceS
         mesh.material = tinted;
         return;
       }
-      // body gloss: scale environment reflections and polish the authored roughness
-      const tuned = ((Array.isArray(original) ? original : [original]) as THREE.Material[]).map((x) => {
+      // Body gloss and finish colour, both written onto one clone per source material that is
+      // cached on the mesh. The tint used to clone again on every pass, which leaked a material per
+      // gloss step and skipped multi-material meshes entirely.
+      const src = (Array.isArray(original) ? original : [original]) as THREE.Material[];
+      const cache = (mesh.userData.tuned ??= new Map<THREE.Material, THREE.MeshStandardMaterial>()) as Map<THREE.Material, THREE.MeshStandardMaterial>;
+      const tuned = src.map((x) => {
         const std = x as THREE.MeshStandardMaterial;
-        if (!("envMapIntensity" in std)) return x;
-        const cache = (mesh.userData.tuned ??= new Map<THREE.Material, THREE.MeshStandardMaterial>()) as Map<THREE.Material, THREE.MeshStandardMaterial>;
+        const tintable = finishNames.has(std.name) && "color" in std;
+        if (!("envMapIntensity" in std) && !tintable) return x;
         let t = cache.get(x);
         if (!t) {
           t = std.clone();
           t.userData.baseRoughness = std.roughness;
+          t.userData.baseColor = "color" in std ? std.color.clone() : null;
           // photogrammetry-style normal maps are high-frequency noise; without mip filtering they
           // alias into sparkles under a bright HDRI, so filter them properly and tame the strength
           for (const map of [t.normalMap, t.map, t.roughnessMap, t.metalnessMap, t.aoMap]) {
@@ -564,34 +599,39 @@ export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceS
           if (t.normalMap) t.normalScale = t.normalScale.clone().multiplyScalar(0.65);
           cache.set(x, t);
         }
-        t.envMapIntensity = gloss;
+        const baseColor = t.userData.baseColor as THREE.Color | null;
+        if (tintable) t.color.set(finish.color);
+        else if (baseColor && "color" in t) t.color.copy(baseColor);
+        if ("envMapIntensity" in t) {
+          t.envMapIntensity = gloss;
+          const base = t.userData.baseRoughness as number;
+          // gloss polishes the surface a little, never to a mirror: a noisy normal map on a near-mirror
+          // surface is what produces speckle, so keep a floor when one is present
+          const polished = base * Math.max(0.7, 1.08 - gloss * 0.12);
+          t.roughness = Math.max(t.normalMap ? 0.22 : 0.05, Math.min(1, polished));
+        }
         t.fog = false;
-        const base = t.userData.baseRoughness as number;
-        // gloss polishes the surface a little, never to a mirror: a noisy normal map on a near-mirror
-        // surface is what produces speckle, so keep a floor when one is present
-        const polished = base * Math.max(0.7, 1.08 - gloss * 0.12);
-        t.roughness = Math.max(t.normalMap ? 0.22 : 0.05, Math.min(1, polished));
         return t;
       });
       mesh.material = tuned.length === 1 ? tuned[0] : tuned;
-      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      mesh.material = mats.map((m) => {
-        if (finishNames.has(m.name) && "color" in m) {
-          const c = (m as THREE.MeshStandardMaterial).clone();
-          c.color.set(finish.color);
-          return c;
-        }
-        return m;
-      }).length === 1 ? (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) : mesh.material;
-      // re-run tint on single material
-      if (!Array.isArray(mesh.material) && finishNames.has(mesh.material.name) && "color" in mesh.material) {
-        const c = (mesh.material as THREE.MeshStandardMaterial).clone();
-        c.color.set(finish.color);
-        mesh.material = c;
-      }
     });
     invalidate();
   }, [root, model.screenMesh, model.screenInset, model.finishMaterials, model.hide, finish.color, screen, invalidate, gloss, spec.id, spec.screenPx, spec, scene, notch, caseKeyboard, bandColor, maxAniso]);
+
+  // Publish the real footprint so floors, shadows and framing use it. It is declared after the
+  // effect above because that one decides what is visible and how far a tablet leans back, and a
+  // measurement taken before it would be one toggle behind.
+  const yawApplied = (root.getObjectByName("autoYaw") as THREE.Group | undefined)?.rotation.y ?? 0;
+  useEffect(() => {
+    root.updateWorldMatrix(true, true);
+    // in the device's own frame, so the mockup rotation the user set never moves the floor
+    const inv = deviceInverse(root);
+    const b = new THREE.Box3();
+    root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m.visible) b.union(meshBox(m, inv).box); });
+    const sz = new THREE.Vector3();
+    b.getSize(sz);
+    useModelBounds.getState().set(spec.id, { minY: b.min.y, maxY: b.max.y, width: sz.x, height: sz.y });
+  }, [root, spec.id, yawApplied, caseKeyboard]);
 
   return <primitive object={root} rotation={model.rotation ?? [0, 0, 0]} position={model.position ?? [0, 0, 0]} />;
 }

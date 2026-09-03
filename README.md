@@ -11,9 +11,12 @@ rendering and encoding happens locally with WebGL and WebCodecs.
 ## Features
 
 - **10 photoreal device models** (CC-BY glTF from Sketchfab, credits in `CREDITS.md`): iPhone 17 Pro
-  (Silver, Cosmic Orange, Deep Blue), 17 Pro Max, 16 Pro Max, iPad Pro 13" on Magic Keyboard, MacBook Pro
-  14" / 16", Apple Watch Ultra 2 / Series 9, iMac 24", Pro Display XDR — the screen is detected automatically,
+  (Silver, Cosmic Orange, Deep Blue), 17 Pro Max, 16 Pro Max, iPad Pro 13" on Magic Keyboard (Silver or
+  Space Black, case included), MacBook Pro 14" / 16" (Silver or Space Black), Apple Watch Ultra 2 (Natural or
+  Black Titanium) / Series 9, iMac 24", Pro Display XDR — the screen is detected automatically,
   mapped at the device's true aspect and aligned to the camera, so a native screenshot fits exactly
+- **Android too**: Pixel 9 Pro with its camera bar and Galaxy S25 Ultra with bare lens rings, both in
+  their real colourways, with Play Store output sizes beside the App Store ones
 - **Device options found geometrically** (model node names are obfuscated): keyframeable **lid angle** on the
   MacBooks, **Dynamic Island** toggle on the iPhones, **case + keyboard** toggle on the iPad (it lies flat facing
   the camera without it), **band colour** on the watches; **status bar** overlay and **screen background** colour
@@ -21,17 +24,21 @@ rendering and encoding happens locally with WebGL and WebCodecs.
 - **Flat card and browser window** for plain screenshots; parametric fallbacks for every device remain
   in the code (hidden from the picker)
 - **Scenes**: custom (any background), Studio light tent, Concrete dark, Dark room, Bright studio — real
-  shadow-mapped lighting, an infinite sweep that fades into fog with no horizon seam, a reflective floor in the
-  Dark room, and light thrown by the device screen itself, coloured by what is on the display
+  variance-shadow-mapped lighting whose softness and opacity you control, an infinite sweep that dissolves into
+  your own backdrop colour with no horizon seam, a reflective floor in the Dark room, and light thrown by the
+  device screen itself, coloured by what is on the display. Light rotation swings the lights and their shadows,
+  not just the reflections, and a transparent export drops the room and leaves only the device
 - **8 lighting rigs** from CC0 Poly Haven HDRIs, rotatable and keyframeable, with contact-shadow softness and opacity
-- **Backgrounds**: solid color, 15 layered mesh-gradient presets picked from a visual grid, your own image
-  with blur, or transparent
+- **Backgrounds**: solid colour, 20 layered mesh-gradient presets picked from a visual grid, your own image
+  with blur, or transparent — and the same gradients can sit behind a transparent screenshot on the device
+  screen itself
 - **Camera**: orbit / zoom / pan directly in the viewport with Ultramock's rig order and feel (drag 0.5°/px,
   pitch about the world axis so angled views lean the device), nine presets — five of them ported numerically
   from Ultramock — FOV, roll, centre guides and snap-to-centre panning
 - **Blur**: radial, directional or tilt-shift focus blur with bokeh, or true lens depth of field with a placeable
   focal point (drag the pad or ⌥-click the viewport). Lens blur autofocuses on the surface under the focus point
-  or takes a manual, keyframeable focus distance. Guides draw the focus while you adjust and fade out again
+  or takes a manual, keyframeable focus distance. The focus point and the blur angle are keyframeable too, so a
+  rack focus can pull between two subjects. Guides draw the focus while you adjust and fade out again
 - **Effects**: vignette, grain, bloom, chromatic aberration, sharpen, pixel grid, fish eye, glass border,
   screen fade, ghost, liquid glass
 - **Timeline**: media, **text** and **logo** shots back to back; keyframes on every camera / device / light / blur

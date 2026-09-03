@@ -10,6 +10,8 @@ import { shotKind } from "@/lib/defaults";
 import { ScreenSurface } from "@/three/screen";
 import { createFinishMaterials, createScreenMaterial, disposeMaterials } from "@/three/materials";
 import { anim } from "@/three/anim";
+import { paintPreset } from "@/three/background";
+import { getBgPreset } from "@/lib/presets";
 import { deviceLayout, type DeviceLayout } from "@/three/devices/layout";
 import { PhoneModel } from "@/three/devices/Phone";
 import { LaptopModel } from "@/three/devices/Laptop";
@@ -91,12 +93,24 @@ export function Device({ layout }: { layout: DeviceLayout }) {
     }
   }, [media, shot?.fit, spec.id, finish.id, surface, invalidate]);
 
+  // a gradient screen background is painted once into its own canvas and handed over like an upload
+  const gradientCanvas = useMemo(() => document.createElement("canvas"), []);
   useEffect(() => {
-    const img = screenCfg.bg?.type === "image" && screenBgImage?.kind === "image" ? (screenBgImage.element as HTMLImageElement) : null;
+    let img: HTMLImageElement | HTMLCanvasElement | null = null;
+    if (screenCfg.bg?.type === "image" && screenBgImage?.kind === "image") img = screenBgImage.element as HTMLImageElement;
+    else if (screenCfg.bg?.type === "gradient") {
+      gradientCanvas.width = 1024;
+      gradientCanvas.height = Math.round(1024 * (spec.screenPx[1] / spec.screenPx[0]));
+      const ctx = gradientCanvas.getContext("2d");
+      if (ctx) {
+        paintPreset(ctx, gradientCanvas.width, gradientCanvas.height, getBgPreset(screenCfg.bg.preset ?? "whisp"), 0);
+        img = gradientCanvas;
+      }
+    }
     surface.setBackground(screenCfg.bg?.color ?? "#000000", img);
     surface.setStatusBar(!!screenCfg.statusBar && spec.family === "phone");
     invalidate();
-  }, [screenCfg.bg?.type, screenCfg.bg?.color, screenCfg.statusBar, screenBgImage, spec.family, surface, invalidate]);
+  }, [screenCfg.bg?.type, screenCfg.bg?.color, screenCfg.bg?.preset, screenCfg.statusBar, screenBgImage, spec.family, spec.screenPx, surface, gradientCanvas, invalidate]);
 
   useEffect(() => {
     screenMat.clearcoat = reflection;
@@ -124,9 +138,11 @@ export function Device({ layout }: { layout: DeviceLayout }) {
       }
     }
     const shotMedia = cur && shotKind(cur) === "media" && cur.media ? getMedia(cur.media.id) : media;
-    // lit scenes take their screen glow from what is actually on the display
-    const liveScreen = shotMedia?.kind === "video" && (useUI.getState().playing || anim.exporting);
-    if (scenePreset !== "custom" && (liveScreen || lastSample.current < 0)) {
+    // lit scenes take their screen glow from what is actually on the display, and scrubbing the
+    // timeline moves through the video just as much as playing it does
+    const liveScreen = shotMedia?.kind === "video";
+    // an export steps frame by frame, so re-sample every frame there or the room keeps the first frame's light
+    if (scenePreset !== "custom" && (liveScreen || anim.exporting || lastSample.current < 0)) {
       lastSample.current = state.clock.elapsedTime;
       anim.screenColor = surface.averageColor();
     }

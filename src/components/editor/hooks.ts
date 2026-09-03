@@ -1,12 +1,13 @@
 "use client";
 import { useEffect, useRef } from "react";
-import { useEditor, redo, undo, hasKeyClipboard, hasShotClipboard } from "@/store/editor";
+import { useEditor, redo, undo, hasKeyClipboard, hasShotClipboard, lastCopyWasKeyframes } from "@/store/editor";
 import { APP_VERSION } from "@/lib/version";
-import type { AnimProp } from "@/lib/types";
+import type { AnimProp, Project } from "@/lib/types";
 import { useUI } from "@/store/ui";
-import { loadAutosave, saveAutosave, saveProject, exportProjectFile, importProjectFile, downloadBlob } from "@/lib/persistence";
+import { loadAutosave, saveAutosave, saveProject, listProjects, exportProjectFile, importProjectFile, downloadBlob } from "@/lib/persistence";
 import * as persistence from "@/lib/persistence";
-import { extractFiles } from "@/lib/media";
+import { setStorageErrorHandler, pruneMedia } from "@/lib/persistence";
+import { extractFiles, onMediaPersistFailed } from "@/lib/media";
 import { importFilesToShot, applyCameraPreset } from "@/lib/actions";
 import * as actions from "@/lib/actions";
 import * as capture from "@/export/capture";
@@ -15,10 +16,9 @@ import { anim as animState } from "@/three/anim";
 import { shotStart, totalDuration } from "@/lib/animation";
 import { captureImage } from "@/export/capture";
 import { getAspect, TEMPLATES, EFFECT_DEFS, SCENES } from "@/lib/presets";
-import { DEVICES } from "@/lib/devices";
+import { DEVICES, getDevice, preferModel, type DeviceSpec } from "@/lib/devices";
 import * as screens from "@/lib/screens";
 import { clamp } from "@/lib/cn";
-import { preferModel } from "@/lib/devices";
 
 export function useBootstrap() {
   useEffect(() => {
@@ -26,16 +26,20 @@ export function useBootstrap() {
     // debug handle for QA / power users
     (window as unknown as { __mok: unknown }).__mok = { useEditor, useUI, actions, capture, registry: registryViewport, templates: TEMPLATES, anim: animState, effectDefs: EFFECT_DEFS, devices: DEVICES, scenes: SCENES, screens, persistence, version: APP_VERSION };
     ui.setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
+    setStorageErrorHandler((what) => useUI.getState().showToast(what));
+    onMediaPersistFailed((name, reason) => useUI.getState().showToast(
+      reason === "animated-gif"
+        ? `${name} is an animated GIF — export the clip as MP4 or WebM`
+        : `${name} is only in this session — the browser blocked storage`,
+    ));
     let cancelled = false;
+    // a saved project reaches the store from the autosave, the Projects modal or a .mok import alike,
+    // so the upgrade to the photoreal models runs on whatever lands there
+    const unsubModels = useEditor.subscribe((s) => s.project, (p) => {
+      if (migrateToModels(p)) useEditor.setState({ project: { ...p } });
+    });
     loadAutosave().then((p) => {
       if (cancelled || !p) return;
-      // one-time upgrade: projects saved before the photoreal models existed keep working but switch to them
-      try {
-        if (!localStorage.getItem("mok:migrated-glb")) {
-          p.mockup.device = preferModel(p.mockup.device);
-          localStorage.setItem("mok:migrated-glb", "1");
-        }
-      } catch {}
       useEditor.getState().replaceProject(p);
       useEditor.temporal.getState().clear();
       useUI.getState().setActiveShot(p.shots[0]?.id ?? null);
@@ -47,7 +51,55 @@ export function useBootstrap() {
       else if (seen && seen !== APP_VERSION) window.setTimeout(() => useUI.getState().setModal("whatsnew"), 1200);
       localStorage.setItem("mok:seen-version", APP_VERSION);
     } catch {}
-    return () => { cancelled = true; };
+    return () => { cancelled = true; unsubModels(); };
+  }, []);
+}
+
+/**
+ * The procedural and glTF specs give the same colour different finish ids, so a finish the new
+ * device does not have is carried over by name — from the spec the id came from — and only falls
+ * back to the first finish when there is no equivalent.
+ */
+function swapFinish(from: string, to: DeviceSpec, finish: string): string {
+  if (to.finishes.some((f) => f.id === finish)) return finish;
+  const origin = getDevice(from).finishes.find((f) => f.id === finish) ?? DEVICES.flatMap((d) => d.finishes).find((f) => f.id === finish);
+  return (to.finishes.find((f) => f.name === origin?.name) ?? to.finishes[0]).id;
+}
+
+/**
+ * Projects saved before the photoreal models existed point at the procedural devices, which the
+ * picker no longer offers, and can carry a finish id that belongs to no spec at all. Returns
+ * whether anything had to change.
+ */
+export function migrateToModels(p: Project): boolean {
+  let changed = false;
+  const was = p.mockup.device;
+  const spec = getDevice(preferModel(was));
+  const finish = swapFinish(was, spec, p.mockup.finish);
+  if (spec.id !== was || finish !== p.mockup.finish) {
+    p.mockup.device = spec.id;
+    p.mockup.finish = finish;
+    changed = true;
+  }
+  // a sequence can cut between devices, so the per-shot overrides need the same treatment
+  for (const s of p.shots) {
+    const shotSpec = s.device ? getDevice(preferModel(s.device)) : spec;
+    if (s.finish) {
+      const f = swapFinish(s.device ?? was, shotSpec, s.finish);
+      if (f !== s.finish) { s.finish = f; changed = true; }
+    }
+    if (s.device && shotSpec.id !== s.device) { s.device = shotSpec.id; changed = true; }
+  }
+  return changed;
+}
+
+/** Sweep unreferenced media out of storage once the editor has settled after load. */
+export function useMediaPrune() {
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      void pruneMedia(useEditor.getState().project);
+    }, 6000);
+    return () => window.clearTimeout(t);
   }, []);
 }
 
@@ -56,7 +108,11 @@ export function useAutosave() {
     let timer: number | null = null;
     const unsub = useEditor.subscribe((s) => s.project, (p) => {
       if (timer) window.clearTimeout(timer);
-      timer = window.setTimeout(() => { void saveAutosave(p); }, 800);
+      timer = window.setTimeout(() => {
+        void saveAutosave(p);
+        // a project you have saved keeps saving to its own record, so reopening it is up to date
+        void listProjects().then((all) => { if (all.some((m) => m.id === p.id)) void saveProject(p); });
+      }, 800);
     });
     return () => { unsub(); if (timer) window.clearTimeout(timer); };
   }, []);
@@ -79,7 +135,11 @@ export function exportSizeFor(aspectId: ReturnType<typeof useEditor.getState>["p
   const a = getAspect(aspectId);
   let ratio = a.ratio ?? viewport.w / Math.max(1, viewport.h);
   if (a.px) return a.px;
-  if (a.ratio === null && orientation) ratio = orientation === "square" ? 1 : orientation === "portrait" ? 1 / ratio : ratio;
+  // the viewport is whatever shape the window is, so the orientation choice works off its long side
+  if (a.ratio === null && orientation) {
+    const wide = Math.max(ratio, 1 / ratio);
+    ratio = orientation === "square" ? 1 : orientation === "portrait" ? 1 / wide : wide;
+  }
   if (ratio >= 1) return [long, Math.round(long / ratio / 2) * 2];
   return [Math.round((long * ratio) / 2) * 2, long];
 }
@@ -154,6 +214,8 @@ export function useShortcuts() {
     };
     const onKey = (e: KeyboardEvent) => {
       const ui = useUI.getState();
+      // an export renders frame by frame; a stray keypress would change what is being encoded
+      if (ui.exporting && e.key !== "Escape") return;
       const mod = e.metaKey || e.ctrlKey;
       if (e.key === "Escape") {
         if (ui.modal) ui.setModal(null);
@@ -219,7 +281,16 @@ export function useShortcuts() {
         case "l": case "L": ui.toggleLoop(); break;
         case "d": case "D": if (!e.repeat) ui.toggleTheme(); break;
         case "g": case "G": if (!e.repeat) ui.setGuides(!ui.guides); break;
-        case "k": case "K": if (!e.repeat) { ed.stampKeyframes(CAMERA_PROPS); ui.showToast("Camera keyframes added"); } break;
+        case "k": case "K": {
+          if (e.repeat) break;
+          // stamp the tracks this shot already animates; fall back to the camera on an un-animated shot
+          const shot = ed.project.shots.find((s) => s.id === ui.activeShotId) ?? ed.project.shots[0];
+          const existing = shot ? (Object.keys(shot.keyframes) as AnimProp[]).filter((k) => (shot.keyframes[k]?.length ?? 0) > 0) : [];
+          const props = existing.length ? existing : CAMERA_PROPS;
+          ed.stampKeyframes(props);
+          ui.showToast(`${props.length} keyframe${props.length === 1 ? "" : "s"} added`);
+          break;
+        }
         case "Backspace": case "Delete": {
           if (!ui.selectedKeys.length) break;
           e.preventDefault();

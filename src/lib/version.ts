@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.5.0";
+export const APP_VERSION = "0.6.0";
 
 export interface ChangelogEntry {
   version: string;
@@ -8,6 +8,25 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.6.0",
+    date: "Sep 3, 2026",
+    title: "Android devices, real colourways and shadows that answer to their controls",
+    items: [
+      "Two Android phones: Pixel 9 Pro with its camera bar, and Galaxy S25 Ultra with bare lens rings on the back glass. Play Store output sizes sit beside the App Store ones.",
+      "The photoscanned devices now change colour: MacBook Pro 14\" and 16\" in Silver and Space Black, iPad Pro 13\" in Silver and Space Black with its keyboard case following along, and Apple Watch Ultra in Natural or Black Titanium.",
+      "Shadow softness and opacity finally do something in the lit scenes — they were being applied to a shadow map that ignored them. Every scene also gets the tight contact occlusion that stops the device looking like it hovers.",
+      "Light rotation and Light intensity swing and dim the scene's own lights, so the cast shadow follows the control instead of only the reflections.",
+      "A transparent export from a lit scene now really is transparent: the floor, fog and sky come out for that render and only the device is left.",
+      "The floor blends into whatever backdrop colour you pick rather than ending on a hard horizon.",
+      "Blur angle is animatable and the focus point can be keyframed, so a rack focus can pull between two subjects.",
+      "Editing an animated property between keyframes moves the whole move instead of dropping a keyframe you did not ask for.",
+      "The screen behind a transparent screenshot can use any of the twenty background gradients.",
+      "Dropping several clips at once builds a sequence, and dropping a video opens the timeline.",
+      "A shot has a numeric duration field, colour pickers write one undo step per drag, and typing no longer floods the undo stack.",
+      "Fixes throughout: material and geometry leaks on the glTF devices and the flat mockup, unreferenced media swept out of storage, storage failures surfaced instead of swallowed, named projects saved back to their own record, and a group keyframe move that no longer merges keyframes on top of each other.",
+    ],
+  },
   {
     version: "0.5.0",
     date: "Sep 3, 2026",

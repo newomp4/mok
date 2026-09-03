@@ -24,6 +24,9 @@ export function AspectMenu() {
     { divider: true, label: "" },
     { label: "App Store", disabled: true },
     ...ASPECTS.filter((x) => x.group === "appstore").map((x) => ({ label: x.label, sub: x.sub, checked: x.id === aspect, onSelect: () => update((p) => { p.aspect = x.id; }) })),
+    { divider: true, label: "" },
+    { label: "Play Store", disabled: true },
+    ...ASPECTS.filter((x) => x.group === "playstore").map((x) => ({ label: x.label, sub: x.sub, checked: x.id === aspect, onSelect: () => update((p) => { p.aspect = x.id; }) })),
   ];
   return (
     <>

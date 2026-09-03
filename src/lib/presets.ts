@@ -16,6 +16,10 @@ export const ASPECTS: AspectDef[] = [
   { id: "as-mac", label: "App Store · Mac", ratio: 2880 / 1800, group: "appstore", px: [2880, 1800], sub: "2880 × 1800" },
   { id: "as-video-h", label: "App Store Video · Horizontal", ratio: 16 / 9, group: "appstore", px: [1920, 1080], sub: "1920 × 1080" },
   { id: "as-video-v", label: "App Store Video · Vertical", ratio: 9 / 16, group: "appstore", px: [1080, 1920], sub: "1080 × 1920" },
+  { id: "ps-phone", label: "Play Store · Phone", ratio: 1080 / 1920, group: "playstore", px: [1080, 1920], sub: "1080 × 1920" },
+  { id: "ps-tablet-7", label: "Play Store · 7\" tablet", ratio: 1200 / 1920, group: "playstore", px: [1200, 1920], sub: "1200 × 1920" },
+  { id: "ps-tablet-10", label: "Play Store · 10\" tablet", ratio: 1600 / 2560, group: "playstore", px: [1600, 2560], sub: "1600 × 2560" },
+  { id: "ps-feature", label: "Play Store · Feature graphic", ratio: 1024 / 500, group: "playstore", px: [1024, 500], sub: "1024 × 500" },
 ];
 export const ASPECT_MAP = new Map(ASPECTS.map((a) => [a.id, a]));
 export function getAspect(id: AspectId): AspectDef {
@@ -27,6 +31,12 @@ export interface ExportSize {
   label: string;
   /** long-edge pixels */
   long: number;
+  /** exact pixel dimensions, for the sizes Apple requires verbatim */
+  px?: [number, number];
+  /** true for the App Store group, which is listed after the plain resolutions */
+  store?: boolean;
+  /** video-only or image-only, when a size does not make sense for both */
+  video?: boolean;
 }
 export const EXPORT_SIZES: ExportSize[] = [
   { id: "720", label: "720p", long: 1280 },
@@ -34,6 +44,15 @@ export const EXPORT_SIZES: ExportSize[] = [
   { id: "1440", label: "1440p", long: 2560 },
   { id: "2160", label: "4K", long: 3840 },
   { id: "4320", label: "8K", long: 7680 },
+  // Apple rejects a screenshot that is off by a pixel, so these bypass the aspect maths entirely
+  { id: "as-iphone", label: "App Store · iPhone", long: 2796, px: [1290, 2796], store: true },
+  { id: "as-ipad", label: "App Store · iPad", long: 2752, px: [2064, 2752], store: true },
+  { id: "as-mac", label: "App Store · Mac", long: 2880, px: [2880, 1800], store: true },
+  { id: "as-video-h", label: "App Store Video · Horizontal", long: 1920, px: [1920, 1080], store: true, video: true },
+  { id: "as-video-v", label: "App Store Video · Vertical", long: 1920, px: [1080, 1920], store: true, video: true },
+  { id: "ps-phone", label: "Play Store · Phone", long: 1920, px: [1080, 1920], store: true },
+  { id: "ps-tablet-10", label: "Play Store · 10\" tablet", long: 2560, px: [1600, 2560], store: true },
+  { id: "ps-feature", label: "Play Store · Feature graphic", long: 1024, px: [1024, 500], store: true },
 ];
 
 export interface CameraPreset {
@@ -205,6 +224,11 @@ export const BG_PRESETS: BgPreset[] = [
   { id: "noir", name: "Noir", colors: ["#050506", "#191920", "#0b0b0e", "#2a2a34"], style: "radial" },
   { id: "paper", name: "Paper", colors: ["#f8f6f1", "#eae4d8", "#fdfcf9", "#d9d0be"], style: "linear" },
   { id: "ember", name: "Ember", colors: ["#190a07", "#7a2712", "#31100a", "#e0632f"], style: "mesh" },
+  { id: "heather", name: "Heather", colors: ["#efeaf2", "#c2b2cc", "#f8f5fa", "#9c88ae"], style: "mesh" },
+  { id: "palm-shadow", name: "Palm shadow", colors: ["#eef1e7", "#a9bd93", "#f7f9f2", "#6d8a5c"], style: "mesh" },
+  { id: "prism", name: "Prism", colors: ["#101226", "#4a7bf0", "#2a1c4a", "#f05fa8"], style: "mesh" },
+  { id: "sky", name: "Sky", colors: ["#e6f1fb", "#b7d9f5", "#f6fbff", "#7fb4e4"], style: "linear" },
+  { id: "sandstone", name: "Sandstone", colors: ["#f6efe4", "#dcc4a0", "#fdfaf4", "#b9986e"], style: "mesh" },
 ];
 export function getBgPreset(id: string): BgPreset {
   return BG_PRESETS.find((b) => b.id === id) ?? BG_PRESETS[0];
@@ -291,6 +315,7 @@ export const EFFECT_DEFS: EffectDef[] = [
     { key: "offset", label: "Offset", min: 0, max: 0.08, step: 0.001, default: 0.02 },
     { key: "angle", label: "Angle", min: 0, max: 360, step: 1, default: 45 },
     { key: "opacity", label: "Opacity", min: 0, max: 1, step: 0.01, default: 0.35 },
+    { key: "blur", label: "Blur", min: 0, max: 1, step: 0.01, default: 0.3 },
   ] },
   { id: "liquidGlass", name: "Liquid glass", icon: "droplet", params: [
     { key: "x", label: "X", min: 0, max: 1, step: 0.005, default: 0.5 },
@@ -300,6 +325,9 @@ export const EFFECT_DEFS: EffectDef[] = [
     { key: "radius", label: "Radius", min: 0, max: 0.5, step: 0.005, default: 0.12 },
     { key: "refraction", label: "Refraction", min: 0, max: 1, step: 0.01, default: 0.5 },
     { key: "tint", label: "Tint", min: 0, max: 1, step: 0.01, default: 0.12 },
+    { key: "dispersion", label: "Dispersion", min: 0, max: 1, step: 0.01, default: 0.35 },
+    { key: "shine", label: "Shine", min: 0, max: 2, step: 0.01, default: 1 },
+    { key: "cover", label: "Cover mockup", min: 0, max: 1, step: 1, default: 0 },
   ] },
   { id: "screenFade", name: "Screen fade", icon: "fade", params: [
     { key: "in", label: "Fade in (s)", min: 0, max: 3, step: 0.05, default: 0.6 },

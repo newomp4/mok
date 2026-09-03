@@ -8,7 +8,7 @@ export function Viewport({ dpr = 2 }: { dpr?: number }) {
     <Canvas
       dpr={[1, dpr]}
       frameloop="demand"
-      shadows={{ type: THREE.PCFSoftShadowMap }}
+      shadows={{ type: THREE.VSMShadowMap }}
       flat={false}
       gl={{
         antialias: false,
