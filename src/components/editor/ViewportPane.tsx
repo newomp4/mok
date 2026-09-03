@@ -180,10 +180,12 @@ export function ViewportPane() {
       else window.clearTimeout(timer);
       markInteracting();
       timer = window.setTimeout(() => { endInteraction(); timer = null; }, 250);
-      const delta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
-      // linear in camera distance (like Ultramock): each 100 wheel units moves the camera by a quarter of the fit distance
+      // one mouse notch is ~100 units; a trackpad flings far more, so cap each event
+      const raw = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+      const delta = clamp(raw, -120, 120);
+      // linear in camera distance, at Ultramock's measured rate (100 wheel units ≈ a sixth of the fit distance)
       const dist = 1 / zoom;
-      const next = clamp(dist + delta * (e.ctrlKey ? 0.007 : 0.003), 0.12, 6);
+      const next = clamp(dist + delta * (e.ctrlKey ? 0.0035 : 0.0017), 0.12, 6);
       zoom = 1 / next;
       ed.setValue("camera.zoom", Math.round(zoom * 1000) / 1000);
     };

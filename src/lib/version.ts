@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.3.0";
+export const APP_VERSION = "0.4.0";
 
 export interface ChangelogEntry {
   version: string;
@@ -8,6 +8,21 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.4.0",
+    date: "Sep 3, 2026",
+    title: "Easing graph, marquee selection and rebuilt scenes",
+    items: [
+      "Easing graph editor: select a keyframe and drag either bezier handle, or take one of eight preset curves. Applies across a whole selection or a whole track, with a live cubic-bezier readout.",
+      "Marquee-select keyframes by dragging across the tracks; shift adds. Dragging any selected diamond moves the group, and holding alt retimes it proportionally.",
+      "⌘⌥A selects every keyframe; arrow up and down nudge the selection by a frame (shift ×10, alt retimes).",
+      "Keyframes can now sit before a shot starts or after it ends, so a move carries motion through a cut. Lanes open automatically for shots that have keyframes.",
+      "The 3D scenes were rebuilt: fog no longer swallows the floor, so Studio, Bright studio, Concrete and Dark room all show a lit sweep with real shadows. Dark room has a reflective floor again.",
+      "New: the screen throws its own light into lit scenes, coloured by whatever is on the display and following video as it plays.",
+      "Wheel zoom recalibrated to Ultramock's measured rate; a single notch no longer flies across the range.",
+      "More Central glyphs: distinct upload, download, transport, focus, audio and effect icons.",
+    ],
+  },
   {
     version: "0.3.0",
     date: "Sep 2, 2026",

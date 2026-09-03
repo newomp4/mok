@@ -282,12 +282,12 @@ export const EFFECT_DEFS: EffectDef[] = [
     { key: "width", label: "Width", min: 0, max: 0.2, step: 0.001, default: 0.04 },
     { key: "opacity", label: "Opacity", min: 0, max: 1, step: 0.01, default: 0.5 },
   ] },
-  { id: "ghost", name: "Ghost", icon: "layers", params: [
+  { id: "ghost", name: "Ghost", icon: "ghost", params: [
     { key: "offset", label: "Offset", min: 0, max: 0.08, step: 0.001, default: 0.02 },
     { key: "angle", label: "Angle", min: 0, max: 360, step: 1, default: 45 },
     { key: "opacity", label: "Opacity", min: 0, max: 1, step: 0.01, default: 0.35 },
   ] },
-  { id: "liquidGlass", name: "Liquid glass", icon: "glass", params: [
+  { id: "liquidGlass", name: "Liquid glass", icon: "droplet", params: [
     { key: "x", label: "X", min: 0, max: 1, step: 0.005, default: 0.5 },
     { key: "y", label: "Y", min: 0, max: 1, step: 0.005, default: 0.5 },
     { key: "width", label: "Width", min: 0.05, max: 1, step: 0.005, default: 0.42 },

@@ -5,6 +5,7 @@ import { APP_VERSION } from "@/lib/version";
 import type { AnimProp } from "@/lib/types";
 import { useUI } from "@/store/ui";
 import { loadAutosave, saveAutosave, saveProject, exportProjectFile, importProjectFile, downloadBlob } from "@/lib/persistence";
+import * as persistence from "@/lib/persistence";
 import { extractFiles } from "@/lib/media";
 import { importFilesToShot, applyCameraPreset } from "@/lib/actions";
 import * as actions from "@/lib/actions";
@@ -23,7 +24,7 @@ export function useBootstrap() {
   useEffect(() => {
     const ui = useUI.getState();
     // debug handle for QA / power users
-    (window as unknown as { __mok: unknown }).__mok = { useEditor, useUI, actions, capture, registry: registryViewport, templates: TEMPLATES, anim: animState, effectDefs: EFFECT_DEFS, devices: DEVICES, scenes: SCENES, screens };
+    (window as unknown as { __mok: unknown }).__mok = { useEditor, useUI, actions, capture, registry: registryViewport, templates: TEMPLATES, anim: animState, effectDefs: EFFECT_DEFS, devices: DEVICES, scenes: SCENES, screens, persistence };
     ui.setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
     let cancelled = false;
     loadAutosave().then((p) => {

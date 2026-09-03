@@ -20,8 +20,9 @@ rendering and encoding happens locally with WebGL and WebCodecs.
   or image behind contain-fitted media
 - **Flat card and browser window** for plain screenshots; parametric fallbacks for every device remain
   in the code (hidden from the picker)
-- **Scenes**: custom (any background), Studio cyclorama, Concrete dark, Dark room, Bright studio — with real
-  shadow-mapped lighting on the 3D sets and contact shadows on the custom scene
+- **Scenes**: custom (any background), Studio light tent, Concrete dark, Dark room, Bright studio — real
+  shadow-mapped lighting, an infinite sweep that fades into fog with no horizon seam, a reflective floor in the
+  Dark room, and light thrown by the device screen itself, coloured by what is on the display
 - **6 lighting rigs** from CC0 Poly Haven HDRIs, rotatable and keyframeable
 - **Backgrounds**: solid color, 12 mesh-gradient presets, your own image with blur, or transparent
 - **Camera**: orbit / zoom / pan directly in the viewport with Ultramock's rig order and feel (drag 0.5°/px,
@@ -36,7 +37,9 @@ rendering and encoding happens locally with WebGL and WebCodecs.
   property with per-keyframe easing; motion presets with animated thumbnails; auto-motion that composes a camera
   move from focus areas you draw; right-click menus (rename, split at playhead, reverse, copy / paste, duplicate),
   drag to reorder, snapping, ⌘-scroll zoom, resizable height; **fade transitions** between shots and whole-video
-  fade in / out
+  fade in / out; **marquee-select** keyframes and move or proportionally retime them as a group
+- **Easing graph**: every keyframe carries a cubic-bezier curve you can shape by dragging its handles, or take
+  from an eight-tile preset grid, and apply across a selection or a whole track
 - **Text shots** in Geist or 20 Google fonts (weight, size, colour, alignment, line height, tracking) and
   **logo shots** (PNG / SVG on a colour, with Liquid metal, Gem smoke and Heatmap shader looks), both with enter /
   exit animations

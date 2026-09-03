@@ -18,6 +18,24 @@ import { IconBezierCurve } from "@central-icons-react/round-outlined-radius-2-st
 import { IconCursor } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconCursor";
 import { IconAnchor } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconAnchor";
 import { IconChart2 } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconChart2";
+import { IconArrowUpSquare } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconArrowUpSquare";
+import { IconArrowDownSquare } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconArrowDownSquare";
+import { IconBackward } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconBackward";
+import { IconGhost } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconGhost";
+import { IconDrop } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconDrop";
+import { IconGauge } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconGauge";
+import { IconStopwatch } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconStopwatch";
+import { IconVolumeUp } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconVolumeUp";
+import { IconVolumeOff } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconVolumeOff";
+import { IconHeadphones } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconHeadphones";
+import { IconFocusAuto } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconFocusAuto";
+import { IconFocusLock } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconFocusLock";
+import { IconAspectRatio169 } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconAspectRatio169";
+import { IconAspectRatio11 } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconAspectRatio11";
+import { IconContrast } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconContrast";
+import { IconChainLink1 } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconChainLink1";
+import { IconLayoutDashboard } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconLayoutDashboard";
+import { IconScissors2 } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconScissors2";
 import { IconArrowDown } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconArrowDown";
 import { IconArrowInbox } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconArrowInbox";
 import { IconArrowLeft } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconArrowLeft";
@@ -140,8 +158,10 @@ const CENTRAL: Record<string, CentralIcon> = {
   "info": IconInfoSimple,
   "help-circle": IconQuestionmarkCircle,
   "camera": IconCamera1,
-  "upload": IconShareOs,
-  "download": IconArrowInbox,
+  "upload": IconArrowUpSquare,
+  "share": IconShareOs,
+  "download": IconArrowDownSquare,
+  "inbox": IconArrowInbox,
   "export": IconSquareArrowTopRight2,
   "undo": IconArrowUndoUp,
   "redo": IconArrowRedoDown,
@@ -150,8 +170,8 @@ const CENTRAL: Record<string, CentralIcon> = {
   "sun": IconSun,
   "play": IconPlay,
   "pause": IconPause,
-  "skip-back": IconSkip,
-  "skip-forward": IconSkip,
+  "skip-back": IconBackward,
+  "skip-forward": IconBackward,
   "repeat": IconRepeat,
   "diamond": IconDiamond,
   "record": IconRecord,
@@ -234,13 +254,28 @@ const CENTRAL: Record<string, CentralIcon> = {
   "transition": IconArrowSplitRight,
   "font": IconFontStyle,
   "curve": IconBezierCurve,
+  "ghost": IconGhost,
+  "droplet": IconDrop,
+  "gauge": IconGauge,
+  "stopwatch": IconStopwatch,
+  "volume": IconVolumeUp,
+  "mute": IconVolumeOff,
+  "headphones": IconHeadphones,
+  "focus-auto": IconFocusAuto,
+  "focus-lock": IconFocusLock,
+  "aspect": IconAspectRatio169,
+  "aspect-square": IconAspectRatio11,
+  "contrast": IconContrast,
+  "link": IconChainLink1,
+  "dashboard": IconLayoutDashboard,
+  "split-clip": IconScissors2,
   "cursor": IconCursor,
   "anchor": IconAnchor,
   "chart": IconChart2,
 };
 
 /** icons that reuse a Central glyph mirrored horizontally */
-const FLIP_X = new Set(["skip-back"]);
+const FLIP_X = new Set(["skip-forward"]);
 
 export type IconName = string;
 export const ICON_NAMES = Array.from(new Set([...Object.keys(CENTRAL), ...Object.keys(LEGACY_PATHS)]));

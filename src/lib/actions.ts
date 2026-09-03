@@ -226,7 +226,10 @@ export async function applySampleScreen(id: string, shotId?: string | null) {
   let [w, h] = spec.screenPx;
   if (spec.family === "flat") [w, h] = landscape ? [1600, 1000] : [1206, 2622];
   else if ((w > h) !== landscape) { const long = Math.max(w, h); [w, h] = landscape ? [long, Math.round(long * 0.625)] : [Math.round(long * 0.46), long]; }
-  const blob = await sampleScreenBlob(id, Math.min(w, 2560), Math.min(h, 2560));
+  // cap the long edge but keep the aspect, or the sample would be stretched on the screen
+  const cap = 2560;
+  const scale = Math.min(1, cap / Math.max(w, h));
+  const blob = await sampleScreenBlob(id, Math.round(w * scale), Math.round(h * scale));
   if (!blob) return;
   const file = new File([blob], `${screen.name}.png`, { type: "image/png" });
   const ref = await importMedia(file);

@@ -115,8 +115,8 @@ function MediaEditor({ shot }: { shot: Shot | null }) {
       <Segmented size="sm" value={shot?.fit ?? "cover"} onChange={(v: FitMode) => update((p) => { const s = p.shots.find((x) => x.id === shot?.id); if (s) s.fit = v; })} options={[{ value: "cover", label: "Cover" }, { value: "contain", label: "Contain" }, { value: "stretch", label: "Stretch" }]} />
       {isVideo && shot && (
         <>
-          <NumberRow label="Speed" value={shot.speed ?? 1} min={0.25} max={4} step={0.05} unit="×" onChange={(v) => updateShot(shot.id, (s) => { s.speed = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
-          <NumberRow label="Trim start" value={shot.trimStart ?? 0} min={0} max={Math.max(0, (media.ref.duration ?? 0) - 0.5)} step={0.1} unit="s" onChange={(v) => updateShot(shot.id, (s) => { s.trimStart = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+          <NumberRow label={<span className="flex items-center gap-1.5"><Icon name="gauge" size={11} className="text-muted" />Speed</span>} value={shot.speed ?? 1} min={0.25} max={4} step={0.05} unit="×" onChange={(v) => updateShot(shot.id, (s) => { s.speed = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+          <NumberRow label={<span className="flex items-center gap-1.5"><Icon name="stopwatch" size={11} className="text-muted" />Trim start</span>} value={shot.trimStart ?? 0} min={0} max={Math.max(0, (media.ref.duration ?? 0) - 0.5)} step={0.1} unit="s" onChange={(v) => updateShot(shot.id, (s) => { s.trimStart = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
         </>
       )}
       <Button variant="ghost" size="sm" icon="copy" onClick={() => update((p) => { for (const s of p.shots) if (shotKind(s) === "media") s.media = shot?.media ?? null; })} className="justify-start text-muted">Use for all shots</Button>
@@ -551,7 +551,7 @@ function BlurSection() {
       <AnimRow prop="blur.strength" label="Strength" min={0} max={20} step={0.1} disabled={off} />
       {blur.mode === "depth" && (
         <>
-          <Segmented size="sm" value={(blur.focusDistance ?? 0) > 0 ? "manual" : "auto"} onChange={(v) => update((p) => { p.blur.focusDistance = v === "auto" ? 0 : Math.max(0.1, anim.focusDist); })} options={[{ value: "auto", label: "Auto focus" }, { value: "manual", label: "Manual" }]} />
+          <Segmented size="sm" value={(blur.focusDistance ?? 0) > 0 ? "manual" : "auto"} onChange={(v) => update((p) => { p.blur.focusDistance = v === "auto" ? 0 : Math.max(0.1, anim.focusDist); })} options={[{ value: "auto", label: "Auto focus", icon: "focus-auto" }, { value: "manual", label: "Manual", icon: "focus-lock" }]} />
           {(blur.focusDistance ?? 0) > 0 && <AnimRow prop="blur.focusDistance" label="Focus distance" min={0.1} max={40} step={0.05} />}
         </>
       )}

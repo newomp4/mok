@@ -145,7 +145,7 @@ export function Timeline() {
       ...(kind === "media" ? [{ label: "Upload media…", icon: "upload", onSelect: () => void pickFiles(ACCEPTED_TYPES).then((f) => importFilesToShot(f, shotId)) }] : []),
       ...(kind === "logo" ? [{ label: "Replace logo…", icon: "image", onSelect: () => void pickFiles(ACCEPTED_IMAGES).then(([f]) => f && importLogo(f, shotId)) }] : []),
       { label: "Duplicate", icon: "copy", shortcut: "⌘D", onSelect: () => duplicateShot(shotId) },
-      { label: "Split at playhead", icon: "split", shortcut: "⇧⌘D", disabled: !inside, onSelect: () => splitShot(shotId, ui.time - start) },
+      { label: "Split at playhead", icon: "split-clip", shortcut: "⇧⌘D", disabled: !inside, onSelect: () => splitShot(shotId, ui.time - start) },
       { label: "Reverse", icon: "rewind", onSelect: () => reverseShot(shotId) },
       { divider: true, label: "" },
       { label: "Copy", icon: "clipboard", shortcut: "⌘C", onSelect: () => copyShot(shotId) },
@@ -556,7 +556,7 @@ function AudioLabel({ track, onRemove }: { track: AudioTrack; onRemove: () => vo
   const ref = useRef<HTMLButtonElement>(null);
   return (
     <div className="group flex items-center gap-1.5 border-b border-line px-2" style={{ height: ROW_H }}>
-      <Icon name="speaker" size={11} className="text-muted" />
+      <Icon name="headphones" size={11} className="text-muted" />
       <button ref={ref} type="button" onClick={() => setOpen((o) => !o)} className="label min-w-0 flex-1 truncate text-left text-fg" title={track.media.name}>{track.media.name}</button>
       <span className="num text-[10px] text-muted">{audioLength(track).toFixed(1)}s</span>
       <IconButton icon="trash" size={10} label="Remove audio" onClick={onRemove} className="hidden h-5 w-5 group-hover:flex" />
@@ -590,7 +590,7 @@ function AudioBlock({ track, pps, total }: { track: AudioTrack; pps: number; tot
         onPointerUp={() => { drag.current = null; endInteraction(); }}
       >
         <Waveform loaded={loaded} />
-        <Icon name="audio" size={10} className="relative" />
+        <Icon name="volume" size={10} className="relative" />
         <span className="label relative truncate">{track.media.name}</span>
         {clipped < len && <span className="label-sm relative ml-auto opacity-70">trimmed to end</span>}
       </div>
