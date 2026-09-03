@@ -26,10 +26,15 @@ export interface MediaRef {
 export type EaseId =
   | "linear" | "smooth" | "easeIn" | "easeOut" | "easeInOut" | "expoOut" | "expoInOut" | "backOut" | "hold";
 
+/** cubic-bezier control points [x1, y1, x2, y2], as in CSS timing functions */
+export type EaseCurve = [number, number, number, number];
+
 export interface Keyframe {
   t: number;
   v: number;
   ease: EaseId;
+  /** when set, this curve is used instead of the named ease */
+  cp?: EaseCurve;
 }
 
 export const ANIM_PROPS = [

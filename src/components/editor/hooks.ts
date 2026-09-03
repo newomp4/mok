@@ -178,6 +178,15 @@ export function useShortcuts() {
         else if (ui.activeShotId) { e.preventDefault(); ed.copyShot(ui.activeShotId); ui.showToast("Shot copied"); }
         return;
       }
+      if (mod && e.altKey && e.key.toLowerCase() === "a") {
+        // select every keyframe in the project
+        e.preventDefault();
+        const keys: { shotId: string; prop: AnimProp; t: number }[] = [];
+        for (const shot of ed.project.shots) for (const [prop, list] of Object.entries(shot.keyframes) as [AnimProp, { t: number }[]][]) for (const k of list ?? []) keys.push({ shotId: shot.id, prop, t: k.t });
+        ui.setSelectedKeys(keys);
+        ui.showToast(`${keys.length} keyframe${keys.length === 1 ? "" : "s"} selected`);
+        return;
+      }
       if (mod && e.key.toLowerCase() === "v") {
         if (hasKeyClipboard()) { e.preventDefault(); ed.pasteKeyframes(); ui.showToast("Keyframes pasted at the playhead"); }
         else if (hasShotClipboard()) { e.preventDefault(); ed.pasteShot(ui.activeShotId ?? undefined); }
@@ -213,16 +222,15 @@ export function useShortcuts() {
         case "Backspace": case "Delete": {
           if (!ui.selectedKeys.length) break;
           e.preventDefault();
-          const keys = ui.selectedKeys;
-          ed.update((pp) => {
-            for (const key of keys) {
-              const s = pp.shots.find((x) => x.id === key.shotId);
-              if (!s) continue;
-              const list = (s.keyframes[key.prop] ?? []).filter((k) => Math.abs(k.t - key.t) > 0.0005);
-              if (list.length) s.keyframes[key.prop] = list; else delete s.keyframes[key.prop];
-            }
-          });
-          ui.setSelectedKeys([]);
+          ed.deleteSelectedKeyframes();
+          break;
+        }
+        case "ArrowUp": case "ArrowDown": {
+          // nudge the selected keyframes one frame (shift = ten)
+          if (!ui.selectedKeys.length) break;
+          e.preventDefault();
+          const step = (e.shiftKey ? 10 : 1) / p.fps;
+          ed.moveSelectedKeyframes(e.key === "ArrowUp" ? -step : step, e.altKey);
           break;
         }
       }

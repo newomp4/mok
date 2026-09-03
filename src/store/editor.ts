@@ -39,6 +39,9 @@ interface EditorState {
   stampKeyframes: (props: AnimProp[]) => void;
   copyKeyframes: (keys: { shotId: string; prop: AnimProp; t: number }[]) => void;
   pasteKeyframes: () => void;
+  /** move every selected keyframe; proportional scales the selection around its first keyframe */
+  moveSelectedKeyframes: (dt: number, proportional?: boolean) => void;
+  deleteSelectedKeyframes: () => void;
 }
 
 let shotClipboard: Shot | null = null;
@@ -48,6 +51,12 @@ export const hasKeyClipboard = () => keyClipboard.length > 0;
 
 function clone<T>(v: T): T {
   return structuredClone(v);
+}
+
+/** Keyframes may live outside their shot (motion carries through a cut), within a sane margin. */
+export function clampKeyTime(t: number, duration: number): number {
+  const margin = Math.max(2, duration);
+  return Math.min(Math.max(t, -margin), duration + margin);
 }
 
 /** Immutable base-value write: copies only the group that changes. */
@@ -258,6 +267,66 @@ export const useEditor = create<EditorState>()(
             const k = s?.keyframes[key.prop]?.find((kk) => Math.abs(kk.t - key.t) < 0.0005);
             if (k) keyClipboard.push({ prop: key.prop, k: { ...k } });
           }
+        },
+        moveSelectedKeyframes: (dt, proportional = false) => {
+          const ui = useUI.getState();
+          const keys = ui.selectedKeys;
+          if (!keys.length || Math.abs(dt) < 1e-6) return;
+          const p = clone(get().project);
+          const starts = new Map(p.shots.map((s) => [s.id, shotStart(p, s.id)]));
+          const abs = keys.map((k) => (starts.get(k.shotId) ?? 0) + k.t);
+          const pivot = Math.min(...abs);
+          const span = Math.max(...abs) - pivot;
+          const next: typeof keys = [];
+          // group the moves per track so a shifted keyframe never lands on one we have not moved yet
+          const byTrack = new Map<string, { shotId: string; prop: AnimProp; times: { from: number; to: number }[] }>();
+          keys.forEach((k, i) => {
+            const start = starts.get(k.shotId) ?? 0;
+            const shot = p.shots.find((s) => s.id === k.shotId);
+            if (!shot) return;
+            const scaled = proportional && span > 1e-6
+              ? pivot + (abs[i] - pivot) * ((span + dt) / span)
+              : abs[i] + dt;
+            // a keyframe may sit before a shot starts or after it ends, so a move can carry through a cut
+            const to = Math.round(clampKeyTime(scaled - start, shot.duration) * 100) / 100;
+            const id = `${k.shotId}|${k.prop}`;
+            if (!byTrack.has(id)) byTrack.set(id, { shotId: k.shotId, prop: k.prop, times: [] });
+            byTrack.get(id)!.times.push({ from: k.t, to });
+            next.push({ shotId: k.shotId, prop: k.prop, t: to });
+          });
+          for (const { shotId, prop, times } of byTrack.values()) {
+            const shot = p.shots.find((s) => s.id === shotId);
+            const list = shot?.keyframes[prop];
+            if (!shot || !list) continue;
+            const moved = new Set(times.map((x) => x.from));
+            const rest = list.filter((k) => !moved.has(k.t));
+            const out = [...rest];
+            for (const { from, to } of times) {
+              const src = list.find((k) => Math.abs(k.t - from) < 0.0005);
+              if (!src) continue;
+              const at = out.findIndex((k) => Math.abs(k.t - to) < 0.0005);
+              if (at >= 0) out.splice(at, 1);
+              out.push({ ...src, t: to });
+            }
+            out.sort((a, b) => a.t - b.t);
+            shot.keyframes[prop] = out;
+          }
+          set({ project: p });
+          ui.setSelectedKeys(next);
+        },
+        deleteSelectedKeyframes: () => {
+          const ui = useUI.getState();
+          const keys = ui.selectedKeys;
+          if (!keys.length) return;
+          const p = clone(get().project);
+          for (const key of keys) {
+            const shot = p.shots.find((x) => x.id === key.shotId);
+            if (!shot) continue;
+            const list = (shot.keyframes[key.prop] ?? []).filter((k) => Math.abs(k.t - key.t) > 0.0005);
+            if (list.length) shot.keyframes[key.prop] = list; else delete shot.keyframes[key.prop];
+          }
+          set({ project: p });
+          ui.setSelectedKeys([]);
         },
         pasteKeyframes: () => {
           if (!keyClipboard.length) return;

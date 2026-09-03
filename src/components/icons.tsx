@@ -14,6 +14,10 @@ import { IconSpeaker } from "@central-icons-react/round-outlined-radius-2-stroke
 import { IconLetterASquare } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconLetterASquare";
 import { IconArrowSplitRight } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconArrowSplitRight";
 import { IconFontStyle } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconFontStyle";
+import { IconBezierCurve } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconBezierCurve";
+import { IconCursor } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconCursor";
+import { IconAnchor } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconAnchor";
+import { IconChart2 } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconChart2";
 import { IconArrowDown } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconArrowDown";
 import { IconArrowInbox } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconArrowInbox";
 import { IconArrowLeft } from "@central-icons-react/round-outlined-radius-2-stroke-1.5/IconArrowLeft";
@@ -229,6 +233,10 @@ const CENTRAL: Record<string, CentralIcon> = {
   "logo": IconLetterASquare,
   "transition": IconArrowSplitRight,
   "font": IconFontStyle,
+  "curve": IconBezierCurve,
+  "cursor": IconCursor,
+  "anchor": IconAnchor,
+  "chart": IconChart2,
 };
 
 /** icons that reuse a Central glyph mirrored horizontally */

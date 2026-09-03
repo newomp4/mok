@@ -1,4 +1,4 @@
-import type { AnimProp, EaseId, Keyframe, Project, Shot } from "./types";
+import type { AnimProp, EaseCurve, EaseId, Keyframe, Project, Shot } from "./types";
 
 export const EASES: { id: EaseId; label: string }[] = [
   { id: "smooth", label: "Smooth" },
@@ -11,6 +11,61 @@ export const EASES: { id: EaseId; label: string }[] = [
   { id: "backOut", label: "Back out" },
   { id: "hold", label: "Hold" },
 ];
+
+/** The preset grid in the easing editor, as cubic-bezier curves. */
+export const EASE_CURVES: { id: string; label: string; cp: EaseCurve }[] = [
+  { id: "linear", label: "Linear", cp: [0, 0, 1, 1] },
+  { id: "ease", label: "Ease", cp: [0.25, 0.1, 0.25, 1] },
+  { id: "in", label: "Ease in", cp: [0.42, 0, 1, 1] },
+  { id: "out", label: "Ease out", cp: [0, 0, 0.58, 1] },
+  { id: "inout", label: "Ease in-out", cp: [0.42, 0, 0.58, 1] },
+  { id: "sine", label: "Sine", cp: [0.37, 0, 0.63, 1] },
+  { id: "quint", label: "Quint", cp: [0.83, 0, 0.17, 1] },
+  { id: "expo", label: "Expo", cp: [0.87, 0, 0.13, 1] },
+];
+
+/** Named eases expressed as curves, so the graph can draw any keyframe. */
+const NAMED_CURVES: Record<EaseId, EaseCurve> = {
+  linear: [0, 0, 1, 1],
+  smooth: [0.4, 0, 0.6, 1],
+  easeIn: [0.55, 0.06, 0.68, 0.19],
+  easeOut: [0.22, 0.61, 0.36, 1],
+  easeInOut: [0.65, 0, 0.35, 1],
+  expoOut: [0.19, 1, 0.22, 1],
+  expoInOut: [0.87, 0, 0.13, 1],
+  backOut: [0.34, 1.56, 0.64, 1],
+  hold: [1, 0, 1, 0],
+};
+
+export function curveOf(k: Pick<Keyframe, "ease" | "cp">): EaseCurve {
+  return k.cp ?? NAMED_CURVES[k.ease] ?? NAMED_CURVES.smooth;
+}
+
+/** y at x for a cubic bezier from (0,0) to (1,1) with the given control points. */
+export function bezierEase(cp: EaseCurve, x: number): number {
+  const [x1, y1, x2, y2] = cp;
+  const t = Math.min(1, Math.max(0, x));
+  const bx = (u: number) => 3 * (1 - u) * (1 - u) * u * x1 + 3 * (1 - u) * u * u * x2 + u * u * u;
+  const by = (u: number) => 3 * (1 - u) * (1 - u) * u * y1 + 3 * (1 - u) * u * u * y2 + u * u * u;
+  // Newton-Raphson with a bisection fallback keeps this exact enough for playback and export
+  let u = t;
+  for (let i = 0; i < 6; i++) {
+    const dx = bx(u) - t;
+    if (Math.abs(dx) < 1e-5) return by(u);
+    const d = 3 * (1 - u) * (1 - u) * x1 + 6 * (1 - u) * u * (x2 - x1) + 3 * u * u * (1 - x2);
+    if (Math.abs(d) < 1e-6) break;
+    u -= dx / d;
+  }
+  let lo = 0, hi = 1;
+  u = t;
+  for (let i = 0; i < 20; i++) {
+    const dx = bx(u) - t;
+    if (Math.abs(dx) < 1e-5) break;
+    if (dx > 0) hi = u; else lo = u;
+    u = (lo + hi) / 2;
+  }
+  return by(u);
+}
 
 export function ease(id: EaseId, t: number): number {
   t = Math.min(1, Math.max(0, t));
@@ -43,7 +98,8 @@ export function sampleTrack(kfs: Keyframe[], t: number): number {
   const a = kfs[i], b = kfs[i + 1];
   const span = b.t - a.t;
   if (span <= 0) return b.v;
-  const u = ease(a.ease, (t - a.t) / span);
+  const x = (t - a.t) / span;
+  const u = a.cp ? bezierEase(a.cp, x) : ease(a.ease, x);
   return a.v + (b.v - a.v) * u;
 }
 
