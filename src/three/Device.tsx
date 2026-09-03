@@ -49,6 +49,9 @@ export function Device({ layout }: { layout: DeviceLayout }) {
   const surface = useMemo(() => new ScreenSurface(maxAniso), [maxAniso]);
   useEffect(() => () => surface.dispose(), [surface]);
   const applied = useRef<{ media: LoadedMedia | null; fit: string } | null>(null);
+  const lastSample = useRef(-1);
+  // re-sample the screen colour whenever the picture or the scene changes
+  useEffect(() => { lastSample.current = -1; invalidate(); }, [media, scenePreset, shot?.fit, invalidate]);
   const screenMat = useMemo(() => createScreenMaterial(surface.texture), [surface]);
   useEffect(() => () => screenMat.dispose(), [screenMat]);
 
@@ -105,6 +108,12 @@ export function Device({ layout }: { layout: DeviceLayout }) {
       }
     }
     const shotMedia = cur && shotKind(cur) === "media" && cur.media ? getMedia(cur.media.id) : media;
+    // lit scenes take their screen glow from what is actually on the display
+    const liveScreen = shotMedia?.kind === "video" && (useUI.getState().playing || anim.exporting);
+    if (scenePreset !== "custom" && (liveScreen || lastSample.current < 0)) {
+      lastSample.current = state.clock.elapsedTime;
+      anim.screenColor = surface.averageColor();
+    }
     const target: [number, number, number] = [v["mockup.rotX"] + (standing ? -layout.lean : 0), v["mockup.rotY"], v["mockup.rotZ"]];
     const exact = anim.exporting || useUI.getState().playing;
     if (exact || !smoothRot.current) smoothRot.current = target;

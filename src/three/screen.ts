@@ -26,6 +26,7 @@ export class ScreenSurface {
   bg: { color: string; image: HTMLImageElement | null } = { color: "#000000", image: null };
   statusBar = false;
   private probe: HTMLCanvasElement | null = null;
+  private avg: HTMLCanvasElement | null = null;
 
   constructor(maxAniso = 16) {
     this.canvas = document.createElement("canvas");
@@ -341,6 +342,20 @@ export class ScreenSurface {
       });
     }
     ctx.textAlign = "left";
+  }
+
+  /** Mean colour of the screen in linear space, used to light the room from the display. */
+  averageColor(): [number, number, number] {
+    if (!this.avg) { this.avg = document.createElement("canvas"); this.avg.width = this.avg.height = 4; }
+    const ctx = this.avg.getContext("2d", { willReadFrequently: true })!;
+    ctx.drawImage(this.canvas, 0, 0, 4, 4);
+    const d = ctx.getImageData(0, 0, 4, 4).data;
+    let r = 0, g = 0, b = 0;
+    for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
+    const n = (d.length / 4) * 255;
+    // sRGB -> linear, then lift so a dark screen still tints rather than going black
+    const lin = (v: number) => Math.pow(Math.max(0.04, v / n), 2.2);
+    return [lin(r), lin(g), lin(b)];
   }
 
   dispose() {

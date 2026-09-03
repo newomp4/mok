@@ -27,4 +27,6 @@ export const anim = {
   fadeColor: "#000000",
   /** true while a text / logo card shot is on screen (device hidden) */
   card: false,
+  /** average linear colour of the screen, for the light it throws into a lit scene */
+  screenColor: null as [number, number, number] | null,
 };
