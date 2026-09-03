@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.4.0";
+export const APP_VERSION = "0.5.0";
 
 export interface ChangelogEntry {
   version: string;
@@ -8,6 +8,19 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.5.0",
+    date: "Sep 3, 2026",
+    title: "Designed backgrounds and a timeline that edits like an NLE",
+    items: [
+      "Backgrounds rebuilt as layered mesh gradients with a raking sheen, a soft highlight, a vignette and fine grain. Fifteen presets, including Crystal, Spectrum and Sundrape.",
+      "The background preset list is now a grid of real previews rather than a text list.",
+      "Timeline clips show a frame of their own media; shots trim from the head as well as the tail, taking the video's trim point and the shot's keyframes with them.",
+      "Keyframes follow the cursor while you drag, with a guide line when they snap. Right-click a lane for select whole track, add keyframe here and clear track.",
+      "Number rows nudge with the arrow keys, ten steps at a time with shift.",
+      "Contact shadow gains Soft and Opacity controls; two more lighting rigs, Lightbox and Dramatic key.",
+    ],
+  },
   {
     version: "0.4.0",
     date: "Sep 3, 2026",

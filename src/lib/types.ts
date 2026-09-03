@@ -134,7 +134,7 @@ export interface AudioTrack {
 
 export type BackgroundType = "color" | "preset" | "image" | "transparent";
 export type ScenePresetId = "custom" | "studio" | "concrete" | "darkroom" | "gallery";
-export type LightingId = "default" | "soft" | "bright" | "contrast" | "neon" | "cool";
+export type LightingId = "default" | "soft" | "bright" | "contrast" | "neon" | "cool" | "lightbox" | "dramatic";
 export type BlurMode = "off" | "radial" | "directional" | "linear" | "depth";
 export type EffectId =
   | "vignette" | "grain" | "bloom" | "chromatic" | "sharpen" | "pixel" | "fisheye" | "glassBorder" | "screenFade" | "ghost" | "liquidGlass";
@@ -159,6 +159,9 @@ export interface Project {
     lightRotY: number;
     lightIntensity: number;
     contactShadow: boolean;
+    /** contact shadow blur (0..1) and opacity (0..1) on the custom scene */
+    shadowSoft?: number;
+    shadowOpacity?: number;
     background: {
       type: BackgroundType;
       color: string;

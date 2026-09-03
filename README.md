@@ -23,8 +23,9 @@ rendering and encoding happens locally with WebGL and WebCodecs.
 - **Scenes**: custom (any background), Studio light tent, Concrete dark, Dark room, Bright studio — real
   shadow-mapped lighting, an infinite sweep that fades into fog with no horizon seam, a reflective floor in the
   Dark room, and light thrown by the device screen itself, coloured by what is on the display
-- **6 lighting rigs** from CC0 Poly Haven HDRIs, rotatable and keyframeable
-- **Backgrounds**: solid color, 12 mesh-gradient presets, your own image with blur, or transparent
+- **8 lighting rigs** from CC0 Poly Haven HDRIs, rotatable and keyframeable, with contact-shadow softness and opacity
+- **Backgrounds**: solid color, 15 layered mesh-gradient presets picked from a visual grid, your own image
+  with blur, or transparent
 - **Camera**: orbit / zoom / pan directly in the viewport with Ultramock's rig order and feel (drag 0.5°/px,
   pitch about the world axis so angled views lean the device), nine presets — five of them ported numerically
   from Ultramock — FOV, roll, centre guides and snap-to-centre panning

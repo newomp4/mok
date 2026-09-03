@@ -22,16 +22,20 @@ const ROW_H = 30;
 const LANE_H = 24;
 const SNAP_PX = 7;
 
-/** Snap a time to half-seconds and the playhead when within a few pixels. */
-function snapTime(t: number, pps: number, playhead: number): number {
-  const cands = [Math.round(t * 2) / 2, playhead];
+/** Snap a time to half-seconds and the playhead, reporting what it locked on to. */
+function snapDetail(t: number, pps: number, playhead: number): { t: number; snapped: number | null } {
   let best = t;
   let bestD = SNAP_PX / pps;
-  for (const c of cands) {
+  let snapped: number | null = null;
+  for (const c of [Math.round(t * 2) / 2, playhead]) {
     const d = Math.abs(c - t);
-    if (d < bestD) { best = c; bestD = d; }
+    if (d < bestD) { best = c; bestD = d; snapped = c; }
   }
-  return Math.round(best * 100) / 100;
+  return { t: Math.round(best * 100) / 100, snapped };
+}
+
+function snapTime(t: number, pps: number, playhead: number): number {
+  return snapDetail(t, pps, playhead).t;
 }
 
 const KIND_ICON: Record<string, string> = { media: "shot", text: "type", logo: "logo" };
@@ -65,6 +69,7 @@ export function Timeline() {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [transitionFor, setTransitionFor] = useState<string | null>(null);
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [snapAt, setSnapAt] = useState<number | null>(null);
   const marqueeRef = useRef<{ x0: number; y0: number; additive: boolean; base: typeof selected } | null>(null);
   const advanced = ui.timelineMode === "advanced";
 
@@ -353,6 +358,8 @@ export function Timeline() {
                             key={k.t}
                             id={`${shot.id}|${prop}|${k.t}`}
                             x={8 + (start + k.t) * pps}
+                            t={k.t}
+                            start={start}
                             selected={isSel}
                             custom={!!k.cp}
                             onContextMenu={(at) => { if (!isSel) setSelected([{ shotId: shot.id, prop, t: k.t }]); setKeyMenu({ at, shotId: shot.id, prop, t: k.t }); }}
@@ -362,7 +369,15 @@ export function Timeline() {
                               else if (!isSel) setSelected([key]);
                               ui.setTime(start + k.t);
                             }}
+                            preview={(dt) => {
+                              // a group drag moves everything by the raw delta; a single one snaps
+                              if (selected.length > 1 && isSel) { setSnapAt(null); return k.t + dt; }
+                              const d = snapDetail(k.t + dt, pps, ui.time - start);
+                              setSnapAt(d.snapped === null ? null : start + d.snapped);
+                              return clampKeyTime(d.t, shot.duration);
+                            }}
                             onMove={(dt, alt) => {
+                              setSnapAt(null);
                               const many = selected.length > 1 && isSel;
                               if (many) { useEditor.getState().moveSelectedKeyframes(dt, alt); return; }
                               const nt = clampKeyTime(snapTime(k.t + dt, pps, ui.time - start), shot.duration);
@@ -386,6 +401,9 @@ export function Timeline() {
               ))}
               {project.audio && <AudioBlock track={project.audio} pps={pps} total={total} />}
             </div>
+            {snapAt !== null && (
+              <div className="pointer-events-none absolute top-0 z-30 h-full w-px bg-accent/70" style={{ left: 8 + snapAt * pps }} />
+            )}
             {marquee && (
               <div className="pointer-events-none absolute z-30 rounded-sm border border-accent bg-accent/15" style={{ left: marquee.x0, top: marquee.y0, width: marquee.x1 - marquee.x0, height: marquee.y1 - marquee.y0 }} />
             )}
@@ -680,22 +698,30 @@ function Waveform({ loaded }: { loaded: ReturnType<typeof useMedia> }) {
   );
 }
 
-function KeyframeDiamond({ id, x, selected, custom, onSelect, onMove, pps, onContextMenu }: { id: string; x: number; selected: boolean; custom?: boolean; onSelect: (additive: boolean) => void; onMove: (dt: number, alt: boolean) => void; pps: number; onContextMenu?: (at: { x: number; y: number }) => void }) {
+function KeyframeDiamond({ id, x, t, start, selected, custom, onSelect, onMove, preview, pps, onContextMenu }: { id: string; x: number; t: number; start: number; selected: boolean; custom?: boolean; onSelect: (additive: boolean) => void; onMove: (dt: number, alt: boolean) => void; preview?: (dt: number) => number; pps: number; onContextMenu?: (at: { x: number; y: number }) => void }) {
   const drag = useRef<{ x: number; moved: boolean } | null>(null);
+  const [ghost, setGhost] = useState<number | null>(null);
   return (
     <button
       type="button"
       data-kf={id}
       title={custom ? "Custom easing curve" : undefined}
-      className={cn("absolute top-1/2 flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-sm", selected ? "text-fg" : "text-accent")}
-      style={{ left: x }}
+      className={cn("absolute top-1/2 flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-sm", selected ? "text-fg" : "text-accent", ghost !== null && "z-20")}
+      style={{ left: ghost === null ? x : 8 + (start + ghost) * pps }}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu?.({ x: e.clientX, y: e.clientY }); }}
       onPointerDown={(e) => { e.stopPropagation(); (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); drag.current = { x: e.clientX, moved: false }; onSelect(e.shiftKey); }}
-      onPointerMove={(e) => { if (!drag.current) return; if (Math.abs(e.clientX - drag.current.x) > 3) drag.current.moved = true; }}
-      onPointerUp={(e) => {
+      onPointerMove={(e) => {
         if (!drag.current) return;
-        if (drag.current.moved) onMove((e.clientX - drag.current.x) / pps, e.altKey);
+        if (Math.abs(e.clientX - drag.current.x) > 3) drag.current.moved = true;
+        // the diamond follows the cursor so you can see where it will land
+        if (drag.current.moved && preview) setGhost(preview((e.clientX - drag.current.x) / pps));
+      }}
+      onPointerUp={(e) => {
+        const d = drag.current;
+        if (!d) return;
         drag.current = null;
+        setGhost(null);
+        if (d.moved) onMove((e.clientX - d.x) / pps, e.altKey);
       }}
       onDoubleClick={(e) => e.stopPropagation()}
     >

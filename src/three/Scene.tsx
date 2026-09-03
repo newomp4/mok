@@ -235,6 +235,8 @@ export function SceneRoot() {
   const layout = useDeviceLayout();
   const scenePreset = useEditor((s) => s.project.scene.preset);
   const contactShadow = useEditor((s) => s.project.scene.contactShadow);
+  const shadowSoft = useEditor((s) => s.project.scene.shadowSoft ?? 0.5);
+  const shadowOpacity = useEditor((s) => s.project.scene.shadowOpacity ?? 0.5);
   const shadowsOn = scenePreset !== "custom";
   return (
     <>
@@ -250,7 +252,7 @@ export function SceneRoot() {
       <Device layout={layout} />
       {!shadowsOn && contactShadow && (
         <DeviceOnly>
-          <ContactShadows position={[0, layout.floorY - 0.004, 0]} scale={layout.fitSize * 2.8} blur={2.4} opacity={0.5} far={layout.fitSize * 1.4} resolution={1024} color="#000000" />
+          <ContactShadows position={[0, layout.floorY - 0.004, 0]} scale={layout.fitSize * (2.2 + shadowSoft * 1.4)} blur={0.6 + shadowSoft * 4} opacity={shadowOpacity} far={layout.fitSize * (0.8 + shadowSoft * 1.2)} resolution={1024} color="#000000" />
         </DeviceOnly>
       )}
       <PostFX />

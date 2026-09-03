@@ -291,6 +291,12 @@ function SceneSection() {
       <AnimRow prop="scene.lightRotY" label="Light rotation Y" min={0} max={360} step={1} />
       <AnimRow prop="scene.lightIntensity" label="Light intensity" min={0} max={3} step={0.01} />
       {custom && <ToggleRow label="Contact shadow" checked={scene.contactShadow} onChange={(v) => update((p) => { p.scene.contactShadow = v; })} />}
+      {custom && scene.contactShadow && (
+        <>
+          <NumberRow label="Shadow soft" value={scene.shadowSoft ?? 0.5} min={0} max={1} step={0.01} onChange={(v) => update((p) => { p.scene.shadowSoft = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+          <NumberRow label="Shadow opacity" value={scene.shadowOpacity ?? 0.5} min={0} max={1} step={0.01} onChange={(v) => update((p) => { p.scene.shadowOpacity = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+        </>
+      )}
       {custom ? (
         <>
           <SelectRow label="Background" value={bg.type} onChange={(v) => update((p) => { p.scene.background.type = v; })} options={[{ value: "color", label: "Color" }, { value: "preset", label: "Preset" }, { value: "image", label: "Image" }, { value: "transparent", label: "Transparent" }]} />

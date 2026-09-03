@@ -44,6 +44,8 @@ export function createProject(): Project {
       lightRotY: 263,
       lightIntensity: 1,
       contactShadow: true,
+      shadowSoft: 0.5,
+      shadowOpacity: 0.5,
       background: { type: "preset", color: "#f2f2f2", preset: "whisp", image: null, blur: 0.85 },
     },
     mockup: { device: "iphone-17-pro-glb", finish: "model", reflection: 0.99, gloss: 1.4, borderRadius: 0.04, rotX: 0, rotY: 8, rotZ: 0, lid: 110, notch: true, caseKeyboard: true, bandColor: null },
@@ -67,6 +69,8 @@ export function normalizeProject(p: Project): Project {
   p.screen.bg ??= { type: "color", color: "#000000", image: null };
   p.screen.statusBar ??= false;
   p.blur.focusDistance ??= 0;
+  p.scene.shadowSoft ??= 0.5;
+  p.scene.shadowOpacity ??= 0.5;
   p.audio ??= null;
   p.fade ??= { in: 0, out: 0, color: "#000000" };
   for (const s of p.shots) { s.kind ??= "media"; s.focusAreas ??= []; s.keyframes ??= {}; }

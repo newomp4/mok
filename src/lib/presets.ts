@@ -176,6 +176,8 @@ export const LIGHTINGS: LightingPreset[] = [
   { id: "cool", name: "Two tone", file: "/hdri/blue_photo_studio.hdr", intensity: 1, rotY: 300 },
   { id: "contrast", name: "Warm glow", file: "/hdri/photo_studio_01.hdr", intensity: 1, rotY: 220 },
   { id: "bright", name: "Bright", file: "/hdri/studio_small_03.hdr", intensity: 1.15, rotY: 120 },
+  { id: "lightbox", name: "Lightbox", file: "/hdri/studio_small_09.hdr", intensity: 1.35, rotY: 20 },
+  { id: "dramatic", name: "Dramatic key", file: "/hdri/photo_studio_01.hdr", intensity: 1.5, rotY: 55 },
 ];
 export function getLighting(id: LightingId): LightingPreset {
   return LIGHTINGS.find((l) => l.id === id) ?? LIGHTINGS[0];
