@@ -112,17 +112,21 @@ export function applyTemplate(id: string) {
   // a fade-in means t=0 is a blank frame, so park the playhead just past it
   const fadeIn = useEditor.getState().project.fade?.in ?? 0;
   useUI.getState().setTime(fadeIn > 0 ? Math.round((fadeIn + 0.4) * 100) / 100 : 0);
-  // a template should look finished straight away: fill empty media shots with its sample screen
+  // a template should look finished straight away: fill empty media shots with its sample screen.
+  // rendering one costs a canvas draw and an IndexedDB write, so switching templates quickly only
+  // ever renders the screen of the one you settle on.
   if (t.screen) {
-    const p = useEditor.getState().project;
-    if (!p.shots.some((sh) => shotKind(sh) === "media" && sh.media)) {
-      void applySampleScreen(t.screen).then(() => {
-        // another template may have been picked while the screen was rendering
+    const screen = t.screen;
+    window.setTimeout(() => {
+      if (token !== templateToken) return;
+      const p = useEditor.getState().project;
+      if (p.shots.some((sh) => shotKind(sh) === "media" && sh.media)) return;
+      void applySampleScreen(screen).then(() => {
         if (token !== templateToken) return;
         const ref = useEditor.getState().project.shots.find((sh) => sh.media)?.media ?? null;
         if (ref) useEditor.getState().update((pp) => { for (const sh of pp.shots) if (shotKind(sh) === "media") sh.media = ref; });
       });
-    }
+    }, 180);
   }
 }
 

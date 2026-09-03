@@ -14,6 +14,8 @@ const only = process.argv.slice(2);
 const ids = (await page.evaluate(() => __mok.templates.map((t) => t.id))).filter((id) => !only.length || only.includes(id));
 for (const id of ids) {
   const dataUrl = await page.evaluate(async (id) => {
+    // a fresh project first, so each template seeds its own sample screen
+    __mok.actions.newProject();
     __mok.actions.applyTemplate(id);
     const tpl = __mok.templates.find((t) => t.id === id);
     const p = __mok.useEditor.getState().project;

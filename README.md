@@ -28,7 +28,8 @@ rendering and encoding happens locally with WebGL and WebCodecs.
   pitch about the world axis so angled views lean the device), nine presets — five of them ported numerically
   from Ultramock — FOV, roll, centre guides and snap-to-centre panning
 - **Blur**: radial, directional or tilt-shift focus blur with bokeh, or true lens depth of field with a placeable
-  focal point (drag the pad or ⌥-click the viewport; the focus distance is measured on the device surface)
+  focal point (drag the pad or ⌥-click the viewport). Lens blur autofocuses on the surface under the focus point
+  or takes a manual, keyframeable focus distance. Guides draw the focus while you adjust and fade out again
 - **Effects**: vignette, grain, bloom, chromatic aberration, sharpen, pixel grid, fish eye, glass border,
   screen fade, ghost, liquid glass
 - **Timeline**: media, **text** and **logo** shots back to back; keyframes on every camera / device / light / blur
@@ -46,7 +47,8 @@ rendering and encoding happens locally with WebGL and WebCodecs.
   template opens with content already on the device
 - **Export**: PNG / WebP / JPG up to 8K (or any custom size) with transparent background; MP4 (H.264) or WebM
   (VP9, alpha) up to 4K, 24 / 30 / 60 fps, 4× / 8× / 16× motion blur, App Store preview sizes, audio muxed in
-- **20 starter templates** with hover previews, including multi-shot sequences (title → device → logo)
+- **24 starter templates** with hover previews, including multi-shot sequences (title → device → logo), each
+  opening with a sample screen already on the device
 - **Projects**: autosave, local project library (IndexedDB), portable `.mok.json` files, undo / redo
 - Light and dark UI in Geist Sans + Geist Mono, keyboard shortcuts (`?`), onboarding tour, what's new, preferences
 

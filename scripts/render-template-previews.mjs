@@ -14,6 +14,8 @@ const only = process.argv.slice(2);
 const ids = (await page.evaluate(() => __mok.templates.filter((t) => t.motion || t.sequence).map((t) => t.id))).filter((id) => !only.length || only.includes(id));
 for (const id of ids) {
   const dataUrl = await page.evaluate(async (id) => {
+    // a fresh project first, so each template seeds its own sample screen
+    __mok.actions.newProject();
     __mok.actions.applyTemplate(id);
     // keep the clip short: the first media shot only, capped at 3 s
     __mok.useEditor.getState().update((p) => {

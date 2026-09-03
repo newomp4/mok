@@ -359,6 +359,29 @@ export const TEMPLATES: Template[] = [
   { id: "air-mint", screen: "music", name: "Air on mint", device: "iphone-16-pro-max-glb", finish: "model", scene: "custom", camera: { x: 20, y: 12, z: 4, fov: 24, zoom: 0.8, panX: 0, panY: 0 }, rot: { x: 0, y: -20, z: 0 }, motion: "flip", aspect: "9:16", background: { type: "preset", preset: "mint" }, swatch: ["#e6f4ec", "#8fd1ae"] },
   { id: "imac-noir", screen: "analytics", name: "iMac noir", device: "imac-24-glb", finish: "green", scene: "darkroom", camera: { x: -16, y: 10, z: 0, fov: 24, zoom: 1, panX: 0, panY: 0.04 }, rot: { x: 0, y: 8, z: 0 }, motion: "out-and-back", aspect: "16:9", swatch: ["#0c0c0c", "#2c5e9a"] },
   {
+    id: "watch-detail", screen: "finance-dark", name: "Watch detail", description: "Side close-up on plain grey", device: "apple-watch-ultra-glb", finish: "natural", scene: "custom",
+    camera: { x: 22, y: -10, z: 0, fov: 24, zoom: 1.75, panX: -0.02, panY: -0.02 }, rot: { x: 0, y: 0, z: 0 }, aspect: "4:3", motion: "drift",
+    background: { type: "color", color: "#f2f2f2" }, swatch: ["#f2f2f2", "#d8d8d8"], thumbAt: 0.4,
+  },
+  {
+    id: "iphone-top", screen: "finance-dark", name: "iPhone top", description: "Tight on the top third", device: "iphone-17-pro-glb", finish: "model", scene: "custom",
+    camera: { x: -14, y: 16, z: 0, fov: 24, zoom: 2.05, panX: 0.02, panY: -0.3 }, rot: { x: 0, y: 0, z: 0 }, aspect: "4:3", motion: "drift",
+    background: { type: "color", color: "#f2f2f2" }, swatch: ["#f2f2f2", "#dcdcdc"], thumbAt: 0.4,
+  },
+  {
+    id: "iphone-angle", screen: "music", name: "iPhone angle", description: "Low three-quarter, plain ground", device: "iphone-17-pro-max-glb", finish: "model", scene: "custom",
+    camera: { x: 26, y: -34, z: 3, fov: 30, zoom: 1.12, panX: -0.02, panY: -0.03 }, rot: { x: 0, y: 0, z: 0 }, aspect: "4:3", motion: "low-pan-up",
+    background: { type: "color", color: "#f2f2f2" }, swatch: ["#f2f2f2", "#d0d0d0"], thumbAt: 0.6,
+  },
+  {
+    id: "macbook-1", screen: "analytics", name: "MacBook 1", description: "Open lid on a light sweep", device: "macbook-pro-14-glb", finish: "space-gray", scene: "studio",
+    camera: { x: -24, y: 16, z: 0, fov: 26, zoom: 1.02, panX: 0, panY: 0.02 }, rot: { x: 0, y: 6, z: 0 }, aspect: "16:9", swatch: ["#e6e6e6", "#f4f4f4"],
+    sequence: [
+      { kind: "media", name: "Open", duration: 4, keyframes: { "mockup.lid": [{ t: 0, v: 62, ease: "easeInOut" }, { t: 2.6, v: 108, ease: "easeInOut" }], "camera.zoom": [{ t: 0, v: 1.15, ease: "easeInOut" }, { t: 4, v: 1.0, ease: "easeInOut" }] } },
+      { kind: "media", name: "Detail", duration: 3.5, motion: "scan-lr" },
+    ],
+  },
+  {
     id: "clean-demo", screen: "finance-light", name: "Clean demo", description: "Title · two iPhone moves · logo", device: "iphone-17-pro-glb", finish: "model", scene: "custom",
     camera: { x: -30, y: -12, z: 0, fov: 24, zoom: 1.05, panX: 0, panY: 0 }, rot: { x: 0, y: 0, z: 0 }, aspect: "16:9",
     background: { type: "preset", preset: "paper" }, swatch: ["#f7f5f0", "#ddd5c6"], fade: { in: 0.4, out: 0.6, color: "#f7f5f0" },

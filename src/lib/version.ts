@@ -19,6 +19,9 @@ export const CHANGELOG: ChangelogEntry[] = [
       "Scene picker rebuilt as full-width preview cards.",
       "Applying a template parks the playhead past its fade-in, so you see the shot instead of a black frame.",
       "iPhone 17 Pro finishes: Silver, Cosmic Orange, Deep Blue.",
+      "Blur focus guides while you adjust: a circle for radial (solid where the blur starts, dashed for the falloff), paired lines for tilt shift, an angled line for directional.",
+      "Lens blur gains Auto focus / Manual, with a keyframeable Focus distance for pulling focus between subjects.",
+      "Four more starters in a plain-ground, tight-crop style: Watch detail, iPhone top, iPhone angle and MacBook 1, bringing the gallery to 24.",
     ],
   },
   {
