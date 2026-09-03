@@ -6,7 +6,7 @@ import { useUI } from "@/store/ui";
 import { getAspect } from "@/lib/presets";
 import { Viewport } from "@/three/Viewport";
 import { extractFiles } from "@/lib/media";
-import { importFilesToShot } from "@/lib/actions";
+import { addAudioFile, importFilesToShot } from "@/lib/actions";
 import { Icon } from "@/components/icons";
 import { cn, clamp } from "@/lib/cn";
 import { useActiveShot } from "@/three/Device";
@@ -193,11 +193,22 @@ export function ViewportPane() {
     return () => { el.removeEventListener("wheel", onWheel); if (timer) window.clearTimeout(timer); };
   }, [frame.w, frame.h]);
 
-  const onDrop = (e: React.DragEvent) => {
+  const [dropZone, setDropZone] = useState<"replace" | "new" | "audio" | null>(null);
+  const onDrop = (e: React.DragEvent, zone: "replace" | "new" | "audio" | null) => {
     e.preventDefault();
     setDragging(false);
+    setDropZone(null);
     const files = extractFiles(e.dataTransfer);
-    if (files.length) void importFilesToShot(files);
+    if (!files.length) return;
+    const audio = files[0].type.startsWith("audio/");
+    if (zone === "audio" || audio) { void addAudioFile(files[0]); return; }
+    if (zone === "new") {
+      const ed = useEditor.getState();
+      const id = ed.addShot("media", useUI.getState().activeShotId ?? undefined);
+      void importFilesToShot(files, id);
+      return;
+    }
+    void importFilesToShot(files);
   };
 
   const transparent = scenePreset === "custom" && bgType === "transparent";
@@ -208,8 +219,8 @@ export function ViewportPane() {
       className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-xl border border-line bg-panel-2"
       data-tour="viewport"
       onDragOver={(e) => { e.preventDefault(); if (!dragging) setDragging(true); }}
-      onDragLeave={(e) => { if (e.currentTarget === e.target) setDragging(false); }}
-      onDrop={onDrop}
+      onDragLeave={(e) => { if (e.currentTarget === e.target) { setDragging(false); setDropZone(null); } }}
+      onDrop={(e) => onDrop(e, dropZone)}
     >
       <div
         ref={frameRef}
@@ -229,11 +240,25 @@ export function ViewportPane() {
       <UploadHint />
       <Toast />
       {dragging && (
-        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-accent/10 backdrop-blur-[1px]">
-          <div className="flex items-center gap-2 rounded-full bg-panel px-4 py-2 shadow-lg">
-            <Icon name="upload" size={14} className="text-accent" />
-            <span className="label text-fg">Drop to use as source</span>
-          </div>
+        // choose what the drop does, rather than always replacing the current shot
+        <div className="absolute inset-0 z-30 grid grid-cols-3 gap-2 bg-black/35 p-3 backdrop-blur-[2px]">
+          {([
+            { id: "replace" as const, icon: "image", title: "Replace source", sub: "Put it on this shot" },
+            { id: "new" as const, icon: "plus", title: "Add as new shot", sub: "Keep what is here" },
+            { id: "audio" as const, icon: "audio", title: "Audio track", sub: "Music or voiceover" },
+          ]).map((z) => (
+            <div
+              key={z.id}
+              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDropZone(z.id); }}
+              onDragLeave={() => setDropZone((d) => (d === z.id ? null : d))}
+              onDrop={(e) => { e.stopPropagation(); onDrop(e, z.id); }}
+              className={cn("flex flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed text-center transition-colors", dropZone === z.id ? "border-accent bg-accent/20" : "border-white/40 bg-white/5")}
+            >
+              <Icon name={z.icon} size={18} className="text-white" />
+              <span className="label text-white">{z.title}</span>
+              <span className="label-sm text-white/70">{z.sub}</span>
+            </div>
+          ))}
         </div>
       )}
       {autoMotion && <AutoMotionOverlay />}

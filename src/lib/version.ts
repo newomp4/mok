@@ -19,6 +19,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       "Keyframes follow the cursor while you drag, with a guide line when they snap. Right-click a lane for select whole track, add keyframe here and clear track.",
       "Number rows nudge with the arrow keys, ten steps at a time with shift.",
       "Contact shadow gains Soft and Opacity controls; two more lighting rigs, Lightbox and Dramatic key.",
+      "Dropping a file now asks what it should do: replace this shot's source, add it as a new shot, or become the audio track.",
+      "Add › Shot from camera appends a shot that starts from wherever the sequence ends and parks the playhead on its closing keyframe, so moving the camera sets where the shot lands.",
     ],
   },
   {

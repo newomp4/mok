@@ -45,7 +45,8 @@ rendering and encoding happens locally with WebGL and WebCodecs.
   **logo shots** (PNG / SVG on a colour, with Liquid metal, Gem smoke and Heatmap shader looks), both with enter /
   exit animations
 - **Audio lane**: music or voiceover with volume, fades, trim and drag-to-offset; mixed into the exported video
-- **Source tools**: crop, cover / contain / stretch, playback speed and trim start for video shots, per-shot media
+- **Source tools**: crop, cover / contain / stretch, playback speed and trim start for video shots, per-shot media;
+  dropping a file offers to replace the shot, add a new shot, or become the audio track
 - **Six built-in sample screens** (Finance dark / light, Music, Messages, Analytics, Landing page) drawn
   procedurally at any resolution, so a mockup looks finished before you upload anything and every starter
   template opens with content already on the device

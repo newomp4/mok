@@ -6,7 +6,7 @@ import type { AnimProp, Keyframe, MediaRef, Project, Shot } from "./types";
 import { importMedia } from "./media";
 import { getDevice } from "./devices";
 import { getSampleScreen, sampleScreenBlob } from "./screens";
-import { shotStart } from "./animation";
+import { getBase, shotStart } from "./animation";
 import { createLogoShot, createProject, createShot, createTextShot, defaultLogoStyle, shotKind } from "./defaults";
 import { deviceLayout } from "@/three/devices/layout";
 import { S } from "@/three/geometry";
@@ -128,6 +128,52 @@ export function applyTemplate(id: string) {
       });
     }, 180);
   }
+}
+
+const POSE_PROPS: AnimProp[] = ["camera.x", "camera.y", "camera.z", "camera.fov", "camera.zoom", "camera.panX", "camera.panY"];
+
+/**
+ * Appends a shot the way Ultramock's simple timeline does: the sequence's current pose is frozen
+ * onto the shot before it, the new shot starts from that pose, and the playhead parks at its end so
+ * moving the camera sets where the shot lands. The move is written as ordinary, editable keyframes.
+ */
+export function addShotFromCamera(): string {
+  const ed = useEditor.getState();
+  const pose = endPose(ed.project);
+  const prev = ed.project.shots[ed.project.shots.length - 1];
+  // pin the previous shot to the pose it currently holds, so the new move has something to leave from
+  if (prev && !POSE_PROPS.some((p) => prev.keyframes[p]?.length)) {
+    ed.updateShot(prev.id, (shot) => {
+      for (const prop of POSE_PROPS) shot.keyframes[prop] = [{ t: 0, v: pose[prop] ?? 0, ease: "smooth" }];
+    });
+  }
+  const id = useEditor.getState().addShot("media");
+  useEditor.getState().updateShot(id, (shot) => {
+    for (const prop of POSE_PROPS) {
+      const v = pose[prop] ?? 0;
+      shot.keyframes[prop] = [
+        { t: 0, v, ease: "smooth", cp: [0.42, 0, 0.58, 1] },
+        { t: shot.duration, v, ease: "smooth" },
+      ];
+    }
+  });
+  const p = useEditor.getState().project;
+  const shot = p.shots.find((s) => s.id === id)!;
+  // park exactly on the closing keyframe so moving the camera edits it rather than adding another
+  useUI.getState().setTime(shotStart(p, id) + shot.duration);
+  useUI.getState().showToast("Shot added — move the camera to set where it lands");
+  return id;
+}
+
+/** The camera pose the sequence is left in after its last shot. */
+function endPose(p: Project): Partial<Record<AnimProp, number>> {
+  const last = p.shots[p.shots.length - 1];
+  const out: Partial<Record<AnimProp, number>> = {};
+  for (const prop of POSE_PROPS) {
+    const track = last?.keyframes[prop];
+    out[prop] = track?.length ? track[track.length - 1].v : getBase(p, prop);
+  }
+  return out;
 }
 
 export function setShotMedia(shotId: string | null, media: MediaRef | null) {

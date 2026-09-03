@@ -8,7 +8,7 @@ import { MOTION_PRESETS } from "@/lib/presets";
 import { Button, IconButton, Popover, Segmented, MenuList, ContextMenu, NumberRow, ColorRow, type MenuItem } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { cn, clamp } from "@/lib/cn";
-import { applyMotionPreset, importFilesToShot, addAudioFile, importLogo } from "@/lib/actions";
+import { applyMotionPreset, importFilesToShot, addAudioFile, importLogo, addShotFromCamera } from "@/lib/actions";
 import { pickFiles } from "./hooks";
 import { ACCEPTED_AUDIO, ACCEPTED_IMAGES, ACCEPTED_TYPES, useMedia } from "@/lib/media";
 import { audioLength } from "@/lib/audio";
@@ -217,6 +217,7 @@ export function Timeline() {
           <MenuList
             items={[
               { label: "Media", sub: "New shot from image or video", icon: "image", onSelect: () => void addTrack("media") },
+              { label: "Shot from camera", sub: "Animates from where the sequence ends", icon: "camera", onSelect: () => { addShotFromCamera(); setAddOpen(false); } },
               { label: "Text", sub: "Title or caption shot", icon: "type", onSelect: () => void addTrack("text") },
               { label: "Logo", sub: "Brand mark shot", icon: "logo", onSelect: () => void addTrack("logo") },
               { label: "Audio", sub: project.audio ? "Replace the music or voiceover" : "Music or voiceover track", icon: "audio", onSelect: () => void addTrack("audio") },
