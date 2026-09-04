@@ -4,7 +4,7 @@ import { subscribeWithSelector } from "zustand/middleware";
 import { temporal } from "zundo";
 import type { AnimProp, AudioTrack, Keyframe, Project, Shot, ShotKind, Transition } from "@/lib/types";
 import { createLogoShot, createProject, createShot, createTextShot, normalizeProject } from "@/lib/defaults";
-import { getBase, hasKeyframeAt, locate, removeKeyframe, reverseTrack, sampleTrack, splitTrack, totalDuration, upsertKeyframe, shotStart } from "@/lib/animation";
+import { getBase, hasKeyframeAt, inHandleOf, locate, removeKeyframe, reverseTrack, sampleTrack, setInHandle, shotBase, splitTrack, totalDuration, upsertKeyframe, shotStart } from "@/lib/animation";
 import { uid } from "@/lib/ids";
 import { useUI } from "./ui";
 import { getDevice } from "@/lib/devices";
@@ -42,7 +42,32 @@ interface EditorState {
   /** move every selected keyframe; proportional scales the selection around its first keyframe */
   moveSelectedKeyframes: (dt: number, proportional?: boolean) => void;
   deleteSelectedKeyframes: () => void;
+  /** push the shot under the playhead's framing / lens onto every other shot */
+  applyPoseToAllShots: (props: AnimProp[]) => void;
+  /** clear a shot's own value for these props so it follows the project again */
+  clearPose: (shotId: string, props: AnimProp[]) => void;
+  /** empty seconds before a shot on the ruler */
+  setShotGap: (id: string, gap: number) => void;
+  /** pull this shot and everything after it back so the gap before it closes */
+  closeGap: (id: string) => void;
 }
+
+/** Where a shot leaves a property when it ends — its last keyframe, or the value it holds. */
+function closingValue(p: Project, shot: Shot, prop: AnimProp): number {
+  const track = shot.keyframes[prop];
+  return track?.length ? track[track.length - 1].v : shotBase(p, shot, prop);
+}
+
+/**
+ * The properties a shot owns rather than the project: its framing, its lens and how the mockup is
+ * turned. Lighting and screen brightness stay project-wide, since they belong to the set.
+ */
+const SHOT_SCOPED = new Set<AnimProp>([
+  "camera.x", "camera.y", "camera.z", "camera.fov", "camera.zoom", "camera.panX", "camera.panY",
+  "mockup.rotX", "mockup.rotY", "mockup.rotZ", "mockup.lid",
+  "blur.strength", "blur.focusSize", "blur.falloff", "blur.focusX", "blur.focusY", "blur.focusDistance", "blur.angle",
+]);
+export const isShotScoped = (prop: AnimProp) => SHOT_SCOPED.has(prop);
 
 let shotClipboard: Shot | null = null;
 let keyClipboard: { prop: AnimProp; k: Keyframe; offset?: number }[] = [];
@@ -109,8 +134,13 @@ export const useEditor = create<EditorState>()(
           const prev = get().project;
           const { shot, localT } = currentShot(prev);
           let p: Project = { ...prev, updatedAt: Date.now() };
-          const nextShot: Shot | null = shot ? { ...shot, keyframes: { ...shot.keyframes } } : null;
+          const nextShot: Shot | null = shot ? { ...shot, keyframes: { ...shot.keyframes }, pose: { ...shot.pose } } : null;
           let shotTouched = false;
+          // A framing or a lens belongs to the shot you are parked on, not to the whole sequence,
+          // so an un-animated property writes the shot's own value and leaves every other shot as
+          // it was. A single-shot project has nothing to diverge from, so it writes the project.
+          const perShot = prev.shots.length > 1;
+          const simple = ui.timelineMode === "simple" && prev.shots.length > 1 && !ui.recording;
           for (const [prop, v] of Object.entries(values) as [AnimProp, number][]) {
             if (v === undefined || Number.isNaN(v)) continue;
             const track = nextShot?.keyframes[prop];
@@ -125,6 +155,20 @@ export const useEditor = create<EditorState>()(
               // rather than dropping a keyframe nobody asked for, so the motion keeps its shape
               const delta = v - sampleTrack(track!, localT);
               nextShot.keyframes[prop] = track!.map((k) => ({ ...k, v: k.v + delta }));
+              shotTouched = true;
+            } else if (nextShot && simple && SHOT_SCOPED.has(prop)) {
+              // In the simple timeline a shot IS a camera position: moving the camera sets where the
+              // shot ends, and the shot opens on whatever the one before it closed on, so the
+              // sequence animates between the framings instead of cutting between them.
+              const idx = p.shots.findIndex((x) => x.id === nextShot.id);
+              const from = idx > 0 ? closingValue(p, p.shots[idx - 1], prop) : shotBase(p, nextShot, prop);
+              nextShot.keyframes[prop] = [
+                { t: 0, v: from, ease: "smooth" },
+                { t: nextShot.duration, v, ease: "smooth" },
+              ];
+              shotTouched = true;
+            } else if (nextShot && perShot && SHOT_SCOPED.has(prop)) {
+              nextShot.pose![prop] = v;
               shotTouched = true;
             } else {
               p = withBase(p, prop, v);
@@ -237,6 +281,9 @@ export const useEditor = create<EditorState>()(
           a.transitionOut = undefined;
           b.enter = undefined;
           a.exit = undefined;
+          // the gap sits before the shot being cut, so it stays with the first half rather than
+          // opening a second empty stretch in the middle of the split
+          delete b.gap;
           for (const prop of Object.keys(a.keyframes) as AnimProp[]) {
             const kfs = a.keyframes[prop];
             if (!kfs || !kfs.length) continue;
@@ -362,12 +409,25 @@ export const useEditor = create<EditorState>()(
             }
             const moved = times.map((x) => x.from);
             const rest = list.filter((k) => !moved.some((t) => Math.abs(k.t - t) < 0.0005));
+            // A keyframe dropped on top of one that is not moving keeps its own place rather than
+            // taking the other one's: the two are held a frame apart, the same way two moving
+            // keyframes are, so no drag can ever silently delete a keyframe.
+            const occupied = rest.map((k) => k.t).sort((a, b) => a - b);
+            let cursor = -Infinity;
+            for (const entry of times) {
+              let to = Math.max(entry.to, cursor + STEP);
+              for (let guard = 0; guard < 200; guard++) {
+                const hit = occupied.find((o) => Math.abs(o - to) < STEP - 1e-9);
+                if (hit === undefined) break;
+                to = hit + STEP;
+              }
+              entry.to = Math.round(to * 1000) / 1000;
+              cursor = entry.to;
+            }
             const out = [...rest];
             for (const { from, to } of times) {
               const src = list.find((k) => Math.abs(k.t - from) < 0.0005);
               if (!src) continue;
-              const at = out.findIndex((k) => Math.abs(k.t - to) < 0.0005);
-              if (at >= 0) out.splice(at, 1);
               out.push({ ...src, t: to });
               next.push({ shotId, prop, t: to });
             }
@@ -376,6 +436,45 @@ export const useEditor = create<EditorState>()(
           }
           set({ project: p });
           ui.setSelectedKeys(next);
+        },
+        applyPoseToAllShots: (props) => {
+          const p = clone(get().project);
+          const { shot } = currentShot(p);
+          if (!shot) return;
+          for (const s of p.shots) {
+            if (s.id === shot.id) continue;
+            s.pose = { ...s.pose };
+            for (const prop of props) {
+              const own = shot.pose?.[prop];
+              if (own === undefined) delete s.pose[prop]; else s.pose[prop] = own;
+              // a shot that animates the property would ignore the pose, so the track goes too
+              delete s.keyframes[prop];
+            }
+          }
+          set({ project: p });
+        },
+        clearPose: (shotId, props) => {
+          const p = clone(get().project);
+          const shot = p.shots.find((s) => s.id === shotId);
+          if (!shot?.pose) return;
+          for (const prop of props) delete shot.pose[prop];
+          set({ project: p });
+        },
+        setShotGap: (id, gap) => {
+          const p = clone(get().project);
+          const shot = p.shots.find((s) => s.id === id);
+          if (!shot) return;
+          const next = Math.max(0, Math.round(gap * 100) / 100);
+          if (next === (shot.gap ?? 0)) return;
+          if (next === 0) delete shot.gap; else shot.gap = next;
+          set({ project: p });
+        },
+        closeGap: (id) => {
+          const p = clone(get().project);
+          const shot = p.shots.find((s) => s.id === id);
+          if (!shot?.gap) return;
+          delete shot.gap;
+          set({ project: p });
         },
         deleteSelectedKeyframes: () => {
           const ui = useUI.getState();
@@ -407,7 +506,11 @@ export const useEditor = create<EditorState>()(
             const list = upsertKeyframe(shot.keyframes[prop], t, k.v, k.ease);
             // carry the custom curve across too, not just the named ease
             const placed = list.find((x) => Math.abs(x.t - t) < 0.0005);
-            if (placed) { if (k.cp) placed.cp = [...k.cp] as typeof k.cp; else delete placed.cp; }
+            if (placed) {
+              if (k.cp) placed.cp = [...k.cp] as typeof k.cp; else delete placed.cp;
+              // the arrival curve belongs to the keyframe just as much as the one it leaves on
+              setInHandle(placed, inHandleOf(k) ?? null);
+            }
             shot.keyframes[prop] = list;
           }
           set({ project: p });

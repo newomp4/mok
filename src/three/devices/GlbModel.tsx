@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useMemo } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useShotView } from "@/three/Device";
 import * as THREE from "three";
 import { useFrame, useThree } from "@react-three/fiber";
 import { anim } from "@/three/anim";
@@ -7,10 +8,21 @@ import { useGLTF } from "@react-three/drei";
 import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 import type { DeviceSpec, Finish } from "@/lib/devices";
 import { S } from "@/three/geometry";
-import { useModelBounds, viewport, type ModelFeatures } from "@/three/registry";
+import { useModelBounds, viewport, type ModelFeatures, useShownDevice } from "@/three/registry";
 import { useEditor } from "@/store/editor";
 
 let ktx2: KTX2Loader | null = null;
+
+/**
+ * The loader setup these models need. Preloading and rendering share it so both land on the same
+ * entry in drei's cache, which is what lets a preloaded model render without suspending again.
+ */
+function ktx2Support(gl: THREE.WebGLRenderer): NonNullable<Parameters<typeof useGLTF.preload>[3]> {
+  return (loader) => {
+    if (!ktx2) ktx2 = new KTX2Loader().setTranscoderPath("/basis/").detectSupport(gl);
+    loader.setKTX2Loader(ktx2 as never);
+  };
+}
 
 const SCREEN_RE = /screen|display|wallpaper|lcd|oled|panel|glass_front|front_glass/i;
 
@@ -390,20 +402,30 @@ export function hideScreenOverlays(root: THREE.Object3D, screen: THREE.Mesh): TH
   return hidden;
 }
 
+interface GlbProps {
+  spec: DeviceSpec;
+  finish: Finish;
+  screen: THREE.Material;
+  gloss?: number;
+}
+
 /**
  * Renders a real glTF model. The mesh named `spec.model.screenMesh` gets the
  * live screen material; materials listed in `finishMaterials` are tinted with
  * the chosen finish. Supports meshopt + KTX2-compressed assets out of the box.
+ *
+ * While it is the incoming half of a device swap it is mounted `hidden`, and reports through
+ * `onReady` once it is not merely loaded but prepared.
  */
-export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceSpec; finish: Finish; screen: THREE.Material; gloss?: number }) {
+/** Device ids whose model has been fully prepared at least once, so a return trip needs no hold. */
+const prepared = new Set<string>();
+
+function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: GlbProps & { hidden?: boolean; onReady?: () => void }) {
   const gl = useThree((s) => s.gl);
   const maxAniso = gl.capabilities.getMaxAnisotropy();
   const invalidate = useThree((s) => s.invalidate);
   const model = spec.model!;
-  const gltf = useGLTF(model.url, true, true, (loader) => {
-    if (!ktx2) ktx2 = new KTX2Loader().setTranscoderPath("/basis/").detectSupport(gl);
-    loader.setKTX2Loader(ktx2 as never);
-  });
+  const gltf = useGLTF(model.url, true, true, ktx2Support(gl));
   const root = useMemo(() => {
     const clone = gltf.scene.clone(true);
     clone.updateWorldMatrix(true, true);
@@ -424,7 +446,7 @@ export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceS
     return holder;
   }, [gltf.scene, model.scale, model.size, spec.body.h, spec.body.w]);
 
-  const notch = useEditor((s) => s.project.mockup.notch ?? true);
+  const notch = useShotView().notch;
   const caseKeyboard = useEditor((s) => s.project.mockup.caseKeyboard ?? true);
   const bandColor = useEditor((s) => s.project.mockup.bandColor ?? null);
   const scene = useThree((s) => s.scene);
@@ -633,5 +655,53 @@ export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: { spec: DeviceS
     useModelBounds.getState().set(spec.id, { minY: b.min.y, maxY: b.max.y, width: sz.x, height: sz.y });
   }, [root, spec.id, yawApplied, caseKeyboard]);
 
-  return <primitive object={root} rotation={model.rotation ?? [0, 0, 0]} position={model.position ?? [0, 0, 0]} />;
+  // Declared after both effects above, so a model is only ever announced once its screen, its
+  // movable parts and its materials are in place — never as a frame of raw geometry.
+  useEffect(() => { prepared.add(spec.id); onReady?.(); }, [onReady, spec.id]);
+
+  return <primitive object={root} visible={!hidden} rotation={model.rotation ?? [0, 0, 0]} position={model.position ?? [0, 0, 0]} />;
+}
+
+/**
+ * Picking a different device never empties the viewport: the model already on screen keeps
+ * rendering while the incoming one downloads and prepares itself out of sight, and the two trade
+ * places in a single commit once it is ready.
+ */
+export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: GlbProps) {
+  const gl = useThree((s) => s.gl);
+  // the model the viewport is showing, and the one being brought in behind it; they differ only
+  // for as long as a newly picked device takes to load
+  const [shown, setShown] = useState(spec);
+  const [staged, setStaged] = useState(spec);
+  const promote = useCallback(() => { if (staged === spec) setShown(staged); }, [staged, spec]);
+  // the rest of the scene frames and sizes itself to whatever is actually on screen
+  useEffect(() => { useShownDevice.getState().set(shown.id); }, [shown.id]);
+  useEffect(() => () => useShownDevice.getState().set(null), []);
+
+  useEffect(() => {
+    if (staged === spec) return;
+    // a model that has already been prepared this session is in the cache, so holding the old one
+    // in front of it only adds a wait the viewport does not need
+    if (prepared.has(spec.id)) { setStaged(spec); setShown(spec); return; }
+    // Start the download here rather than leaving it to the render below, so the loading manager —
+    // which drives the viewport's pill and the wait an export does before it encodes — knows the
+    // model is on its way the moment the device changes.
+    useGLTF.preload(spec.model!.url, true, true, ktx2Support(gl));
+    // The incoming model suspends while it loads. Inside a transition React leaves the committed
+    // scene alone until it resolves, instead of swapping in the empty Suspense fallback above us,
+    // and that is what keeps the editor from going blank.
+    startTransition(() => setStaged(spec));
+  }, [spec, staged, gl]);
+
+  // The finish and gloss the visible model keeps on its way out. A newly picked device brings its
+  // own finish with it, and re-tinting the outgoing model would flash a colour it never had.
+  const held = useRef({ finish, gloss });
+  useEffect(() => { if (shown === spec) held.current = { finish, gloss }; });
+  const out = shown === spec ? { finish, gloss } : held.current;
+
+  // One keyed list rather than two slots, so the prepared model is reused — not remounted and
+  // loaded again — when it takes the visible place of the one it replaces.
+  const models = [<GlbInstance key={shown.id} spec={shown} finish={out.finish} screen={screen} gloss={out.gloss} />];
+  if (staged !== shown) models.push(<GlbInstance key={staged.id} spec={staged} finish={finish} screen={screen} gloss={gloss} hidden onReady={promote} />);
+  return <>{models}</>;
 }

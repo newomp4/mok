@@ -2,10 +2,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
-import { useEditor, redo, undo, beginInteraction, endInteraction } from "@/store/editor";
+import { useEditor, redo, undo, beginInteraction, endInteraction, isShotScoped } from "@/store/editor";
 import { useUI } from "@/store/ui";
 import { ANIM_LABELS, ANIM_PROPS, type AnimProp, type BlurMode, type EffectId, type EnterExit, type EnterExitEffect, type FitMode, type LogoEffect, type Shot, type TextStyle } from "@/lib/types";
-import { hasKeyframeAt, locate, sampleTrack, getBase } from "@/lib/animation";
+import { hasKeyframeAt, locate, sampleTrack, getBase, shotBase } from "@/lib/animation";
 import { DEVICES, FAMILY_LABELS, deviceGroup, getDevice, getFinish, type DeviceBrand, type DeviceFamily } from "@/lib/devices";
 import { BG_PRESETS, CAMERA_PRESETS, EFFECT_DEFS, LIGHTINGS, SCENES, getBgPreset, getEffectDef, getScene } from "@/lib/presets";
 import { paintPreset } from "@/three/background";
@@ -37,9 +37,9 @@ function useAnimRow(prop: AnimProp) {
   const { value, keyState } = useEditor(useShallow((s) => {
     const loc = locate(s.project, time);
     const track = loc.shot?.keyframes[prop];
-    // getBase carries the fallback for properties a saved project predates, so a missing field
-    // shows its default rather than rendering the row with undefined
-    const base = getBase(s.project, prop);
+    // shotBase resolves the shot's own framing or lens before the project's, and carries the
+    // fallback for properties a saved project predates
+    const base = shotBase(s.project, loc.shot, prop);
     const value = track && track.length ? sampleTrack(track, loc.localT) : base;
     const keyState: KeyState = track && track.length ? (hasKeyframeAt(track, loc.localT) ? "key" : "track") : "none";
     return { value, keyState };
@@ -49,8 +49,15 @@ function useAnimRow(prop: AnimProp) {
 
 function AnimRow({ prop, label, min, max, step, hint, unit, disabled, sensitivity }: { prop: AnimProp; label?: ReactNode; min: number; max: number; step?: number; hint?: string; unit?: string; disabled?: boolean; sensitivity?: number }) {
   const row = useAnimRow(prop);
-  return (
+  const shot = useRenderShot();
+  // Framing, rotation and lens are written to the shot you are parked on, so a row can be holding
+  // this shot's value rather than the project's. A keyframe track wins over the pose, so an
+  // animated row says nothing. The control is the one the per-shot selects show once they are
+  // overridden: clicking it hands the property back to the project.
+  const owned = row.keyState === "none" && isShotScoped(prop) && !!shot && shot.pose?.[prop] !== undefined;
+  const numberRow = (
     <NumberRow
+      className={owned ? "min-w-0 flex-1" : undefined}
       label={label ?? ANIM_LABELS[prop]}
       value={row.value}
       min={min}
@@ -68,7 +75,39 @@ function AnimRow({ prop, label, min, max, step, hint, unit, disabled, sensitivit
       onKey={row.onKey}
     />
   );
+  if (!owned || !shot) return numberRow;
+  return (
+    <div className="flex items-stretch gap-1">
+      {numberRow}
+      <IconButton
+        icon="x"
+        size={12}
+        label="Use the project value"
+        onClick={() => useEditor.getState().clearPose(shot.id, [prop])}
+        className="h-8 w-7 shrink-0 rounded-md bg-fill text-accent"
+      />
+    </div>
+  );
 }
+
+/**
+ * Footer for a section whose values belong to the shot on screen: it says so, and hands that shot's
+ * values to every other shot. Only worth showing once a sequence has something to diverge from.
+ */
+function ShotScopeFooter({ subject, props }: { subject: string; props: AnimProp[] }) {
+  const shot = useRenderShot();
+  const many = useEditor((s) => s.project.shots.length > 1);
+  if (!shot || !many) return null;
+  return (
+    <>
+      <div className="label-sm px-0.5 pt-1 leading-snug text-muted">{subject} belongs to {shot.name}. Other shots keep their own.</div>
+      <Button variant="ghost" size="sm" icon="copy" onClick={() => useEditor.getState().applyPoseToAllShots(props)} className="justify-start text-muted">Use for all shots</Button>
+    </>
+  );
+}
+
+const CAMERA_POSE: AnimProp[] = ["camera.x", "camera.y", "camera.z", "camera.fov", "camera.zoom", "camera.panX", "camera.panY"];
+const BLUR_POSE: AnimProp[] = ["blur.strength", "blur.focusSize", "blur.falloff", "blur.focusX", "blur.focusY", "blur.focusDistance", "blur.angle"];
 
 /* ---------- Shot (source) ---------- */
 function ShotSection() {
@@ -541,7 +580,15 @@ function MockupSection() {
       <AnimRow prop="mockup.rotX" label="Rotate X" min={-180} max={180} step={1} />
       <AnimRow prop="mockup.rotZ" label="Rotate Z" min={-180} max={180} step={1} />
       {features?.lid && <AnimRow prop="mockup.lid" label="Lid angle" min={0} max={135} step={1} unit="°" />}
-      {features?.island && <ToggleRow label="Dynamic Island" checked={mockup.notch ?? true} onChange={(v) => update((p) => { p.mockup.notch = v; })} />}
+      {features?.island && (
+        <ShotToggleOverride
+          label="Dynamic Island"
+          project={mockup.notch ?? true}
+          read={(sh) => sh.notch}
+          write={(sh, v) => { sh.notch = v; }}
+          setProject={(v) => update((p) => { p.mockup.notch = v; })}
+        />
+      )}
       {features?.caseParts && <ToggleRow label="Case + keyboard" checked={mockup.caseKeyboard ?? true} onChange={(v) => update((p) => { p.mockup.caseKeyboard = v; })} />}
       {features?.band && (
         <div className="flex h-8 items-center justify-between rounded-md bg-fill px-2.5">
@@ -675,6 +722,47 @@ function ShotOverrideRow({ label, options, project, read, write, setProject }: {
   );
 }
 
+/**
+ * The switch twin of ShotOverrideRow, for the settings a shot holds as a plain on / off. The row
+ * itself has no room for the "this shot" tag the selects carry, so the pin does the talking: grey
+ * pins the project's value to the shot, accent says the shot holds its own and hands it back.
+ */
+function ShotToggleOverride({ label, project, read, write, setProject, disabled }: {
+  label: string;
+  project: boolean;
+  read: (s: Shot) => boolean | undefined;
+  write: (s: Shot, v: boolean | undefined) => void;
+  setProject: (v: boolean) => void;
+  disabled?: boolean;
+}) {
+  const shot = useRenderShot();
+  const updateShot = useEditor((s) => s.updateShot);
+  const override = shot ? read(shot) : undefined;
+  const value = override ?? project;
+  return (
+    <div className="flex items-stretch gap-1">
+      <div className="min-w-0 flex-1">
+        <ToggleRow
+          label={label}
+          checked={value}
+          disabled={disabled}
+          onChange={(v) => { if (override !== undefined && shot) updateShot(shot.id, (s) => write(s, v)); else setProject(v); }}
+        />
+      </div>
+      {shot && (
+        <IconButton
+          icon={override === undefined ? "pin" : "x"}
+          size={12}
+          label={override === undefined ? `Override ${label.toLowerCase()} for this shot` : "Use the project value"}
+          disabled={disabled}
+          onClick={() => updateShot(shot.id, (s) => write(s, override === undefined ? project : undefined))}
+          className={cn("h-8 w-7 shrink-0 rounded-md bg-fill", override !== undefined && "text-accent")}
+        />
+      )}
+    </div>
+  );
+}
+
 /** Per-shot environment: which 3D scene this shot uses. */
 function ShotSceneOverride() {
   const shot = useRenderShot();
@@ -720,6 +808,7 @@ function CameraSection() {
           ))}
         </div>
       )}
+      <ShotScopeFooter subject="Framing" props={CAMERA_POSE} />
     </Section>
   );
 }
@@ -759,28 +848,52 @@ function FocusPicker({ depth = false }: { depth?: boolean }) {
   );
 }
 
+const BLUR_MODES: { value: BlurMode; label: string }[] = [
+  { value: "off", label: "None" }, { value: "radial", label: "Radial" }, { value: "directional", label: "Directional" },
+  { value: "linear", label: "Tilt shift" }, { value: "depth", label: "Lens" },
+];
+
 function BlurSection() {
   const blur = useEditor((s) => s.project.blur);
   const update = useEditor((s) => s.update);
   const [open, setOpen] = useState(true);
-  const off = blur.mode === "off";
+  const renderShot = useRenderShot();
+  // the mode and the bokeh on screen can be the shot's own, and every row below reads from them
+  const view = useEditor(useShallow((s) => resolveShotView(s.project, renderShot)));
+  const mode = view.blurMode;
+  const off = mode === "off";
   return (
     <Section title="Blur" open={open} onToggle={() => setOpen((o) => !o)} tour="blur" right={<IconButton icon="rotate-ccw" size={12} label="Reset blur" onClick={resetBlur} className="h-6 w-6" />}>
-      <SelectRow label="Mode" value={blur.mode} onChange={(v: BlurMode) => update((p) => { p.blur.mode = v; })} options={[{ value: "off", label: "None" }, { value: "radial", label: "Radial" }, { value: "directional", label: "Directional" }, { value: "linear", label: "Tilt shift" }, { value: "depth", label: "Lens" }]} />
-      {(blur.mode === "directional" || blur.mode === "linear") && (
+      <ShotOverrideRow
+        label="Mode"
+        options={BLUR_MODES}
+        project={blur.mode}
+        read={(sh) => sh.blurMode}
+        write={(sh, v) => { sh.blurMode = v as BlurMode; }}
+        setProject={(v) => update((p) => { p.blur.mode = v as BlurMode; })}
+      />
+      {(mode === "directional" || mode === "linear") && (
         <AnimRow prop="blur.angle" label="Angle" min={0} max={360} step={1} unit="°" />
       )}
       <AnimRow prop="blur.strength" label="Strength" min={0} max={20} step={0.1} disabled={off} />
-      {blur.mode === "depth" && (
+      {mode === "depth" && (
         <>
           <Segmented size="sm" value={(blur.focusDistance ?? 0) > 0 ? "manual" : "auto"} onChange={(v) => update((p) => { p.blur.focusDistance = v === "auto" ? 0 : Math.max(0.1, anim.focusDist); })} options={[{ value: "auto", label: "Auto focus", icon: "focus-auto" }, { value: "manual", label: "Manual", icon: "focus-lock" }]} />
           {(blur.focusDistance ?? 0) > 0 && <AnimRow prop="blur.focusDistance" label="Focus distance" min={0.1} max={40} step={0.05} />}
         </>
       )}
-      <AnimRow prop="blur.focusSize" label={blur.mode === "depth" ? "Focus range" : "Focus size"} min={0} max={1.5} step={0.01} disabled={off} />
+      <AnimRow prop="blur.focusSize" label={mode === "depth" ? "Focus range" : "Focus size"} min={0} max={1.5} step={0.01} disabled={off} />
       <AnimRow prop="blur.falloff" label="Falloff" min={0} max={1} step={0.01} disabled={off} />
-      <ToggleRow label="Bokeh" checked={blur.bokeh} onChange={(v) => update((p) => { p.blur.bokeh = v; })} disabled={off} />
-      {!off && <FocusPicker depth={blur.mode === "depth"} />}
+      <ShotToggleOverride
+        label="Bokeh"
+        project={blur.bokeh}
+        read={(sh) => sh.bokeh}
+        write={(sh, v) => { sh.bokeh = v; }}
+        setProject={(v) => update((p) => { p.blur.bokeh = v; })}
+        disabled={off}
+      />
+      {!off && <FocusPicker depth={mode === "depth"} />}
+      <ShotScopeFooter subject="The lens" props={BLUR_POSE} />
     </Section>
   );
 }

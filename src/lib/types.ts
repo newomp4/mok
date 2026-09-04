@@ -34,8 +34,17 @@ export interface Keyframe {
   t: number;
   v: number;
   ease: EaseId;
-  /** when set, this curve is used instead of the named ease */
+  /**
+   * When set, this curve is used instead of the named ease. It shapes the segment that LEAVES this
+   * keyframe: [x1, y1] is the handle on the way out, [x2, y2] the handle arriving at the next one.
+   */
   cp?: EaseCurve;
+  /**
+   * The handle on the way INTO this keyframe, [x, y]. When the next keyframe carries one it wins
+   * over the second half of the previous keyframe's `cp`, which is what lets the two ends of a
+   * segment be shaped independently. A keyframe without it eases exactly as it always has.
+   */
+  cpIn?: [number, number];
 }
 
 export const ANIM_PROPS = [
@@ -125,6 +134,19 @@ export interface Shot {
   finish?: string;
   scene?: ScenePresetId;
   lighting?: LightingId;
+  /** blur settings this shot holds instead of the project's, so a cut can change the lens */
+  blurMode?: BlurMode;
+  bokeh?: boolean;
+  /** Dynamic Island, per shot */
+  notch?: boolean;
+  /**
+   * What this shot holds for properties it does not animate — its own camera framing, lens and
+   * mockup rotation. A property with no entry here falls back to the project's value, so a shot
+   * only diverges once you actually move something while parked on it.
+   */
+  pose?: Partial<Record<AnimProp, number>>;
+  /** empty seconds before this shot on the ruler, so a sequence can hold a frame between cuts */
+  gap?: number;
 }
 
 export interface AudioTrack {

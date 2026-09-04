@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.6.0";
+export const APP_VERSION = "0.7.0";
 
 export interface ChangelogEntry {
   version: string;
@@ -8,6 +8,25 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.7.0",
+    date: "Sep 4, 2026",
+    title: "A shot owns its framing, its lens and its place on the ruler",
+    items: [
+      "Move the camera while parked on a shot and only that shot re-frames. The same goes for the lens: focus point, strength, range, angle, mode and bokeh all belong to the shot now. Camera and Blur each gained an Apply to all shots action, and a row holding its own value says so and can be handed back to the project.",
+      "Shots sit anywhere on the ruler. Drag one along it to open a gap, shown as an orange band that names the two shots it sits between; the sequence holds the previous frame through it. Right-click a gap to close it.",
+      "Marquee or shift-click several shots and move them as a group.",
+      "The simple timeline is a real editing model: every shot on one row with a single shared keyframe lane, and moving the camera on a shot animates the sequence into that framing instead of cutting to it.",
+      "Every keyframe carries its own in and out curves, shaped independently in the easing graph, with a tracing dot that runs the timing as you set it.",
+      "A real mirror in the glass: the keyboard and the floor below actually reflect in the display, with the deck blocking the room behind it, on top of the environment sheen that was already there.",
+      "Switching a 3D device keeps the one you are looking at on screen, at its own size, until the new model is ready — and a device you have already used comes back instantly.",
+      "Eight backgrounds that read as wallpaper rather than as gradients, with bokeh, light leaks and depth, available for the scene and for the device screen alike.",
+      "Save any project as a template and start from it later, from the Templates menu or the Projects window.",
+      "Shadow softness and opacity reach the lit scenes; the studio backdrop casts a real key shadow, and the floor no longer draws a hard line where its shadow map ends.",
+      "A keyframe dragged onto another is held a frame away instead of replacing it, and Delete no longer spends a keyframe selection and a shot selection in one press.",
+      "Also: the iPad Air in its four colourways, Android phones under their own heading, an export that keeps running in a background tab, transparent background previewed live in the viewport, upload buttons that take several files, and a right-click on any number row to put it back.",
+    ],
+  },
   {
     version: "0.6.0",
     date: "Sep 3, 2026",

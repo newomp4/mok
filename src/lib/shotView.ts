@@ -1,4 +1,4 @@
-import type { LightingId, Project, ScenePresetId, Shot } from "./types";
+import type { BlurMode, LightingId, Project, ScenePresetId, Shot } from "./types";
 
 /**
  * What a shot actually looks like. Ultramock scopes the device, environment and lighting to each
@@ -10,6 +10,9 @@ export interface ShotView {
   finish: string;
   scene: ScenePresetId;
   lighting: LightingId;
+  blurMode: BlurMode;
+  bokeh: boolean;
+  notch: boolean;
 }
 
 export function resolveShotView(p: Project, shot: Shot | null | undefined): ShotView {
@@ -18,6 +21,9 @@ export function resolveShotView(p: Project, shot: Shot | null | undefined): Shot
     finish: shot?.finish ?? p.mockup.finish,
     scene: shot?.scene ?? p.scene.preset,
     lighting: shot?.lighting ?? p.scene.lighting,
+    blurMode: shot?.blurMode ?? p.blur.mode,
+    bokeh: shot?.bokeh ?? p.blur.bokeh,
+    notch: shot?.notch ?? p.mockup.notch ?? true,
   };
 }
 
@@ -30,5 +36,5 @@ export function devicesInProject(p: Project): string[] {
 
 /** True when any shot overrides something, i.e. the per-shot column is worth showing. */
 export function hasShotOverrides(p: Project): boolean {
-  return p.shots.some((s) => s.device || s.finish || s.scene || s.lighting);
+  return p.shots.some((s) => s.device || s.finish || s.scene || s.lighting || s.blurMode || s.notch !== undefined || s.pose);
 }

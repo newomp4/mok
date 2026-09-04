@@ -9,6 +9,7 @@ import { getMedia, useMedia, type LoadedMedia } from "@/lib/media";
 import { shotKind } from "@/lib/defaults";
 import { ScreenSurface } from "@/three/screen";
 import { createFinishMaterials, createScreenMaterial, disposeMaterials } from "@/three/materials";
+import { ScreenReflection } from "@/three/ScreenReflection";
 import { anim } from "@/three/anim";
 import { paintPreset } from "@/three/background";
 import { getBgPreset } from "@/lib/presets";
@@ -19,7 +20,7 @@ import { WatchModel } from "@/three/devices/Watch";
 import { DesktopModel } from "@/three/devices/Desktop";
 import { FlatModel } from "@/three/devices/Flat";
 import { GlbDevice } from "@/three/devices/GlbModel";
-import { useModelBounds } from "@/three/registry";
+import { useModelBounds, useShownDevice } from "@/three/registry";
 import { useShallow } from "zustand/react/shallow";
 import { locate } from "@/lib/animation";
 import { resolveShotView, type ShotView } from "@/lib/shotView";
@@ -73,12 +74,14 @@ export function Device({ layout }: { layout: DeviceLayout }) {
   const screenMat = useMemo(() => createScreenMaterial(surface.texture), [surface]);
   useEffect(() => () => screenMat.dispose(), [screenMat]);
 
-  // size the screen canvas to the device's native resolution (or the media for flat devices)
+  // Size the screen canvas to the device's native resolution (or the media for flat devices). It
+  // follows the layout's device rather than the picked one, so the model being held while a new one
+  // loads keeps its own screen shape instead of being re-rasterised to the incoming aspect.
   useEffect(() => {
-    if (spec.family === "flat" && layout.flat) surface.setSize(layout.flat.px[0], layout.flat.px[1]);
-    else surface.setSize(spec.screenPx[0], spec.screenPx[1]);
+    if (layout.spec.family === "flat" && layout.flat) surface.setSize(layout.flat.px[0], layout.flat.px[1]);
+    else surface.setSize(layout.spec.screenPx[0], layout.spec.screenPx[1]);
     invalidate();
-  }, [spec, surface, layout.flat, invalidate]);
+  }, [layout.spec, surface, layout.flat, invalidate]);
 
   useEffect(() => {
     surface.setMedia(media, shot?.fit ?? "cover", { kind: spec.id === "browser" ? "browser" : "none", dark: finish.id === "dark" });
@@ -199,17 +202,24 @@ export function Device({ layout }: { layout: DeviceLayout }) {
   // procedural laptops are modelled from the floor up; glTF models are already centred
   const yOffset = !spec.model && spec.family === "laptop" ? -layout.height / 2 : 0;
   return (
-    <group ref={group} name="device">
-      <group position={[0, yOffset, 0]}>{model}</group>
-    </group>
+    <>
+      <group ref={group} name="device">
+        <group position={[0, yOffset, 0]}>{model}</group>
+      </group>
+      <ScreenReflection material={screenMat} amount={reflection} />
+    </>
   );
 }
 
 export function useDeviceLayout(): DeviceLayout {
   const deviceId = useShotView().device;
   const shot = useRenderShot();
-  const spec = getDevice(deviceId);
-  const bounds = useModelBounds((s) => s.bounds[deviceId]);
+  // while a newly picked glTF model prepares, the one still on screen keeps the framing: fitting the
+  // camera to a device that has not arrived yet would shrink and re-frame the one you are looking at
+  const shownId = useShownDevice((s) => s.id);
+  const held = shownId && shownId !== deviceId && getDevice(deviceId).model && getDevice(shownId).model ? shownId : deviceId;
+  const spec = getDevice(held);
+  const bounds = useModelBounds((s) => s.bounds[held]);
   return useMemo(() => {
     const base = deviceLayout(spec, shot?.media ?? null);
     if (spec.model && bounds) {

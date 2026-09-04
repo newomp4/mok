@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef } from "react";
+import { useShotView } from "@/three/Device";
 import { useFrame, useThree } from "@react-three/fiber";
 import { EffectComposer, Bloom, ChromaticAberration, DepthOfField, Noise, Pixelation, SMAA, ToneMapping, Vignette } from "@react-three/postprocessing";
 import { BlendFunction, ToneMappingMode, type DepthOfFieldEffect, type EffectComposer as EffectComposerImpl } from "postprocessing";
@@ -12,8 +13,9 @@ import { getEffectDef } from "@/lib/presets";
 import { CARD_Z } from "@/three/CardLayer";
 
 export function PostFX() {
-  const blurMode = useEditor((s) => s.project.blur.mode);
-  const bokeh = useEditor((s) => s.project.blur.bokeh);
+  const view = useShotView();
+  const blurMode = view.blurMode;
+  const bokeh = view.bokeh;
   const effects = useEditor((s) => s.project.effects);
   const borderRadius = useEditor((s) => s.project.mockup.borderRadius);
   const composerRef = useRef<EffectComposerImpl>(null);

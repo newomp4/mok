@@ -21,22 +21,37 @@ function useNoRoom(): boolean {
   return useRenderFlags((s) => s.transparent);
 }
 
+/** Every key in here shares one shadow camera, so its depth range is authored once. */
+const SHADOW_NEAR = 0.1;
+const SHADOW_FAR = 22;
+/** the widest penumbra each key can throw, in texels of its 2048² shadow map */
+const SHADOW_SPREAD: Record<ScenePresetId, number> = {
+  custom: 0,
+  studio: 104,
+  gallery: 100,
+  concrete: 52,
+  darkroom: 80,
+};
+
 /**
  * Shadow softness and opacity for the lit scenes. These sliders used to move nothing outside the
  * studio backdrop: `shadow.radius` is ignored under PCFSoftShadowMap, so the authored blur never
- * applied. The renderer now uses variance shadow maps, where both actually take effect.
+ * applied. The renderer now uses variance shadow maps, where both actually take effect. Softness
+ * stands for the size of the source, so it sets the widest penumbra the key can throw; the floors
+ * pull that back in again wherever the caster is close to them.
  */
-function useSceneShadow(base: number) {
+function useSceneShadow(spread: number) {
   const soft = useEditor((s) => s.project.scene.shadowSoft ?? 0.5);
   const opacity = useEditor((s) => s.project.scene.shadowOpacity ?? 0.5);
   // the variance blur is measured in shadow-map texels, so it takes a wide radius on a 2048 map
   // before the penumbra reads as soft at all
   return {
-    "shadow-radius": Math.max(1, 1 + soft * base * 12),
-    "shadow-blurSamples": Math.round(8 + soft * 16),
+    "shadow-radius": Math.max(1, soft * spread),
+    "shadow-blurSamples": Math.round(8 + soft * 24),
     "shadow-intensity": Math.max(0.05, Math.min(1, 0.15 + opacity * 1.7)),
   } as const;
 }
+
 
 /**
  * Infinite sweep: a radial gradient floor that fades into fog of the same colour, so the horizon
@@ -182,14 +197,11 @@ function MirrorFloor({ active, size }: { active: boolean; size: number }) {
 
 export function EnvScene({ preset, floorY, fitSize, backdrop }: { preset: ScenePresetId; floorY: number; fitSize: number; backdrop?: string }) {
   const noRoom = useNoRoom();
-  const shadow4 = useSceneShadow(4);
-  const shadow8 = useSceneShadow(8);
-  const shadow14 = useSceneShadow(14);
-  const shadow16 = useSceneShadow(16);
+  const keyShadow = useSceneShadow(SHADOW_SPREAD[preset]);
   const glowFloor = floorY;
   const f = fitSize;
   if (preset === "custom") return null;
-  const shadow = { left: -f * 1.6, right: f * 1.6, top: f * 1.6, bottom: -f * 1.6, near: 0.1, far: f * 22 };
+  const shadow = { left: -f * 1.6, right: f * 1.6, top: f * 1.6, bottom: -f * 1.6, near: SHADOW_NEAR, far: f * SHADOW_FAR };
   return (
     <group position={[0, floorY, 0]}>
       {preset === "studio" && (
@@ -197,7 +209,7 @@ export function EnvScene({ preset, floorY, fitSize, backdrop }: { preset: SceneP
         <>
           <SoftFloor size={f * 40} center="#eeeef0" edge={backdrop ?? "#b0b0b6"} />
           <SceneFog color={backdrop ?? "#d5d5d8"} near={f * 7} far={f * 26} />
-          <directionalLight position={[-f * 2.2, f * 3.4, -f * 2.6]} intensity={2.6} castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004} shadow-normalBias={0.02} {...shadow14}>
+          <directionalLight position={[-f * 2.2, f * 3.4, -f * 2.6]} intensity={2.6} castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004} shadow-normalBias={0.02} {...keyShadow}>
             <orthographicCamera attach="shadow-camera" args={[shadow.left, shadow.right, shadow.top, shadow.bottom, shadow.near, shadow.far]} />
           </directionalLight>
           <directionalLight position={[f * 3, f * 2, f * 3]} intensity={0.8} color="#ffffff" />
@@ -209,7 +221,7 @@ export function EnvScene({ preset, floorY, fitSize, backdrop }: { preset: SceneP
         <>
           <SoftFloor size={f * 40} center="#fcfcfd" edge={backdrop ?? "#d4d4da"} />
           <SceneFog color={backdrop ?? "#f2f2f4"} near={f * 8} far={f * 28} />
-          <directionalLight position={[-f * 1.6, f * 4.2, f * 2.2]} intensity={2.1} castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004} shadow-normalBias={0.02} {...shadow16}>
+          <directionalLight position={[-f * 1.6, f * 4.2, f * 2.2]} intensity={2.1} castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004} shadow-normalBias={0.02} {...keyShadow}>
             <orthographicCamera attach="shadow-camera" args={[shadow.left, shadow.right, shadow.top, shadow.bottom, shadow.near, shadow.far]} />
           </directionalLight>
           <directionalLight position={[f * 2.4, f * 2.4, -f * 2]} intensity={0.7} />
@@ -221,7 +233,7 @@ export function EnvScene({ preset, floorY, fitSize, backdrop }: { preset: SceneP
         <>
           <ConcreteFloor size={f * 26} />
           <SceneFog color={backdrop ?? "#0f1013"} near={f * 8} far={f * 24} />
-          <directionalLight position={[f * 3.4, f * 2.6, f * 1.6]} intensity={3.4} color="#ffeedd" castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0005} shadow-normalBias={0.02} {...shadow4}>
+          <directionalLight position={[f * 3.4, f * 2.6, f * 1.6]} intensity={3.4} color="#ffeedd" castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0005} shadow-normalBias={0.02} {...keyShadow}>
             <orthographicCamera attach="shadow-camera" args={[shadow.left, shadow.right, shadow.top, shadow.bottom, shadow.near, shadow.far]} />
           </directionalLight>
           <directionalLight position={[-f * 2.6, f * 1.6, -f * 3]} intensity={1.2} color="#93b0e8" />
@@ -234,7 +246,7 @@ export function EnvScene({ preset, floorY, fitSize, backdrop }: { preset: SceneP
         // black mirror floor, one cool rim, and the screen lighting its own surroundings
         <>
           <SceneFog color={backdrop ?? "#050506"} near={f * 6} far={f * 20} />
-          <spotLight position={[-f * 2, f * 3.6, -f * 2.2]} intensity={f * f * 30} angle={0.6} penumbra={0.95} distance={f * 22} color="#eaf0fb" castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004} shadow-normalBias={0.02} {...shadow8} />
+          <spotLight position={[-f * 2, f * 3.6, -f * 2.2]} intensity={f * f * 30} angle={0.6} penumbra={0.95} distance={f * 22} color="#eaf0fb" castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004} shadow-normalBias={0.02} {...keyShadow} />
           <spotLight position={[f * 2.8, f * 1.6, f * 2.4]} intensity={f * f * 13} angle={0.8} penumbra={1} distance={f * 22} color="#ffe2c6" />
           <ScreenGlow distance={f * 0.55} intensity={f * f * 6} height={f * 0.28} floorY={glowFloor} />
           <hemisphereLight intensity={0.08} color="#8fa8d0" groundColor="#000000" />

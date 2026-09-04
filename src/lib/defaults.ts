@@ -1,11 +1,12 @@
 import { uid } from "./ids";
+import { ANIM_DEFAULT_KEYS } from "./animation";
 import { DEVICES } from "./devices";
 import { LIGHTINGS, SCENES } from "./presets";
 
 const DEVICE_IDS = new Set(DEVICES.map((d) => d.id));
 const SCENE_IDS = new Set(SCENES.map((s) => s.id));
 const LIGHTING_IDS = new Set(LIGHTINGS.map((l) => l.id));
-import type { EnterExit, Project, Shot, TextStyle, LogoStyle } from "./types";
+import type { AnimProp, EnterExit, Project, Shot, TextStyle, LogoStyle } from "./types";
 
 export function createShot(name: string, duration = 3): Shot {
   return { id: uid(), name, duration, media: null, fit: "cover", keyframes: {}, focusAreas: [] };
@@ -84,6 +85,13 @@ export function normalizeProject(p: Project): Project {
     s.kind ??= "media";
     s.focusAreas ??= [];
     s.keyframes ??= {};
+    if (s.gap !== undefined && !(s.gap > 0)) delete s.gap;
+    if (s.pose) {
+      for (const k of Object.keys(s.pose) as AnimProp[]) {
+        if (!ANIM_DEFAULT_KEYS[k] || typeof s.pose[k] !== "number") delete s.pose[k];
+      }
+      if (!Object.keys(s.pose).length) delete s.pose;
+    }
     // a per-shot override pointing at a device or scene that no longer exists falls back to the project
     if (s.device && !DEVICE_IDS.has(s.device)) delete s.device;
     if (s.scene && !SCENE_IDS.has(s.scene)) delete s.scene;

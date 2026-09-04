@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useEditor, redo, undo } from "@/store/editor";
 import { useUI } from "@/store/ui";
 import { ASPECTS, TEMPLATES, getAspect } from "@/lib/presets";
@@ -7,6 +7,7 @@ import { BarButton, IconButton, MenuList, Popover, type MenuItem } from "@/compo
 import { Icon } from "@/components/icons";
 import { getDevice } from "@/lib/devices";
 import { applyTemplate, newProject } from "@/lib/actions";
+import { listTemplates, projectFromTemplate, type TemplateMeta } from "@/lib/persistence";
 import { MOD } from "@/lib/cn";
 import { exportProjectToFile, importProjectFromFile, saveCurrentProject } from "./hooks";
 
@@ -45,11 +46,50 @@ export function AspectMenu() {
 export function TemplatesMenu() {
   const [open, setOpen] = useState(false);
   const [hover, setHover] = useState<string | null>(null);
+  const [mine, setMine] = useState<TemplateMeta[]>([]);
   const ref = useRef<HTMLButtonElement>(null);
+  // templates you saved yourself sit above the built-ins, refreshed each time the menu opens
+  useEffect(() => { if (open) void listTemplates().then(setMine); }, [open]);
+  const startFrom = async (t: TemplateMeta) => {
+    const p = await projectFromTemplate(t.id);
+    if (!p) return;
+    useEditor.getState().replaceProject(p);
+    useEditor.temporal.getState().clear();
+    useUI.getState().setTime(0);
+    useUI.getState().setActiveShot(p.shots[0]?.id ?? null);
+    setOpen(false);
+    useUI.getState().showToast(`Started from “${t.name}”`);
+  };
   return (
     <>
       <BarButton ref={ref} iconRight="chevron-down" active={open} onClick={() => setOpen((o) => !o)}>Templates</BarButton>
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} className="w-[460px] p-2">
+        {mine.length > 0 && (
+          <>
+            <div className="label px-1 pb-2 pt-1 text-muted">Your templates</div>
+            <div className="grid grid-cols-2 gap-2 pb-3 pr-1">
+              {mine.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => void startFrom(t)}
+                  className="group flex flex-col overflow-hidden rounded-lg border border-line bg-panel-2 text-left transition-colors hover:border-line-2"
+                >
+                  <div className="relative flex aspect-[8/5] items-center justify-center overflow-hidden bg-panel text-muted">
+                    {t.thumb
+                      // eslint-disable-next-line @next/next/no-img-element
+                      ? <img src={t.thumb} alt="" className="h-full w-full object-cover transition-transform group-hover:scale-[1.03]" draggable={false} />
+                      : <Icon name={getDevice(t.device).icon} size={20} />}
+                  </div>
+                  <div className="flex items-center justify-between gap-2 px-2.5 py-2">
+                    <span className="label truncate text-fg">{t.name}</span>
+                    <span className="label-sm shrink-0 text-muted">{getDevice(t.device).name}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
         <div className="label px-1 pb-2 pt-1 text-muted">Starter templates · hover to preview</div>
         <div className="scroll grid max-h-[60vh] grid-cols-2 gap-2 overflow-auto pr-1">
           {TEMPLATES.map((t) => {

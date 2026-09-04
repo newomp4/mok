@@ -53,11 +53,203 @@ function blob(ctx: CanvasRenderingContext2D, x: number, y: number, rx: number, r
 }
 
 /**
+ * An out-of-focus point of light: a soft disc that is brightest just inside its edge, which is how
+ * a fast lens renders a highlight sitting outside the focal plane.
+ */
+function orb(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string, alpha: number, rim: number) {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, rgba(color, alpha * 0.58));
+  g.addColorStop(0.5, rgba(color, alpha * 0.66));
+  g.addColorStop(0.78, rgba(color, alpha * 0.82));
+  g.addColorStop(0.91, rgba(color, alpha * rim));
+  g.addColorStop(0.98, rgba(color, alpha * 0.3));
+  g.addColorStop(1, rgba(color, 0));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/**
+ * One raking band of light: a stroke that bends twice on its way across the frame and fades out
+ * before either end, so a run of them reads as folded fabric rather than as stripes.
+ */
+function ribbon(
+  ctx: CanvasRenderingContext2D, w: number, h: number, long: number,
+  angle: number, offset: number, amp: number, freq: number, phase: number,
+  width: number, color: string, alpha: number,
+) {
+  ctx.save();
+  ctx.translate(w / 2, h / 2);
+  ctx.rotate(angle);
+  const span = long * 0.85;
+  const g = ctx.createLinearGradient(-span, 0, span, 0);
+  g.addColorStop(0, rgba(color, 0));
+  g.addColorStop(0.24, rgba(color, alpha));
+  g.addColorStop(0.62, rgba(color, alpha * 0.75));
+  g.addColorStop(1, rgba(color, 0));
+  ctx.strokeStyle = g;
+  ctx.lineWidth = width;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  const steps = 48;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const x = -span + t * span * 2;
+    const y = offset + Math.sin(t * freq * Math.PI * 2 + phase) * amp + Math.sin(t * freq * 0.37 * Math.PI * 2 + phase * 1.7) * amp * 0.55;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * Paints a preset as a photographic wallpaper rather than a gradient: a colour field pushed far
+ * out of focus, raking bands of light across it, a leak, out-of-focus highlights at two depths and
+ * film grain over the lot. Every placement comes from the preset id, so the picture is the same in
+ * the viewport, in a thumbnail and in an export, and every size is a fraction of the long edge, so
+ * it holds together from a 132px chip to a 4K frame.
+ */
+function paintWallpaper(ctx: CanvasRenderingContext2D, w: number, h: number, preset: BgPreset, blur: number) {
+  const [c0, c1, c2, c3] = preset.colors;
+  const long = Math.max(w, h);
+  const rand = rng(seedOf(preset.id));
+  const light = lightness(c0) > 0.5;
+  // light presets take added light through soft-light, which lifts them without blowing out
+  const add = light ? "soft-light" : "screen";
+  // the background defocus setting only nudges these layers: the picture is already out of focus by
+  // design, and a heavy pass would leave nothing of the bokeh that makes it a wallpaper
+  const soft = (f: number) => `blur(${Math.max(1, Math.round(long * (f + blur * 0.006)))}px)`;
+  // each preset draws its own balance of fabric, glare and angle, so the recipe never repeats
+  const silk = 0.8 + rand() * 0.7;
+  const glare = 0.7 + rand() * 0.7;
+  const tilt = -1 + rand() * 1.4;
+
+  ctx.filter = "none";
+  ctx.globalCompositeOperation = "source-over";
+
+  // the ground, a wide ramp through three of the four colours so nothing reads as one flat hue
+  const base = ctx.createLinearGradient(w * 0.1, 0, w * 0.9, h);
+  base.addColorStop(0, mix(c0, c2, 0.45));
+  base.addColorStop(0.45, c0);
+  base.addColorStop(0.8, mix(c0, c1, 0.4));
+  base.addColorStop(1, mix(c0, c3, light ? 0.2 : 0.12));
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, w, h);
+
+  // far colour: masses blurred until only their hue survives, which is what everything drawn
+  // afterwards sits in front of
+  ctx.save();
+  ctx.filter = soft(0.1);
+  const masses = [c1, c3, c2, c1, c3];
+  for (let i = 0; i < masses.length; i++) {
+    const a = (i / masses.length) * Math.PI * 2 + rand() * 1.4;
+    const dist = 0.26 + rand() * 0.36;
+    const rx = long * (0.26 + rand() * 0.3);
+    blob(ctx, w * (0.5 + Math.cos(a) * dist), h * (0.5 + Math.sin(a) * dist * 0.92), rx, rx * (0.6 + rand() * 0.55), rand() * Math.PI, masses[i], light ? 0.72 : 0.8);
+  }
+  ctx.restore();
+
+  // a thin haze over the colour field, the aerial perspective that sets it behind the near layers
+  ctx.save();
+  ctx.globalAlpha = light ? 0.1 : 0.2;
+  ctx.fillStyle = mix(c0, light ? c2 : c1, 0.45);
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
+
+  // fabric: bands raking across at a shared angle, each at its own depth and softness
+  ctx.save();
+  ctx.globalCompositeOperation = add;
+  for (let i = 0; i < 9; i++) {
+    const depth = rand();
+    ctx.filter = soft(0.004 + depth * depth * 0.05);
+    const color = rand() < 0.45 ? c3 : "#ffffff";
+    const alpha = Math.min(0.8, (light ? 0.26 + rand() * 0.34 : 0.1 + rand() * 0.2) * silk);
+    ribbon(
+      ctx, w, h, long,
+      tilt + (rand() - 0.5) * 0.55, (rand() - 0.5) * long * 1.05,
+      long * (0.02 + rand() * 0.12), 0.4 + rand() * 1.4, rand() * Math.PI * 2,
+      long * (0.005 + depth * 0.055), color, alpha,
+    );
+  }
+  ctx.restore();
+
+  // one broad shaft leaking in from off frame
+  ctx.save();
+  ctx.globalCompositeOperation = add;
+  ctx.filter = soft(0.045);
+  ctx.translate(w / 2, h / 2);
+  ctx.rotate(tilt + 0.65 + rand() * 0.4);
+  const bw = long * (0.1 + rand() * 0.15) * glare;
+  const boff = (rand() - 0.5) * long * 0.55;
+  const leak = ctx.createLinearGradient(0, boff - bw, 0, boff + bw);
+  leak.addColorStop(0, rgba(c3, 0));
+  leak.addColorStop(0.34, rgba(c3, light ? 0.36 : 0.2));
+  leak.addColorStop(0.52, `rgba(255,255,255,${light ? 0.5 : 0.26})`);
+  leak.addColorStop(0.72, rgba(c3, light ? 0.3 : 0.16));
+  leak.addColorStop(1, rgba(c3, 0));
+  ctx.fillStyle = leak;
+  ctx.fillRect(-long, boff - bw, long * 2, bw * 2);
+  ctx.restore();
+
+  // far bokeh: large, dim and soft enough to stay behind the near highlights. On a pale preset the
+  // discs have to carry colour rather than light, or they disappear into the ground.
+  ctx.save();
+  ctx.globalCompositeOperation = light ? "source-over" : "screen";
+  ctx.filter = soft(0.016);
+  for (let i = 0; i < 8; i++) {
+    const r = long * (0.05 + rand() * 0.13);
+    const c = rand() < 0.5 ? c3 : c1;
+    orb(ctx, w * (-0.05 + rand() * 1.1), h * (-0.05 + rand() * 1.1), r, c, (light ? 0.13 : 0.22) * glare, 1.1);
+  }
+  ctx.restore();
+
+  // near bokeh, all but sharp so the frame has a plane in focus, then a scatter of small sparkles
+  ctx.save();
+  ctx.globalCompositeOperation = light ? "source-over" : "lighter";
+  ctx.filter = soft(0.002);
+  for (let i = 0; i < 12; i++) {
+    const r = long * (0.016 + rand() * 0.055);
+    const tinted = rand() < 0.55;
+    const a = light ? (tinted ? 0.16 : 0.24) : (tinted ? 0.15 : 0.09);
+    orb(ctx, w * (-0.05 + rand() * 1.1), h * (-0.05 + rand() * 1.1), r, tinted ? c3 : "#ffffff", a * glare, 1.25);
+  }
+  // the smallest highlights are clamped to a pixel or two so they stay dots on a thumbnail
+  for (let i = 0; i < 10; i++) {
+    const r = Math.max(1.8, long * (0.004 + rand() * 0.008));
+    orb(ctx, w * rand(), h * rand(), r, "#ffffff", light ? 0.28 : 0.45, 1.4);
+  }
+  ctx.restore();
+
+  // the key: a wide highlight where the light enters, which anchors all of the above
+  ctx.save();
+  ctx.globalCompositeOperation = light ? "soft-light" : "screen";
+  const key = ctx.createRadialGradient(w * 0.32, h * 0.24, 0, w * 0.32, h * 0.24, long * 0.62);
+  key.addColorStop(0, `rgba(255,255,255,${light ? 0.28 : 0.16})`);
+  key.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = key;
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
+
+  const v = ctx.createRadialGradient(w * 0.5, h * 0.48, Math.min(w, h) * 0.22, w * 0.5, h * 0.5, long * 0.76);
+  v.addColorStop(0, "rgba(0,0,0,0)");
+  v.addColorStop(1, `rgba(0,0,0,${light ? 0.16 : 0.42})`);
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, w, h);
+
+  grain(ctx, w, h, light ? 0.022 : 0.036, seedOf(preset.id));
+}
+
+/**
  * Paints a background preset as a layered mesh gradient: a base ramp, several rotated colour
  * sources, a raking sheen, a fine grain and a vignette. Everything is derived from the preset id,
  * so the same preset always paints the same picture at any resolution.
  */
 export function paintPreset(ctx: CanvasRenderingContext2D, w: number, h: number, preset: BgPreset, blur: number) {
+  if (preset.style === "wallpaper") {
+    paintWallpaper(ctx, w, h, preset, blur);
+    return;
+  }
   const [c0, c1, c2, c3] = preset.colors;
   const long = Math.max(w, h);
   const rand = rng(seedOf(preset.id));

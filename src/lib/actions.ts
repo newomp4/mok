@@ -26,9 +26,13 @@ export function resetCamera() {
   useEditor.getState().update((p) => {
     p.camera = { x: -22, y: -18, z: 0, fov: 24, zoom: 1.12, panX: 0.02, panY: -0.02 };
     p.mockup.rotX = 0; p.mockup.rotY = 0; p.mockup.rotZ = 0;
+    const isCamera = (k: AnimProp) => k.startsWith("camera.") || k === "mockup.rotX" || k === "mockup.rotY" || k === "mockup.rotZ";
     for (const s of p.shots) {
-      for (const k of Object.keys(s.keyframes) as AnimProp[]) {
-        if (k.startsWith("camera.") || k === "mockup.rotX" || k === "mockup.rotY" || k === "mockup.rotZ") delete s.keyframes[k];
+      for (const k of Object.keys(s.keyframes) as AnimProp[]) if (isCamera(k)) delete s.keyframes[k];
+      // a shot holding its own framing would otherwise survive the reset and keep the old pose
+      if (s.pose) {
+        for (const k of Object.keys(s.pose) as AnimProp[]) if (isCamera(k)) delete s.pose[k];
+        if (!Object.keys(s.pose).length) delete s.pose;
       }
     }
   });
@@ -37,7 +41,16 @@ export function resetCamera() {
 export function resetBlur() {
   useEditor.getState().update((p) => {
     p.blur = { mode: "off", strength: 10, focusSize: 0.52, falloff: 0, bokeh: true, focusX: 0.5, focusY: 0.5, focusDistance: 0 };
-    for (const s of p.shots) for (const k of Object.keys(s.keyframes) as AnimProp[]) if (k.startsWith("blur.")) delete s.keyframes[k];
+    for (const s of p.shots) {
+      for (const k of Object.keys(s.keyframes) as AnimProp[]) if (k.startsWith("blur.")) delete s.keyframes[k];
+      // the same for a lens a shot holds on its own, plus the mode and bokeh it may have overridden
+      if (s.pose) {
+        for (const k of Object.keys(s.pose) as AnimProp[]) if (k.startsWith("blur.")) delete s.pose[k];
+        if (!Object.keys(s.pose).length) delete s.pose;
+      }
+      delete s.blurMode;
+      delete s.bokeh;
+    }
   });
 }
 

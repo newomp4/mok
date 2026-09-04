@@ -206,7 +206,8 @@ export interface BgPreset {
   id: string;
   name: string;
   colors: [string, string, string, string];
-  style: "mesh" | "linear" | "radial";
+  /** "wallpaper" is the photographic class: defocused colour, raking light, bokeh and grain */
+  style: "mesh" | "linear" | "radial" | "wallpaper";
 }
 export const BG_PRESETS: BgPreset[] = [
   { id: "whisp", name: "Whisp", colors: ["#eef0f4", "#cfd6e4", "#f7f8fb", "#aeb8cc"], style: "mesh" },
@@ -229,6 +230,14 @@ export const BG_PRESETS: BgPreset[] = [
   { id: "prism", name: "Prism", colors: ["#101226", "#4a7bf0", "#2a1c4a", "#f05fa8"], style: "mesh" },
   { id: "sky", name: "Sky", colors: ["#e6f1fb", "#b7d9f5", "#f6fbff", "#7fb4e4"], style: "linear" },
   { id: "sandstone", name: "Sandstone", colors: ["#f6efe4", "#dcc4a0", "#fdfaf4", "#b9986e"], style: "mesh" },
+  { id: "obsidian", name: "Obsidian", colors: ["#0a0a0d", "#2b3040", "#131319", "#9fb3d9"], style: "wallpaper" },
+  { id: "plume", name: "Plume", colors: ["#f4efe6", "#dcc3a6", "#fbf8f3", "#b78a5c"], style: "wallpaper" },
+  { id: "citrine", name: "Citrine", colors: ["#fff0d0", "#ffc356", "#fff9ec", "#ff8420"], style: "wallpaper" },
+  { id: "cobalt", name: "Cobalt", colors: ["#08152f", "#1d4494", "#0f2350", "#5fc8f5"], style: "wallpaper" },
+  { id: "blush", name: "Blush", colors: ["#fdeaee", "#f2aabc", "#fff6f8", "#d9607f"], style: "wallpaper" },
+  { id: "indigo", name: "Indigo", colors: ["#120b26", "#3b2a86", "#1d1440", "#8f6bff"], style: "wallpaper" },
+  { id: "quicksilver", name: "Quicksilver", colors: ["#dce1e8", "#98a5b5", "#f2f4f7", "#65707f"], style: "wallpaper" },
+  { id: "daybreak", name: "Daybreak", colors: ["#2a1430", "#d4553f", "#5a2340", "#ffc26b"], style: "wallpaper" },
 ];
 export function getBgPreset(id: string): BgPreset {
   return BG_PRESETS.find((b) => b.id === id) ?? BG_PRESETS[0];

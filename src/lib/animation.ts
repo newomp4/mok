@@ -41,6 +41,44 @@ export function curveOf(k: Pick<Keyframe, "ease" | "cp">): EaseCurve {
   return k.cp ?? NAMED_CURVES[k.ease] ?? NAMED_CURVES.smooth;
 }
 
+/** One end of a segment's curve: a keyframe's out handle, or the in handle of the keyframe it runs to. */
+export type EaseHandle = [number, number];
+
+/**
+ * A keyframe also carries the curve the motion arrives on. The field is written as an optional
+ * extension of the stored keyframe so projects saved before it existed keep sampling untouched.
+ */
+export type EasedKeyframe = Keyframe & { cpIn?: EaseHandle };
+
+export function inHandleOf(k: Keyframe | null | undefined): EaseHandle | undefined {
+  return (k as EasedKeyframe | null | undefined)?.cpIn;
+}
+
+export function setInHandle(k: Keyframe, h: EaseHandle | null) {
+  if (h) (k as EasedKeyframe).cpIn = [h[0], h[1]];
+  else delete (k as EasedKeyframe).cpIn;
+}
+
+/**
+ * The curve of the segment between two keyframes: a shapes how the motion leaves, b how it arrives.
+ * When b has no in-curve the segment is a's alone, which is how every project written so far reads.
+ */
+export function segmentCurve(a: Keyframe, b?: Keyframe | null): EaseCurve {
+  const out = curveOf(a);
+  const arrive = inHandleOf(b);
+  return arrive ? [out[0], out[1], arrive[0], arrive[1]] : out;
+}
+
+/** Eased progress across the segment from a to b, for x from 0 to 1. */
+export function easeSegment(a: Keyframe, b: Keyframe | null | undefined, x: number): number {
+  const arrive = inHandleOf(b);
+  // with nothing arriving on the far end the near keyframe still shapes the whole segment, named ease included
+  if (!arrive) return a.cp ? bezierEase(a.cp, x) : ease(a.ease, x);
+  // a hold is a step rather than a curve, so nothing on the far end can round it off
+  if (!a.cp && a.ease === "hold") return ease("hold", x);
+  return bezierEase(segmentCurve(a, b), x);
+}
+
 /** y at x for a cubic bezier from (0,0) to (1,1) with the given control points. */
 export function bezierEase(cp: EaseCurve, x: number): number {
   const [x1, y1, x2, y2] = cp;
@@ -99,7 +137,7 @@ export function sampleTrack(kfs: Keyframe[], t: number): number {
   const span = b.t - a.t;
   if (span <= 0) return b.v;
   const x = (t - a.t) / span;
-  const u = a.cp ? bezierEase(a.cp, x) : ease(a.ease, x);
+  const u = easeSegment(a, b, x);
   return a.v + (b.v - a.v) * u;
 }
 
@@ -123,9 +161,19 @@ export function evaluate(p: Project, shot: Shot | null, localT: number): AnimVal
   const props = Object.keys(ANIM_DEFAULT_KEYS) as AnimProp[];
   for (const prop of props) {
     const kfs = shot?.keyframes[prop];
-    out[prop] = kfs && kfs.length ? sampleTrack(kfs, localT) : getBase(p, prop);
+    out[prop] = kfs && kfs.length ? sampleTrack(kfs, localT) : shotBase(p, shot, prop);
   }
   return out;
+}
+
+/**
+ * What a property reads as for one shot when nothing animates it: the shot's own value if it has
+ * diverged from the project, otherwise the project's. This is what makes a camera framing or a lens
+ * belong to a shot rather than to the whole sequence.
+ */
+export function shotBase(p: Project, shot: Shot | null | undefined, prop: AnimProp): number {
+  const own = shot?.pose?.[prop];
+  return own === undefined ? getBase(p, prop) : own;
 }
 
 export const ANIM_DEFAULT_KEYS: Record<AnimProp, true> = {
@@ -137,7 +185,7 @@ export const ANIM_DEFAULT_KEYS: Record<AnimProp, true> = {
 };
 
 export function totalDuration(p: Project): number {
-  return p.shots.reduce((a, s) => a + s.duration, 0);
+  return p.shots.reduce((a, s) => a + Math.max(0, s.gap ?? 0) + s.duration, 0);
 }
 
 export interface Location {
@@ -145,12 +193,22 @@ export interface Location {
   index: number;
   localT: number;
   start: number;
+  /** the playhead is in empty space before this shot, holding the previous one's last frame */
+  inGap?: boolean;
 }
 
 export function locate(p: Project, t: number): Location {
   let start = 0;
   for (let i = 0; i < p.shots.length; i++) {
     const s = p.shots[i];
+    const gap = Math.max(0, s.gap ?? 0);
+    if (gap > 0 && t < start + gap) {
+      // inside the gap: hold the previous shot's last frame, or open on this one before there is one
+      const prev = p.shots[i - 1];
+      if (prev) return { shot: prev, index: i - 1, localT: prev.duration, start: start - prev.duration, inGap: true };
+      return { shot: s, index: i, localT: 0, start: start + gap, inGap: true };
+    }
+    start += gap;
     if (t < start + s.duration || i === p.shots.length - 1) {
       return { shot: s, index: i, localT: Math.min(Math.max(0, t - start), s.duration), start };
     }
@@ -162,6 +220,7 @@ export function locate(p: Project, t: number): Location {
 export function shotStart(p: Project, shotId: string): number {
   let start = 0;
   for (const s of p.shots) {
+    start += Math.max(0, s.gap ?? 0);
     if (s.id === shotId) return start;
     start += s.duration;
   }
@@ -215,13 +274,21 @@ export function fadeAt(p: Project, t: number): { alpha: number; color: string } 
 
 /** Mirror a track in time so the motion plays backwards. */
 export function reverseTrack(kfs: Keyframe[], duration: number): Keyframe[] {
-  const out = kfs.map((k) => ({ ...k, t: Math.round((duration - k.t) * 1000) / 1000 })).sort((a, b) => a.t - b.t);
-  // easing describes the segment that STARTS at a keyframe, so reversing has to shift and mirror it
-  const eases = out.map((_, i) => kfs[kfs.length - 1 - i]);
-  return out.map((k, i) => {
-    const src = eases[i + 1] ?? eases[i];
-    const cp = src?.cp;
-    return { ...k, ease: src?.ease ?? k.ease, ...(cp ? { cp: [1 - cp[2], 1 - cp[3], 1 - cp[0], 1 - cp[1]] as typeof cp } : {}) };
+  const n = kfs.length;
+  return kfs.map((_, i) => {
+    const src = kfs[n - 1 - i];
+    const out: Keyframe = { ...src, t: Math.round((duration - src.t) * 1000) / 1000 };
+    delete out.cp;
+    setInHandle(out, null);
+    // easing describes a segment, so reversing hands each keyframe the segment that used to follow the
+    // one it mirrors, flipped end for end and collapsed onto the keyframe the segment now starts at
+    const a = kfs[n - 2 - i], b = kfs[n - 1 - i];
+    if (!a) { out.ease = src.ease; return out; }
+    if (!a.cp && !inHandleOf(b)) { out.ease = a.ease; return out; }
+    const c = segmentCurve(a, b);
+    out.cp = [1 - c[2], 1 - c[3], 1 - c[0], 1 - c[1]];
+    out.ease = a.ease;
+    return out;
   });
 }
 
@@ -231,7 +298,14 @@ export function splitTrack(kfs: Keyframe[], t: number): [Keyframe[], Keyframe[]]
   // the segment being cut is the one whose keyframe is the LAST at or before t
   const cut = [...kfs].reverse().find((k) => k.t <= t);
   const a = kfs.filter((k) => k.t < t - 0.0005);
-  a.push({ t: Math.round(t * 1000) / 1000, v, ease: cut?.ease ?? "smooth", ...(cut?.cp ? { cp: [...cut.cp] as NonNullable<Keyframe["cp"]> } : {}) });
+  const end: Keyframe = { t: Math.round(t * 1000) / 1000, v, ease: cut?.ease ?? "smooth", ...(cut?.cp ? { cp: [...cut.cp] as NonNullable<Keyframe["cp"]> } : {}) };
+  // The closing keyframe keeps the curve the motion arrives on. When the cut lands exactly on an
+  // existing keyframe that is the keyframe's own arrival curve; otherwise it is the one belonging to
+  // the keyframe the cut segment used to run to, so the first half still lands the same way.
+  const onKey = kfs.find((k) => Math.abs(k.t - t) < 0.0005);
+  const arrive = inHandleOf(onKey) ?? inHandleOf(kfs.find((k) => k.t > t + 0.0005));
+  if (arrive) setInHandle(end, arrive);
+  a.push(end);
   const b: Keyframe[] = [{ t: 0, v, ease: cut?.ease ?? "smooth", ...(cut?.cp ? { cp: [...cut.cp] as NonNullable<Keyframe["cp"]> } : {}) }];
   for (const k of kfs) if (k.t > t + 0.0005) b.push({ ...k, t: Math.round((k.t - t) * 1000) / 1000 });
   return [a, b];

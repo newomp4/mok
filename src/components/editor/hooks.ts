@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef } from "react";
-import { useEditor, redo, undo, hasKeyClipboard, hasShotClipboard, lastCopyWasKeyframes } from "@/store/editor";
+import { useEditor, redo, undo, beginInteraction, endInteraction, hasKeyClipboard, hasShotClipboard, lastCopyWasKeyframes } from "@/store/editor";
 import { APP_VERSION } from "@/lib/version";
 import type { AnimProp, Project } from "@/lib/types";
 import { useUI } from "@/store/ui";
@@ -292,9 +292,21 @@ export function useShortcuts() {
           break;
         }
         case "Backspace": case "Delete": {
-          if (!ui.selectedKeys.length) break;
+          // keyframes come first: a shot selection is the fallback, so one press never spends both
+          if (ui.selectedKeys.length) {
+            e.preventDefault();
+            ed.deleteSelectedKeyframes();
+            break;
+          }
+          if (!ui.selectedShots.length) break;
           e.preventDefault();
-          ed.deleteSelectedKeyframes();
+          const before = ed.project.shots.length;
+          beginInteraction();
+          for (const id of ui.selectedShots) ed.removeShot(id);
+          endInteraction();
+          const gone = before - useEditor.getState().project.shots.length;
+          ui.setSelectedShots([]);
+          if (gone) ui.showToast(`${gone} shot${gone === 1 ? "" : "s"} deleted`);
           break;
         }
         case "ArrowUp": case "ArrowDown": {

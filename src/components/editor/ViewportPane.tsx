@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { useShotView } from "@/three/Device";
 import { useProgress } from "@react-three/drei";
 import { useEditor, beginInteraction, endInteraction } from "@/store/editor";
 import { useUI } from "@/store/ui";
@@ -332,7 +333,7 @@ const BLUR_PROPS = ["blur.strength", "blur.focusX", "blur.focusY", "blur.focusSi
  * while you adjust the blur (or hold Alt) and fade out again, so they never sit in a capture.
  */
 function FocusMarker() {
-  const mode = useEditor((s) => s.project.blur.mode);
+  const mode = useShotView().blurMode;
 
   const time = useUI((s) => s.time);
   const v = useEditor(useShallow((s) => {

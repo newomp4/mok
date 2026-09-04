@@ -29,9 +29,10 @@ rendering and encoding happens locally with WebGL and WebCodecs.
   device screen itself, coloured by what is on the display. Light rotation swings the lights and their shadows,
   not just the reflections, and a transparent export drops the room and leaves only the device
 - **8 lighting rigs** from CC0 Poly Haven HDRIs, rotatable and keyframeable, with contact-shadow softness and opacity
-- **Backgrounds**: solid colour, 20 layered mesh-gradient presets picked from a visual grid, your own image
-  with blur, or transparent — and the same gradients can sit behind a transparent screenshot on the device
-  screen itself
+- **Backgrounds**: solid colour, 20 layered mesh-gradient presets and 8 wallpaper-class ones with bokeh, light
+  leaks and depth, all picked from a visual grid, your own image with blur, or transparent — and the same library
+  can sit behind a transparent screenshot on the device screen itself
+- **Templates**: 24 starter templates plus any project you save as one of your own
 - **Camera**: orbit / zoom / pan directly in the viewport with Ultramock's rig order and feel (drag 0.5°/px,
   pitch about the world axis so angled views lean the device), nine presets — five of them ported numerically
   from Ultramock — FOV, roll, centre guides and snap-to-centre panning
@@ -41,12 +42,18 @@ rendering and encoding happens locally with WebGL and WebCodecs.
   rack focus can pull between two subjects. Guides draw the focus while you adjust and fade out again
 - **Effects**: vignette, grain, bloom, chromatic aberration, sharpen, pixel grid, fish eye, glass border,
   screen fade, ghost, liquid glass
-- **Timeline**: media, **text** and **logo** shots back to back; keyframes on every camera / device / light / blur
+- **Per-shot everything**: a shot owns its framing, its lens (focus point, strength, range, angle, mode, bokeh),
+  its device, finish, environment and lighting. Move the camera on one shot and the rest stay where they were,
+  or push one framing across the sequence with **Apply to all shots**
+- **Timeline**: media, **text** and **logo** shots placed anywhere on the ruler — drag one to open a **gap**, shown
+  as a band that names the shots it sits between and holds the previous frame through it, right-click to close it;
+  marquee or shift-click several shots and move them together; keyframes on every camera / device / light / blur
   property with per-keyframe easing; motion presets with animated thumbnails; auto-motion that composes a camera
   move from focus areas you draw; right-click menus (rename, split at playhead, reverse, copy / paste, duplicate),
   drag to reorder, snapping, ⌘-scroll zoom, resizable height; **fade transitions** between shots and whole-video
   fade in / out; **marquee-select** keyframes and move or proportionally retime them as a group
-- **Easing graph**: every keyframe carries a cubic-bezier curve you can shape by dragging its handles, or take
+- **Easing graph**: every keyframe carries its own **in and out** cubic-bezier curves, shaped independently by
+  dragging their handles with a tracing dot that runs the timing, or take
   from an eight-tile preset grid, and apply across a selection or a whole track
 - **Text shots** in Geist or 20 Google fonts (weight, size, colour, alignment, line height, tracking) and
   **logo shots** (PNG / SVG on a colour, with Liquid metal, Gem smoke and Heatmap shader looks), both with enter /

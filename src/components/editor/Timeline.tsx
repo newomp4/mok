@@ -1,9 +1,9 @@
 "use client";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useEditor, beginInteraction, endInteraction, hasShotClipboard, clampKeyTime } from "@/store/editor";
 import { useUI } from "@/store/ui";
-import { ANIM_LABELS, type AnimProp, type Shot, type Transition, type AudioTrack } from "@/lib/types";
-import { EASES, formatTime, shotStart, totalDuration } from "@/lib/animation";
+import { ANIM_LABELS, type AnimProp, type Keyframe, type Shot, type Transition, type AudioTrack } from "@/lib/types";
+import { EASES, formatTime, shotStart, totalDuration, inHandleOf, setInHandle } from "@/lib/animation";
 import { MOTION_PRESETS } from "@/lib/presets";
 import { Button, IconButton, Popover, Segmented, MenuList, ContextMenu, NumberRow, ColorRow, type MenuItem } from "@/components/ui";
 import { Icon } from "@/components/icons";
@@ -47,6 +47,25 @@ function keepInView(t: number, start: number): number {
   return Math.max(t, -start);
 }
 
+/** The distance a track keeps between two keyframes that would otherwise share a frame. */
+const KEY_STEP = 0.001;
+
+/** Where a dragged keyframe can land without sitting on top of another one. Dropping a diamond on
+ *  a neighbour has to push past it in the direction of travel, never swallow it. */
+function freeSlot(t: number, others: number[], dir: number, duration: number): number {
+  const taken = (x: number) => others.some((o) => Math.abs(o - x) < KEY_STEP - 1e-9);
+  const walk = (step: number) => {
+    let out = t;
+    for (let i = 0; i <= others.length && taken(out); i++) out = Math.round((out + step) * 1000) / 1000;
+    return out;
+  };
+  const step = dir < 0 ? -KEY_STEP : KEY_STEP;
+  // clamping to the shot's margin can land the nudge back on the neighbour, so the other side is
+  // the fallback rather than an overwrite
+  const out = clampKeyTime(walk(step), duration);
+  return taken(out) ? clampKeyTime(walk(-step), duration) : out;
+}
+
 /** Where a proportional (alt) group drag puts one keyframe — the pivot and scale the store uses. */
 function scaledKeyTime(abs: number[], t: number, dt: number): number {
   const pivot = Math.min(...abs);
@@ -75,14 +94,17 @@ export function Timeline() {
   const ui = useUI(useShallow((s) => ({
     playing: s.playing, loop: s.loop, recording: s.recording, activeShotId: s.activeShotId,
     timelineMode: s.timelineMode, timelineZoom: s.timelineZoom, timelineHeight: s.timelineHeight,
-    autoMotion: s.autoMotion, guides: s.guides, selectedKeys: s.selectedKeys,
+    autoMotion: s.autoMotion, guides: s.guides, selectedKeys: s.selectedKeys, selectedShots: s.selectedShots,
     setTime: s.setTime, setPlaying: s.setPlaying, toggleLoop: s.toggleLoop, setRecording: s.setRecording,
     setActiveShot: s.setActiveShot, setTimelineMode: s.setTimelineMode, setTimelineZoom: s.setTimelineZoom,
     setTimelineHeight: s.setTimelineHeight, setAutoMotion: s.setAutoMotion, setGuides: s.setGuides,
-    setSelectedKeys: s.setSelectedKeys, setTimelineOpen: s.setTimelineOpen, showToast: s.showToast,
+    setSelectedKeys: s.setSelectedKeys, setSelectedShots: s.setSelectedShots, setTimelineOpen: s.setTimelineOpen, showToast: s.showToast,
   })));
   const total = totalDuration(project);
   const pps = 96 * ui.timelineZoom;
+  const selectedShots = ui.selectedShots;
+  const setSelectedShots = (next: string[] | ((cur: string[]) => string[])) =>
+    ui.setSelectedShots(typeof next === "function" ? next(useUI.getState().selectedShots) : next);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const selected = ui.selectedKeys;
   const setSelected = ui.setSelectedKeys;
@@ -98,21 +120,64 @@ export function Timeline() {
   const [transitionFor, setTransitionFor] = useState<string | null>(null);
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [snapAt, setSnapAt] = useState<number | null>(null);
-  const marqueeRef = useRef<{ x0: number; y0: number; additive: boolean; base: typeof selected } | null>(null);
+  const marqueeRef = useRef<{ x0: number; y0: number; additive: boolean; base: typeof selected; baseShots: string[] } | null>(null);
   const advanced = ui.timelineMode === "advanced";
+  const reorderShot = useEditor((s) => s.reorderShot);
+  // whole shots picked out on the ruler. The UI store carries the keyframe selection but not this
+  // one, so it lives with the timeline and is pruned whenever a shot goes away.
+
+  const [shotDrag, setShotDrag] = useState<{ ids: string[]; dx: number } | null>(null);
+  const [gapMenu, setGapMenu] = useState<{ at: { x: number; y: number }; shotId: string } | null>(null);
+
+  // Simple mode packs the sequence — a gap neither shows nor offsets anything — so the blocks, the
+  // keyframes and the playhead all share one mapping between project time and where it is drawn.
+  const packed = useMemo(() => {
+    const starts = new Map<string, { real: number; disp: number }>();
+    let real = 0, disp = 0;
+    for (const s of project.shots) {
+      real += Math.max(0, s.gap ?? 0);
+      starts.set(s.id, { real, disp });
+      real += s.duration;
+      disp += s.duration;
+    }
+    return { starts, total: disp };
+  }, [project.shots]);
+  const dispTotal = advanced ? total : packed.total;
+  const toDisplayTime = (t: number) => {
+    if (advanced) return t;
+    for (const s of project.shots) {
+      const st = packed.starts.get(s.id)!;
+      if (t < st.real) return st.disp;
+      if (t < st.real + s.duration) return st.disp + (t - st.real);
+    }
+    return packed.total;
+  };
+  const toRealTime = (d: number) => {
+    if (advanced) return d;
+    for (const s of project.shots) {
+      const st = packed.starts.get(s.id)!;
+      if (d < st.disp + s.duration) return st.real + Math.max(0, d - st.disp);
+    }
+    const last = project.shots[project.shots.length - 1];
+    const st = last && packed.starts.get(last.id);
+    return st ? st.real + last.duration : 0;
+  };
 
   const seekFromEvent = (e: React.PointerEvent | PointerEvent) => {
     const el = scrollRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
     const x = e.clientX - r.left + el.scrollLeft - 8;
-    ui.setTime(clamp(x / pps, 0, total));
+    ui.setTime(clamp(toRealTime(clamp(x / pps, 0, dispTotal)), 0, total));
   };
   const scrubbing = useRef(false);
   const onRulerDown = (e: React.PointerEvent) => {
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     scrubbing.current = true;
     if (ui.playing) ui.setPlaying(false);
+    // scrubbing is the other natural way to say "nothing in particular", so it drops the selection
+    // rather than leaving a group of shots armed for the next drag or the next Delete
+    if (useUI.getState().selectedShots.length) ui.setSelectedShots([]);
     seekFromEvent(e);
   };
   const onRulerMove = (e: React.PointerEvent) => { if (scrubbing.current) seekFromEvent(e); };
@@ -139,19 +204,114 @@ export function Timeline() {
 
   const ticks = useMemo(() => {
     const out: number[] = [];
-    const end = Math.max(total, 12) + 2;
+    const end = Math.max(dispTotal, 12) + 2;
     const step = pps < 50 ? 2 : pps < 90 ? 1 : 0.5;
     for (let t = 0; t <= end; t += step) out.push(Math.round(t * 100) / 100);
     return out;
-  }, [total, pps]);
-  const innerW = Math.max(total, 12) * pps + 240;
+  }, [dispTotal, pps]);
+  const innerW = Math.max(dispTotal, 12) * pps + 240;
 
   const rows: { shot: Shot; start: number; lanes: AnimProp[]; open: boolean }[] = project.shots.map((shot) => {
     const tracks = (Object.keys(shot.keyframes) as AnimProp[]).filter((k) => (shot.keyframes[k]?.length ?? 0) > 0);
     // a shot with keyframes shows its lanes unless you collapse it, so a new keyframe is never hidden
     const open = expanded[shot.id] ?? tracks.length > 0;
-    return { shot, start: shotStart(project, shot.id), lanes: advanced && open ? tracks : [], open };
+    const st = packed.starts.get(shot.id) ?? { real: 0, disp: 0 };
+    return { shot, start: advanced ? st.real : st.disp, lanes: advanced && open ? tracks : [], open };
   });
+
+  // Simple mode has one lane for the whole sequence, so every keyframe a shot holds at the same
+  // time is drawn as a single diamond carrying all of its tracks together.
+  const stacks = useMemo(() => {
+    if (advanced) return [];
+    const out: { shot: Shot; start: number; realStart: number; t: number; props: AnimProp[]; custom: boolean }[] = [];
+    for (const shot of project.shots) {
+      const st = packed.starts.get(shot.id) ?? { real: 0, disp: 0 };
+      const at = new Map<number, { t: number; props: AnimProp[]; custom: boolean }>();
+      for (const [prop, list] of Object.entries(shot.keyframes) as [AnimProp, Keyframe[] | undefined][]) {
+        for (const k of list ?? []) {
+          const slot = at.get(Math.round(k.t * 1000)) ?? { t: k.t, props: [], custom: false };
+          slot.props.push(prop);
+          if (k.cp || inHandleOf(k)) slot.custom = true;
+          at.set(Math.round(k.t * 1000), slot);
+        }
+      }
+      for (const slot of at.values()) out.push({ shot, start: st.disp, realStart: st.real, ...slot });
+    }
+    return out;
+  }, [advanced, project.shots, packed]);
+
+  const groupIds = (id: string) => (selectedShots.length > 1 && selectedShots.includes(id) ? selectedShots : [id]);
+
+  const selectShot = (id: string, additive: boolean) => {
+    ui.setActiveShot(id);
+    if (additive) { setSelectedShots((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id])); return; }
+    setSelectedShots([id]);
+    ui.setTime(clamp((packed.starts.get(id)?.real ?? 0) + 0.0001, 0, total));
+  };
+
+  // a shot the sequence no longer holds must not linger in the selection and be deleted twice
+  useEffect(() => {
+    const cur = useUI.getState().selectedShots;
+    const live = cur.filter((id) => project.shots.some((s) => s.id === id));
+    if (live.length !== cur.length) useUI.getState().setSelectedShots(live);
+  }, [project.shots]);
+
+  // Delete clears a shot selection made on the ruler. The keyframe selection owns the key first —
+
+
+  /** Move a run of shots along the ruler by growing the empty stretch in front of it. The shot
+   *  after a run gives the same time back, so nothing downstream drifts unless the space runs out. */
+  const shiftGaps = (ids: string[], dt: number) => {
+    const p = useEditor.getState().project;
+    const sel = new Set(ids);
+    const runs: { first: Shot; after: Shot | undefined }[] = [];
+    p.shots.forEach((s, i) => {
+      if (!sel.has(s.id) || (i > 0 && sel.has(p.shots[i - 1].id))) return;
+      let j = i;
+      while (j + 1 < p.shots.length && sel.has(p.shots[j + 1].id)) j++;
+      runs.push({ first: s, after: p.shots[j + 1] });
+    });
+    if (!runs.length) return;
+    // the selection stays rigid, so the whole group stops as soon as one of its gaps would go under zero
+    const d = Math.max(dt, ...runs.map((r) => -(r.first.gap ?? 0)));
+    if (Math.abs(d) < 0.005) return;
+    const setGap = useEditor.getState().setShotGap;
+    beginInteraction();
+    for (const r of runs) {
+      setGap(r.first.id, (r.first.gap ?? 0) + d);
+      if (r.after && !sel.has(r.after.id)) setGap(r.after.id, Math.max(0, (r.after.gap ?? 0) - d));
+    }
+    endInteraction();
+  };
+
+  const dropShot = (shot: Shot, index: number, dxPx: number) => {
+    setShotDrag(null);
+    const dt = dxPx / pps;
+    const ids = groupIds(shot.id);
+    // carrying a block past another shot's midpoint still reorders the sequence; a drag that stays
+    // inside its own slot moves the shot in time instead
+    const center = (rows[index]?.start ?? 0) + shot.duration / 2 + dt;
+    let target = index;
+    if (ids.length === 1) {
+      for (let i = 0; i < rows.length; i++) {
+        if (i === index) continue;
+        const c = rows[i].start + rows[i].shot.duration / 2;
+        if (i < index && center < c) target = Math.min(target, i);
+        if (i > index && center > c) target = Math.max(target, i);
+      }
+    }
+    if (target !== index) { reorderShot(shot.id, target); return; }
+    // simple mode packs the sequence, so a shot there has nowhere to go but another slot
+    if (advanced) shiftGaps(ids, dt);
+  };
+
+  const gapLabel = (shotId: string) => {
+    const i = project.shots.findIndex((s) => s.id === shotId);
+    const shot = project.shots[i], prev = project.shots[i - 1];
+    if (!shot) return "";
+    const gap = Math.max(0, shot.gap ?? 0);
+    return prev ? `${gap.toFixed(2)}s between ${prev.name} and ${shot.name}` : `${gap.toFixed(2)}s before ${shot.name}`;
+  };
 
   const cycleFps = () => update((p) => { p.fps = p.fps === 24 ? 30 : p.fps === 30 ? 60 : 24; });
 
@@ -289,7 +449,20 @@ export function Timeline() {
         <div className="scroll flex shrink-0 flex-col overflow-hidden border-r border-line" style={{ width: LEFT_W }}>
           <div className="shrink-0 border-b border-line" style={{ height: RULER_H }} />
           <div className="scroll min-h-0 flex-1 overflow-y-auto">
-            {rows.map(({ shot, lanes, open }) => {
+            {!advanced && (
+              <>
+                <div className="flex items-center gap-1.5 border-b border-line px-2" style={{ height: ROW_H }}>
+                  <Icon name="film" size={11} className="text-muted" />
+                  <span className="label text-fg">Shots</span>
+                  <span className="num ml-auto text-[10px] text-muted">{project.shots.length}</span>
+                </div>
+                <div className="flex items-center gap-1.5 border-b border-line pl-8 pr-2" style={{ height: LANE_H }}>
+                  <Icon name="diamond" size={8} className="text-accent" />
+                  <span className="label-sm text-fg-2">Keyframes</span>
+                </div>
+              </>
+            )}
+            {advanced && rows.map(({ shot, lanes, open }) => {
               const active = ui.activeShotId === shot.id;
               return (
                 <div key={shot.id}>
@@ -327,14 +500,14 @@ export function Timeline() {
           ref={scrollRef}
           className="scroll relative min-w-0 flex-1 overflow-auto"
           onPointerDown={(e) => {
-            // a drag starting on empty track space marquee-selects keyframes
+            // a drag starting on empty track space marquee-selects keyframes and whole shots
             const t = e.target as HTMLElement;
             if (e.button !== 0 || t.closest("[data-kf]") || t.closest("[data-shot]") || t.closest("[data-ruler]") || t.closest("[data-clip]")) return;
             const el = scrollRef.current!;
             const r = el.getBoundingClientRect();
             const x = e.clientX - r.left + el.scrollLeft, y = e.clientY - r.top + el.scrollTop;
-            marqueeRef.current = { x0: x, y0: y, additive: e.shiftKey, base: e.shiftKey ? selected : [] };
-            if (!e.shiftKey) setSelected([]);
+            marqueeRef.current = { x0: x, y0: y, additive: e.shiftKey, base: e.shiftKey ? selected : [], baseShots: e.shiftKey ? selectedShots : [] };
+            if (!e.shiftKey) { setSelected([]); setSelectedShots([]); }
             el.setPointerCapture(e.pointerId);
           }}
           onPointerMove={(e) => {
@@ -353,17 +526,30 @@ export function Timeline() {
               const ny = b.top + b.height / 2 - r.top + el.scrollTop;
               if (nx >= rect.x0 && nx <= rect.x1 && ny >= rect.y0 && ny <= rect.y1) {
                 const [shotId, prop, t] = (node as HTMLElement).dataset.kf!.split("|");
-                hits.push({ shotId, prop: prop as AnimProp, t: Number(t) });
+                // one diamond stands for several tracks in the shared lane, so it carries them all
+                for (const p2 of prop.split(",")) hits.push({ shotId, prop: p2 as AnimProp, t: Number(t) });
               }
             });
             const merged = m.additive ? [...m.base, ...hits.filter((h) => !m.base.some((b2) => b2.shotId === h.shotId && b2.prop === h.prop && Math.abs(b2.t - h.t) < 0.0005))] : hits;
             setSelected(merged);
+            // a shot block is a wide target, so it joins the selection on any overlap rather than
+            // only when its centre falls inside the marquee
+            const shotHits: string[] = [];
+            el.querySelectorAll("[data-shot]").forEach((node) => {
+              const b = (node as HTMLElement).getBoundingClientRect();
+              const bx0 = b.left - r.left + el.scrollLeft, by0 = b.top - r.top + el.scrollTop;
+              if (bx0 + b.width >= rect.x0 && bx0 <= rect.x1 && by0 + b.height >= rect.y0 && by0 <= rect.y1) shotHits.push((node as HTMLElement).dataset.shot!);
+            });
+            setSelectedShots(m.additive ? [...m.baseShots, ...shotHits.filter((id) => !m.baseShots.includes(id))] : shotHits);
           }}
           onPointerUp={(e) => { marqueeRef.current = null; setMarquee(null); try { scrollRef.current?.releasePointerCapture(e.pointerId); } catch {} }}
         >
           <div className="relative" style={{ width: innerW, minHeight: "100%" }}>
             {/* ruler */}
             <div data-ruler="" className="sticky top-0 z-10 cursor-pointer border-b border-line bg-panel" style={{ height: RULER_H }} onPointerDown={onRulerDown} onPointerMove={onRulerMove} onPointerUp={onRulerUp}>
+              {advanced && rows.map(({ shot, start }) => (shot.gap ?? 0) > 0 && (
+                <div key={shot.id} className="pointer-events-none absolute inset-y-0" style={{ left: 8 + (start - (shot.gap ?? 0)) * pps, width: Math.max(2, (shot.gap ?? 0) * pps), background: "color-mix(in srgb, var(--accent) 13%, transparent)" }} />
+              ))}
               {ticks.map((t) => (
                 <div key={t} className="absolute top-0 flex h-full flex-col justify-end" style={{ left: 8 + t * pps }}>
                   <span className={cn("num -translate-x-1/2 text-[9px]", Number.isInteger(t) ? "text-muted" : "text-transparent")}>{Number.isInteger(t) ? `${t}s` : ""}</span>
@@ -373,17 +559,91 @@ export function Timeline() {
             </div>
             {/* rows */}
             <div>
-              {rows.map(({ shot, start, lanes, open }, i) => (
+              {!advanced && (
+                <>
+                  <div className="relative border-b border-line" style={{ height: ROW_H }}>
+                    {rows.map(({ shot, start }, i) => (
+                      <Fragment key={shot.id}>
+                        <ShotBlock
+                          shot={shot}
+                          start={start}
+                          pps={pps}
+                          active={ui.activeShotId === shot.id}
+                          selected={selectedShots.includes(shot.id)}
+                          renaming={renaming === shot.id}
+                          onRenameEnd={() => setRenaming(null)}
+                          dx={shotDrag?.ids.includes(shot.id) ? shotDrag.dx : 0}
+                          onSelect={(additive) => selectShot(shot.id, additive)}
+                          onExpand={() => ui.setTimelineMode("advanced")}
+                          onDragMove={(dx) => setShotDrag({ ids: groupIds(shot.id), dx })}
+                          onDragEnd={(dx) => dropShot(shot, i, dx)}
+                          onMenu={(at) => setMenu({ at, shotId: shot.id })}
+                        />
+                        {i < rows.length - 1 && (
+                          <TransitionMarker shot={shot} x={8 + (start + shot.duration) * pps} open={transitionFor === shot.id} onOpen={() => setTransitionFor(shot.id)} onClose={() => setTransitionFor(null)} />
+                        )}
+                      </Fragment>
+                    ))}
+                  </div>
+                  <div className="relative border-b border-line" style={{ height: LANE_H }}>
+                    {stacks.map(({ shot, start, realStart, t, props, custom }) => {
+                      const keys = props.map((prop) => ({ shotId: shot.id, prop, t }));
+                      const isSel = keys.every((key) => selected.some((s) => s.shotId === key.shotId && s.prop === key.prop && Math.abs(s.t - key.t) < 0.0005));
+                      return (
+                        <KeyframeDiamond
+                          key={`${shot.id}|${t}`}
+                          id={`${shot.id}|${props.join(",")}|${t}`}
+                          x={8 + (start + t) * pps}
+                          t={t}
+                          start={start}
+                          selected={isSel}
+                          custom={custom}
+                          pps={pps}
+                          onContextMenu={(at) => { if (!isSel) setSelected(keys); setKeyMenu({ at, shotId: shot.id, prop: props[0], t }); }}
+                          onSelect={(additive) => {
+                            if (additive) setSelected(isSel ? selected.filter((s) => !(s.shotId === shot.id && props.includes(s.prop) && Math.abs(s.t - t) < 0.0005)) : [...selected, ...keys]);
+                            else if (!isSel) setSelected(keys);
+                            ui.setTime(clamp(realStart + t, 0, total));
+                          }}
+                          preview={(dt) => {
+                            const d = snapDetail(t + dt, pps, useUI.getState().time - realStart);
+                            const nt = keepInView(clampKeyTime(d.t, shot.duration), start);
+                            setSnapAt(d.snapped !== null && Math.abs(nt - d.snapped) < 0.0005 ? start + d.snapped : null);
+                            return nt;
+                          }}
+                          onMove={(dt, alt) => {
+                            setSnapAt(null);
+                            // the whole stack is already in the selection, and the store holds two
+                            // keyframes that would share a frame apart rather than dropping one
+                            const nt = keepInView(clampKeyTime(snapTime(t + dt, pps, useUI.getState().time - realStart), shot.duration), start);
+                            useEditor.getState().moveSelectedKeyframes(nt - t, alt);
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+              {advanced && rows.map(({ shot, start, lanes, open }, i) => (
                 <div key={shot.id}>
                   <div className="relative border-b border-line" style={{ height: ROW_H }} onContextMenu={(e) => { e.preventDefault(); setMenu({ at: { x: e.clientX, y: e.clientY }, shotId: shot.id }); }}>
+                    {(shot.gap ?? 0) > 0 && (
+                      <GapBand shot={shot} start={start} pps={pps} label={gapLabel(shot.id)} onMenu={(at) => setGapMenu({ at, shotId: shot.id })} />
+                    )}
                     <ShotBlock
                       shot={shot}
-                      index={i}
                       start={start}
                       pps={pps}
                       active={ui.activeShotId === shot.id}
-                      onSelect={() => { ui.setActiveShot(shot.id); ui.setTime(start + 0.0001); }}
+                      selected={selectedShots.includes(shot.id)}
+                      renaming={renaming === shot.id}
+                      onRenameEnd={() => setRenaming(null)}
+                      dx={shotDrag?.ids.includes(shot.id) ? shotDrag.dx : 0}
+                      onSelect={(additive) => selectShot(shot.id, additive)}
                       onExpand={() => setExpanded((x) => ({ ...x, [shot.id]: !open }))}
+                      onDragMove={(dx) => setShotDrag({ ids: groupIds(shot.id), dx })}
+                      onDragEnd={(dx) => dropShot(shot, i, dx)}
+                      onMenu={(at) => setMenu({ at, shotId: shot.id })}
                     />
                     {i < rows.length - 1 && (
                       <TransitionMarker shot={shot} x={8 + (start + shot.duration) * pps} open={transitionFor === shot.id} onOpen={() => setTransitionFor(shot.id)} onClose={() => setTransitionFor(null)} />
@@ -416,7 +676,7 @@ export function Timeline() {
                             t={k.t}
                             start={start}
                             selected={isSel}
-                            custom={!!k.cp}
+                            custom={!!k.cp || !!inHandleOf(k)}
                             onContextMenu={(at) => { if (!isSel) setSelected([{ shotId: shot.id, prop, t: k.t }]); setKeyMenu({ at, shotId: shot.id, prop, t: k.t }); }}
                             onSelect={(additive) => {
                               const key = { shotId: shot.id, prop, t: k.t };
@@ -436,8 +696,9 @@ export function Timeline() {
                                 const at = alt ? scaledKeyTime(abs, start + k.t, dt) : start + k.t + Math.max(dt, -Math.min(...abs));
                                 return clampKeyTime(at - start, shot.duration);
                               }
+                              const others = (shot.keyframes[prop] ?? []).filter((kk) => Math.abs(kk.t - k.t) > 0.0005).map((kk) => kk.t);
                               const d = snapDetail(k.t + dt, pps, useUI.getState().time - start);
-                              const nt = keepInView(clampKeyTime(d.t, shot.duration), start);
+                              const nt = freeSlot(keepInView(clampKeyTime(d.t, shot.duration), start), others, dt, shot.duration);
                               // the guide promises where the diamond will land, so a snap the clamps
                               // pull back off its target has nothing left to point at
                               setSnapAt(d.snapped !== null && Math.abs(nt - d.snapped) < 0.0005 ? start + d.snapped : null);
@@ -447,11 +708,15 @@ export function Timeline() {
                               setSnapAt(null);
                               const many = selected.length > 1 && isSel;
                               if (many) { useEditor.getState().moveSelectedKeyframes(dt, alt); return; }
-                              const nt = keepInView(clampKeyTime(snapTime(k.t + dt, pps, useUI.getState().time - start), shot.duration), start);
+                              // a diamond dropped on another one used to overwrite it; hold the two
+                              // a frame apart instead, the way a group move does
+                              const others = (shot.keyframes[prop] ?? []).filter((kk) => Math.abs(kk.t - k.t) > 0.0005).map((kk) => kk.t);
+                              const nt = freeSlot(keepInView(clampKeyTime(snapTime(k.t + dt, pps, useUI.getState().time - start), shot.duration), start), others, dt, shot.duration);
+                              if (others.some((o) => Math.abs(o - nt) < 0.0005)) return;
                               update((p) => {
                                 const s = p.shots.find((x) => x.id === shot.id);
                                 if (!s) return;
-                                const list = (s.keyframes[prop] ?? []).filter((kk) => Math.abs(kk.t - k.t) > 0.0005 && Math.abs(kk.t - nt) > 0.0005);
+                                const list = (s.keyframes[prop] ?? []).filter((kk) => Math.abs(kk.t - k.t) > 0.0005);
                                 list.push({ ...k, t: nt });
                                 list.sort((a, b) => a.t - b.t);
                                 s.keyframes[prop] = list;
@@ -466,7 +731,7 @@ export function Timeline() {
                   ))}
                 </div>
               ))}
-              {project.audio && <AudioBlock track={project.audio} pps={pps} total={total} />}
+              {project.audio && <AudioBlock track={project.audio} pps={pps} total={total} toDisplay={toDisplayTime} toReal={toRealTime} />}
             </div>
             {snapAt !== null && (
               <div className="pointer-events-none absolute top-0 z-30 h-full w-px bg-accent/70" style={{ left: 8 + snapAt * pps }} />
@@ -475,11 +740,19 @@ export function Timeline() {
               <div className="pointer-events-none absolute z-30 rounded-sm border border-accent bg-accent/15" style={{ left: marquee.x0, top: marquee.y0, width: marquee.x1 - marquee.x0, height: marquee.y1 - marquee.y0 }} />
             )}
             {/* playhead */}
-            <Playhead pps={pps} />
+            <Playhead pps={pps} toDisplay={toDisplayTime} />
           </div>
         </div>
       </div>
       <ContextMenu at={menu?.at ?? null} items={menu ? menuItems(menu.shotId) : []} onClose={() => setMenu(null)} />
+      <ContextMenu
+        at={gapMenu?.at ?? null}
+        onClose={() => setGapMenu(null)}
+        items={gapMenu ? [
+          { label: `Gap · ${gapLabel(gapMenu.shotId)}`, disabled: true },
+          { label: "Close gap", icon: "magnet", onSelect: () => { beginInteraction(); useEditor.getState().closeGap(gapMenu.shotId); endInteraction(); } },
+        ] : []}
+      />
       <ContextMenu
         at={trackMenu?.at ?? null}
         onClose={() => setTrackMenu(null)}
@@ -497,9 +770,9 @@ export function Timeline() {
         items={keyMenu ? [
           { label: "Easing", disabled: true },
           // a keyframe carrying a custom curve is on no named ease, so no preset may read as checked
-          ...EASES.map((e) => ({ label: e.label, checked: !keyMenuKf?.cp && keyMenuKf?.ease === e.id, onSelect: () => update((p) => { const s = p.shots.find((x) => x.id === keyMenu.shotId); const k = s?.keyframes[keyMenu.prop]?.find((kk) => Math.abs(kk.t - keyMenu.t) < 0.0005); if (k) { k.ease = e.id; delete k.cp; } }) })),
+          ...EASES.map((e) => ({ label: e.label, checked: !keyMenuKf?.cp && !inHandleOf(keyMenuKf) && keyMenuKf?.ease === e.id, onSelect: () => update((p) => { const s = p.shots.find((x) => x.id === keyMenu.shotId); const k = s?.keyframes[keyMenu.prop]?.find((kk) => Math.abs(kk.t - keyMenu.t) < 0.0005); if (k) { k.ease = e.id; delete k.cp; setInHandle(k, null); } }) })),
           { divider: true, label: "" },
-          { label: "Apply easing to whole track", icon: "diamond", onSelect: () => update((p) => { const s = p.shots.find((x) => x.id === keyMenu.shotId); const list = s?.keyframes[keyMenu.prop]; const src = list?.find((kk) => Math.abs(kk.t - keyMenu.t) < 0.0005); if (list && src) for (const kk of list) { kk.ease = src.ease; if (src.cp) kk.cp = [...src.cp] as typeof src.cp; else delete kk.cp; } }) },
+          { label: "Apply easing to whole track", icon: "diamond", onSelect: () => update((p) => { const s = p.shots.find((x) => x.id === keyMenu.shotId); const list = s?.keyframes[keyMenu.prop]; const src = list?.find((kk) => Math.abs(kk.t - keyMenu.t) < 0.0005); if (list && src) for (const kk of list) { kk.ease = src.ease; if (src.cp) kk.cp = [...src.cp] as typeof src.cp; else delete kk.cp; setInHandle(kk, inHandleOf(src) ?? null); } }) },
           { label: "Copy keyframe", icon: "clipboard", shortcut: "⌘C", onSelect: () => useEditor.getState().copyKeyframes([{ shotId: keyMenu.shotId, prop: keyMenu.prop, t: keyMenu.t }]) },
           { label: "Delete keyframe", icon: "trash", danger: true, onSelect: () => update((p) => { const s = p.shots.find((x) => x.id === keyMenu.shotId); if (!s) return; const list = (s.keyframes[keyMenu.prop] ?? []).filter((kk) => Math.abs(kk.t - keyMenu.t) > 0.0005); if (list.length) s.keyframes[keyMenu.prop] = list; else delete s.keyframes[keyMenu.prop]; }) },
         ] : []}
@@ -533,10 +806,10 @@ function TimeReadout() {
   return <span className="text-fg">{formatTime(time)}</span>;
 }
 
-function Playhead({ pps }: { pps: number }) {
+function Playhead({ pps, toDisplay }: { pps: number; toDisplay: (t: number) => number }) {
   const time = useUI((s) => s.time);
   return (
-    <div className="pointer-events-none absolute top-0 z-20 h-full" style={{ left: 8 + time * pps }}>
+    <div className="pointer-events-none absolute top-0 z-20 h-full" style={{ left: 8 + toDisplay(time) * pps }}>
       <div className="num -translate-x-1/2 rounded-sm bg-fg px-1 text-[9px] text-inverse-fg">{time.toFixed(2)}</div>
       <div className="h-full w-px bg-fg" />
     </div>
@@ -607,22 +880,43 @@ function ShotName({ shot, editing, onEditStart, onEditEnd }: { shot: Shot; editi
   return <button type="button" onDoubleClick={onEditStart} className="label truncate text-fg" title="Double-click to rename">{shot.name}</button>;
 }
 
-function ShotBlock({ shot, index, start, pps, active, onSelect, onExpand }: { shot: Shot; index: number; start: number; pps: number; active: boolean; onSelect: () => void; onExpand: () => void }) {
+/** The empty stretch a shot keeps in front of it, drawn where that time sits on the ruler. */
+function GapBand({ shot, start, pps, label, onMenu }: { shot: Shot; start: number; pps: number; label: string; onMenu: (at: { x: number; y: number }) => void }) {
+  const gap = Math.max(0, shot.gap ?? 0);
+  const w = Math.max(2, gap * pps);
+  return (
+    <div
+      data-gap=""
+      title={label}
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onMenu({ x: e.clientX, y: e.clientY }); }}
+      className="absolute inset-y-1 flex items-center justify-center overflow-hidden rounded-md border border-dashed border-accent/40"
+      style={{ left: 8 + (start - gap) * pps, width: w, background: "repeating-linear-gradient(45deg, color-mix(in srgb, var(--accent) 22%, transparent) 0 4px, color-mix(in srgb, var(--accent) 8%, transparent) 4px 9px)" }}
+    >
+      {w > 34 && <span className="num text-[9px] text-accent">{gap.toFixed(1)}s</span>}
+    </div>
+  );
+}
+
+function ShotBlock({ shot, start, pps, active, selected, dx, onSelect, onExpand, onDragMove, onDragEnd, onMenu, renaming, onRenameEnd }: {
+  shot: Shot; start: number; pps: number; active: boolean; selected: boolean; dx: number;
+  onSelect: (additive: boolean) => void; onExpand: () => void; onDragMove: (dx: number) => void; onDragEnd: (dx: number) => void; onMenu: (at: { x: number; y: number }) => void;
+  /** true while this shot's name is being edited, which in simple mode happens on the block itself */
+  renaming?: boolean; onRenameEnd?: () => void;
+}) {
   const update = useEditor((s) => s.update);
   const media = useMedia(shot.media);
-  const reorderShot = useEditor((s) => s.reorderShot);
   const resize = useRef<{ x: number; d: number } | null>(null);
   const trimLeft = useRef<{ x: number; d: number; trim: number; keys: Shot["keyframes"] } | null>(null);
   const move = useRef<{ x: number; moved: boolean } | null>(null);
-  const [dx, setDx] = useState(0);
   const hasKeys = Object.values(shot.keyframes).some((k) => k && k.length > 0);
   const kind = shotKind(shot);
   const tr = shot.transitionOut;
   return (
     <div
-      data-shot=""
-      className={cn("absolute top-1 flex h-[22px] cursor-pointer select-none items-center gap-1.5 overflow-hidden rounded-md border px-2 transition-colors", active ? "border-accent bg-accent text-white" : kind === "media" ? "border-line-2 bg-fill text-fg-2 hover:bg-fill-2" : "border-line-2 bg-panel-2 text-fg-2 hover:bg-fill", dx !== 0 && "z-30 opacity-90 shadow-lg")}
+      data-shot={shot.id}
+      className={cn("absolute top-1 flex h-[22px] cursor-pointer select-none items-center gap-1.5 overflow-hidden rounded-md border px-2 transition-colors", active ? "border-accent bg-accent text-white" : kind === "media" ? "border-line-2 bg-fill text-fg-2 hover:bg-fill-2" : "border-line-2 bg-panel-2 text-fg-2 hover:bg-fill", selected && "ring-1 ring-fg", dx !== 0 && "z-30 opacity-90 shadow-lg")}
       style={{ left: 8 + start * pps, width: Math.max(24, shot.duration * pps), transform: dx ? `translateX(${dx}px)` : undefined }}
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onMenu({ x: e.clientX, y: e.clientY }); }}
       onPointerDown={(e) => {
         if (e.button !== 0) return;
         if ((e.target as HTMLElement).closest("[data-resize]")) return;
@@ -634,22 +928,14 @@ function ShotBlock({ shot, index, start, pps, active, onSelect, onExpand }: { sh
         const d = e.clientX - move.current.x;
         if (!move.current.moved && Math.abs(d) < 4) return;
         move.current.moved = true;
-        setDx(d);
+        onDragMove(d);
       }}
       onPointerUp={(e) => {
         const m = move.current;
         move.current = null;
         if (!m) return;
-        if (!m.moved) { onSelect(); return; }
-        // drop: find which shot the block's centre now sits over
-        const p = useEditor.getState().project;
-        const center = start + shot.duration / 2 + (e.clientX - m.x) / pps;
-        let acc = 0, target = 0;
-        for (let i = 0; i < p.shots.length; i++) { const s = p.shots[i]; if (center > acc + s.duration / 2) target = i + (i > index ? 0 : 1); acc += s.duration; }
-        target = clamp(center < 0 ? 0 : target, 0, p.shots.length - 1);
-        if (center < p.shots[0].duration / 2) target = 0;
-        setDx(0);
-        if (target !== index) reorderShot(shot.id, target);
+        if (!m.moved) { onSelect(e.shiftKey); return; }
+        onDragEnd(e.clientX - m.x);
       }}
       onDoubleClick={onExpand}
     >
@@ -660,7 +946,9 @@ function ShotBlock({ shot, index, start, pps, active, onSelect, onExpand }: { sh
       <span className="shrink-0" style={{ width: media && kind === "media" ? 20 : 0 }} />
       {hasKeys && <Icon name="diamond" size={8} className="relative" />}
       {kind !== "media" && <Icon name={KIND_ICON[kind]} size={10} className="relative" />}
-      <span className="label relative truncate">{shot.name}</span>
+      {renaming
+        ? <ShotName shot={shot} editing onEditEnd={() => onRenameEnd?.()} onEditStart={() => {}} />
+        : <span className="label relative truncate">{shot.name}</span>}
       {shot.media?.kind === "video" && kind === "media" && <Icon name="video" size={10} className="relative ml-auto opacity-70" />}
       {(shot.speed ?? 1) !== 1 && <span className="num text-[9px] opacity-80">{shot.speed}×</span>}
       {tr && tr.type !== "cut" && <span className="ml-auto h-3 w-3 rounded-sm" style={{ background: `linear-gradient(90deg, transparent, ${tr.color})` }} title={`Fade ${tr.duration}s`} />}
@@ -765,7 +1053,7 @@ function AudioLabel({ track, onRemove }: { track: AudioTrack; onRemove: () => vo
   );
 }
 
-function AudioBlock({ track, pps, total }: { track: AudioTrack; pps: number; total: number }) {
+function AudioBlock({ track, pps, total, toDisplay, toReal }: { track: AudioTrack; pps: number; total: number; toDisplay: (t: number) => number; toReal: (t: number) => number }) {
   const setAudio = useEditor((s) => s.setAudio);
   const loaded = useMedia(track.media);
   const drag = useRef<{ x: number; start: number } | null>(null);
@@ -776,9 +1064,10 @@ function AudioBlock({ track, pps, total }: { track: AudioTrack; pps: number; tot
       <div
         data-clip=""
         className="absolute top-1 flex h-[22px] cursor-grab items-center gap-1.5 overflow-hidden rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2 text-emerald-700 dark:text-emerald-300"
-        style={{ left: 8 + track.start * pps, width: Math.max(24, len * pps) }}
+        style={{ left: 8 + toDisplay(track.start) * pps, width: Math.max(24, len * pps) }}
         onPointerDown={(e) => { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); drag.current = { x: e.clientX, start: track.start }; beginInteraction(); }}
-        onPointerMove={(e) => { if (!drag.current) return; const s = clamp(snapTime(drag.current.start + (e.clientX - drag.current.x) / pps, pps, useUI.getState().time), 0, Math.max(0, total - 0.5)); setAudio({ ...track, start: s }); }}
+        // the clip is dragged where it is drawn, so the delta is read off the ruler and mapped back
+        onPointerMove={(e) => { if (!drag.current) return; const raw = toReal(toDisplay(drag.current.start) + (e.clientX - drag.current.x) / pps); const s = clamp(snapTime(raw, pps, useUI.getState().time), 0, Math.max(0, total - 0.5)); setAudio({ ...track, start: s }); }}
         onPointerUp={() => { drag.current = null; endInteraction(); }}
       >
         <Waveform loaded={loaded} />

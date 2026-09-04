@@ -26,6 +26,16 @@ export const useRenderFlags = create<RenderFlags>()((set) => ({
   setTransparent: (transparent) => set({ transparent }),
 }));
 
+/**
+ * The glTF device actually on screen. It lags the picked one for as long as a newly picked model
+ * takes to prepare, so the framing and the screen canvas can stay with the device still being shown
+ * instead of jumping to a model that is not there yet.
+ */
+export const useShownDevice = create<{ id: string | null; set: (id: string | null) => void }>()((set) => ({
+  id: null,
+  set: (id) => set({ id }),
+}));
+
 /** Measured bounds of loaded glTF devices (scene units, after scale + rotation), keyed by device id. */
 export interface ModelFeatures { lid: boolean; island: boolean; caseParts: boolean; band: boolean }
 export interface ModelBounds { minY: number; maxY: number; width: number; height: number; screenAspect?: number; features?: ModelFeatures }

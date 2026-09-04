@@ -5,11 +5,13 @@ import { useUI } from "@/store/ui";
 import { Button, IconButton, Kbd, Modal, Segmented, ToggleRow } from "@/components/ui";
 import { APP_VERSION, CHANGELOG } from "@/lib/version";
 import { Icon } from "@/components/icons";
-import { deleteProject, listProjects, loadProject, listingFailed } from "@/lib/persistence";
+import { deleteProject, deleteTemplate, listProjects, listTemplates, loadProject, listingFailed, projectFromTemplate, saveTemplate, templateListingFailed, type TemplateMeta } from "@/lib/persistence";
 import type { ProjectMeta } from "@/lib/types";
 import { getDevice } from "@/lib/devices";
+import { blobToDataURL } from "@/lib/media";
+import { captureImage } from "@/export/capture";
 import { MOD } from "@/lib/cn";
-import { exportProjectToFile, importProjectFromFile, saveCurrentProject } from "./hooks";
+import { exportProjectToFile, exportSizeFor, importProjectFromFile, saveCurrentProject } from "./hooks";
 import { newProject } from "@/lib/actions";
 import { REPO_URL } from "./Menus";
 import { CropModal } from "./CropModal";
@@ -123,15 +125,38 @@ function ChangelogModal() {
   );
 }
 
+/**
+ * Template cards are small, so the thumbnail is rendered at card size rather than shrunk from a
+ * full export, and kept inline as a data URL so a listing never has to load anything else.
+ */
+async function captureTemplateThumb(): Promise<string> {
+  const p = useEditor.getState().project;
+  const [w, h] = exportSizeFor(p.aspect, 360, useUI.getState().viewport);
+  const blob = await captureImage({ width: w, height: h, format: "webp", quality: 0.8, transparent: false });
+  return blobToDataURL(blob);
+}
+
 function ProjectsModal() {
   const modal = useUI((s) => s.modal);
   const setModal = useUI((s) => s.setModal);
   const toast = useUI((s) => s.showToast);
   const current = useEditor((s) => s.project.id);
+  const [tab, setTab] = useState<"projects" | "templates">("projects");
   const [items, setItems] = useState<ProjectMeta[]>([]);
   const [unreadable, setUnreadable] = useState(false);
+  const [templates, setTemplates] = useState<TemplateMeta[]>([]);
+  const [templatesUnreadable, setTemplatesUnreadable] = useState(false);
+  // the name being typed for a new template; null while nothing is being saved
+  const [naming, setNaming] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<TemplateMeta | null>(null);
   const refresh = () => void listProjects().then((list) => { setItems(list); setUnreadable(listingFailed()); });
-  useEffect(() => { if (modal === "projects") refresh(); }, [modal]);
+  const refreshTemplates = () => void listTemplates().then((list) => { setTemplates(list); setTemplatesUnreadable(templateListingFailed()); });
+  useEffect(() => {
+    if (modal === "projects") { refresh(); refreshTemplates(); }
+    // a half-typed name or an unanswered confirmation should not be waiting here on the way back in
+    else { setNaming(null); setPendingDelete(null); }
+  }, [modal]);
   const open = async (id: string) => {
     const p = await loadProject(id);
     if (!p) return;
@@ -142,35 +167,156 @@ function ProjectsModal() {
     setModal(null);
     toast(`Opened “${p.name}”`);
   };
+  const saveAsTemplate = async () => {
+    const name = (naming ?? "").trim();
+    if (!name || saving) return;
+    setSaving(true);
+    // a template without its picture is still worth having, so a capture that fails is not fatal
+    const thumb = await captureTemplateThumb().catch(() => "");
+    try {
+      await saveTemplate(useEditor.getState().project, name, thumb);
+      setNaming(null);
+      setTab("templates");
+      refreshTemplates();
+      toast(`Saved “${name}” as a template`);
+    } catch {
+      // saveTemplate has already said why storage refused it
+    } finally {
+      setSaving(false);
+    }
+  };
+  const startFrom = async (t: TemplateMeta) => {
+    const p = await projectFromTemplate(t.id);
+    if (!p) return;
+    useEditor.getState().replaceProject(p);
+    useEditor.temporal.getState().clear();
+    useUI.getState().setTime(0);
+    useUI.getState().setActiveShot(p.shots[0]?.id ?? null);
+    setModal(null);
+    toast(`Started from “${t.name}”`);
+  };
+  const removeTemplate = async (t: TemplateMeta) => {
+    setPendingDelete(null);
+    try {
+      await deleteTemplate(t.id);
+      toast(`Deleted “${t.name}”`);
+    } catch {
+      // deleteTemplate has already said why storage refused it
+    }
+    refreshTemplates();
+  };
   return (
-    <Modal open={modal === "projects"} onClose={() => setModal(null)} title="Projects" width={460}>
-      <div className="flex items-center gap-2 border-b border-line px-4 py-2">
-        <Button variant="solid" size="sm" icon="plus" onClick={() => { newProject(); setModal(null); }}>New</Button>
-        <Button variant="soft" size="sm" icon="save" onClick={() => void saveCurrentProject().then(refresh)}>Save current</Button>
-        <div className="flex-1" />
-        <Button variant="ghost" size="sm" icon="upload" onClick={() => void importProjectFromFile().then(() => setModal(null))}>Import</Button>
-        <Button variant="ghost" size="sm" icon="download" onClick={() => void exportProjectToFile()}>Export .mok</Button>
-      </div>
-      <div className="scroll max-h-[55vh] overflow-auto p-2">
-        {items.length === 0 && (
-          // an empty list and an unreadable one look the same, and telling someone they have no
-          // projects when the browser is simply blocking storage is the wrong thing to say
-          <div className="label-sm px-2 py-6 text-center text-muted">
-            {unreadable ? "This browser is blocking storage, so saved projects cannot be listed here." : `No saved projects yet. Press ${MOD} S to save the current one.`}
-          </div>
-        )}
-        {items.map((m) => (
-          <div key={m.id} className="group flex items-center gap-3 rounded-md px-2 py-2 hover:bg-fill">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-panel-2 text-fg-2"><Icon name={getDevice(m.device).icon} size={15} /></div>
-            <div className="flex min-w-0 flex-1 flex-col">
-              <span className="label truncate text-fg">{m.name}{m.id === current && <span className="label-sm ml-2 text-accent">current</span>}</span>
-              <span className="label-sm text-muted">{getDevice(m.device).name} · {new Date(m.updatedAt).toLocaleString()}</span>
+    <Modal
+      open={modal === "projects"}
+      onClose={() => setModal(null)}
+      width={520}
+      className="relative"
+      title={
+        <Segmented
+          size="sm"
+          className="w-[220px]"
+          value={tab}
+          onChange={setTab}
+          options={[{ value: "projects", label: "Projects", icon: "folder" }, { value: "templates", label: "Templates", icon: "sparkles" }]}
+        />
+      }
+    >
+      {tab === "projects" && (
+        <div className="flex items-center gap-2 border-b border-line px-4 py-2">
+          <Button variant="solid" size="sm" icon="plus" onClick={() => { newProject(); setModal(null); }}>New</Button>
+          <Button variant="soft" size="sm" icon="save" onClick={() => void saveCurrentProject().then(refresh)}>Save current</Button>
+          <Button variant="soft" size="sm" icon="sparkles" onClick={() => setNaming(useEditor.getState().project.name)}>Save as template</Button>
+          <div className="flex-1" />
+          <Button variant="ghost" size="sm" icon="upload" onClick={() => void importProjectFromFile().then(() => setModal(null))}>Import</Button>
+          <Button variant="ghost" size="sm" icon="download" onClick={() => void exportProjectToFile()}>Export .mok</Button>
+        </div>
+      )}
+      {tab === "templates" && (
+        <div className="flex items-center gap-2 border-b border-line px-4 py-2">
+          <Button variant="soft" size="sm" icon="sparkles" onClick={() => setNaming(useEditor.getState().project.name)}>Save as template</Button>
+          <div className="flex-1" />
+          {templates.length > 0 && <span className="label-sm text-muted">Starts a new project from the look you saved</span>}
+        </div>
+      )}
+      {naming !== null && (
+        <div className="flex items-center gap-2 border-b border-line px-4 py-2">
+          <input
+            autoFocus
+            value={naming}
+            placeholder="Template name"
+            onChange={(e) => setNaming(e.target.value)}
+            // Escape belongs to the field while it is open, or the whole modal would close with it
+            onKeyDown={(e) => { if (e.key === "Enter") void saveAsTemplate(); if (e.key === "Escape") { e.stopPropagation(); setNaming(null); } }}
+            className="label h-7 flex-1 rounded-md bg-fill px-2 text-fg outline-none ring-1 ring-accent placeholder:text-muted"
+          />
+          <Button variant="ghost" size="sm" onClick={() => setNaming(null)}>Cancel</Button>
+          <Button variant="solid" size="sm" disabled={saving || !naming.trim()} onClick={() => void saveAsTemplate()}>{saving ? "Saving…" : "Save template"}</Button>
+        </div>
+      )}
+      {tab === "projects" ? (
+        <div className="scroll max-h-[55vh] overflow-auto p-2">
+          {items.length === 0 && (
+            // an empty list and an unreadable one look the same, and telling someone they have no
+            // projects when the browser is simply blocking storage is the wrong thing to say
+            <div className="label-sm px-2 py-6 text-center text-muted">
+              {unreadable ? "This browser is blocking storage, so saved projects cannot be listed here." : `No saved projects yet. Press ${MOD} S to save the current one.`}
             </div>
-            <Button variant="soft" size="sm" onClick={() => void open(m.id)}>Open</Button>
-            <IconButton icon="trash" size={12} label="Delete" onClick={() => void deleteProject(m.id).then(refresh)} className="opacity-0 group-hover:opacity-100" />
+          )}
+          {items.map((m) => (
+            <div key={m.id} className="group flex items-center gap-3 rounded-md px-2 py-2 hover:bg-fill">
+              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-panel-2 text-fg-2"><Icon name={getDevice(m.device).icon} size={15} /></div>
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="label truncate text-fg">{m.name}{m.id === current && <span className="label-sm ml-2 text-accent">current</span>}</span>
+                <span className="label-sm text-muted">{getDevice(m.device).name} · {new Date(m.updatedAt).toLocaleString()}</span>
+              </div>
+              <Button variant="soft" size="sm" onClick={() => void open(m.id)}>Open</Button>
+              <IconButton icon="trash" size={12} label="Delete" onClick={() => void deleteProject(m.id).then(refresh)} className="opacity-0 group-hover:opacity-100" />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="scroll max-h-[55vh] overflow-auto p-3">
+          {templates.length === 0 ? (
+            <div className="label-sm px-2 py-8 text-center text-muted">
+              {templatesUnreadable ? "This browser is blocking storage, so saved templates cannot be listed here." : "No templates of your own yet. Save the project you are in and every new one can start from it."}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              {templates.map((t) => (
+                <div key={t.id} className="group relative overflow-hidden rounded-lg border border-line bg-panel-2 transition-colors hover:border-line-2">
+                  <button type="button" onClick={() => void startFrom(t)} className="flex w-full flex-col text-left">
+                    <div className="flex aspect-[8/5] w-full items-center justify-center overflow-hidden bg-fill text-muted">
+                      {t.thumb
+                        // eslint-disable-next-line @next/next/no-img-element
+                        ? <img src={t.thumb} alt="" className="h-full w-full object-cover transition-transform group-hover:scale-[1.03]" draggable={false} />
+                        : <Icon name={getDevice(t.device).icon} size={20} />}
+                    </div>
+                    <div className="flex min-w-0 flex-col px-2.5 py-2">
+                      <span className="label truncate text-fg">{t.name}</span>
+                      <span className="label-sm truncate text-muted">{getDevice(t.device).name} · {new Date(t.createdAt).toLocaleDateString()}</span>
+                    </div>
+                  </button>
+                  <IconButton icon="trash" size={12} label="Delete template" onClick={() => setPendingDelete(t)} className="absolute right-1.5 top-1.5 bg-panel/80 opacity-0 group-hover:opacity-100" />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {pendingDelete && (
+        // a sheet over the panel rather than a second modal, so a click on it cannot land outside
+        // the projects modal and dismiss the very list being edited
+        <div className="fade-in absolute inset-0 z-10 flex items-center justify-center bg-panel/85 p-6 backdrop-blur-[2px]">
+          <div className="w-full max-w-[320px] rounded-lg border border-line bg-panel p-4 shadow-2xl">
+            <div className="label text-fg">Delete template</div>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-fg-2">“{pendingDelete.name}” will be gone from this browser for good. Projects already started from it are not affected.</p>
+            <div className="mt-3 flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setPendingDelete(null)}>Cancel</Button>
+              <Button variant="danger" size="sm" icon="trash" onClick={() => void removeTemplate(pendingDelete)}>Delete</Button>
+            </div>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
     </Modal>
   );
 }

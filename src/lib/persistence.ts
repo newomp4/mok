@@ -6,6 +6,8 @@ import { uid } from "./ids";
 
 const PROJECT_PREFIX = "project:";
 const INDEX_KEY = "projects:index";
+const TEMPLATE_PREFIX = "template:";
+const TEMPLATE_INDEX_KEY = "templates:index";
 const AUTOSAVE_KEY = "autosave";
 
 let autosaveWarned = false;
@@ -177,6 +179,77 @@ function withoutMedia(p: Project, ids: Set<string>): Project {
   if (p.screen.bg && gone(p.screen.bg.image)) next.screen = { ...p.screen, bg: { ...p.screen.bg, type: "color", image: null } };
   if (gone(p.audio?.media)) next.audio = null;
   return next;
+}
+
+/** What the template list can draw without reading a single stored template. */
+export interface TemplateMeta {
+  id: string;
+  name: string;
+  device: string;
+  createdAt: number;
+  /** small WebP data URL of the frame the template was saved on */
+  thumb: string;
+}
+
+interface StoredTemplate extends TemplateMeta {
+  project: Project;
+}
+
+/** The bare template index read; it throws for the same reason `readIndex` does. */
+async function readTemplateIndex(): Promise<TemplateMeta[]> {
+  const idx = ((await idbGet(TEMPLATE_INDEX_KEY)) as TemplateMeta[] | undefined) ?? [];
+  return idx.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+let lastTemplateListFailed = false;
+/** True when the last listing came back empty because storage refused to be read, not because it is empty. */
+export function templateListingFailed(): boolean { return lastTemplateListFailed; }
+
+export async function listTemplates(): Promise<TemplateMeta[]> {
+  try {
+    lastTemplateListFailed = false;
+    return await readTemplateIndex();
+  } catch (e) {
+    console.warn("Could not read your saved templates", e);
+    lastTemplateListFailed = true;
+    return [];
+  }
+}
+
+/**
+ * A template is a look to start from, so it keeps every setting and none of the media: the
+ * screenshots and clips belong to the project they were dropped on, not to the template saved from
+ * it, and copying them would double the storage every template costs.
+ */
+export async function saveTemplate(p: Project, name: string, thumb: string): Promise<TemplateMeta> {
+  const meta: TemplateMeta = { id: uid(), name, device: p.mockup.device, createdAt: Date.now(), thumb };
+  try {
+    const record: StoredTemplate = { ...meta, project: withoutMedia(p, new Set(collectMedia(p).map((m) => m.id))) };
+    await idbSet(TEMPLATE_PREFIX + meta.id, record);
+    const idx = await readTemplateIndex();
+    await idbSet(TEMPLATE_INDEX_KEY, [meta, ...idx]);
+    lastFailure = { message: "", at: 0 };
+    return meta;
+  } catch (e) {
+    reportStorageFailure(`Could not save “${name}” as a template`, e);
+  }
+}
+
+/** Read a template back as a fresh project, ready to replace whatever is open. */
+export async function projectFromTemplate(id: string): Promise<Project | null> {
+  const t = (await idbGet(TEMPLATE_PREFIX + id)) as StoredTemplate | undefined;
+  if (!t) return null;
+  return { ...t.project, id: uid(), name: t.name, createdAt: Date.now(), updatedAt: Date.now() };
+}
+
+export async function deleteTemplate(id: string): Promise<void> {
+  try {
+    await idbDel(TEMPLATE_PREFIX + id);
+    const idx = await readTemplateIndex();
+    await idbSet(TEMPLATE_INDEX_KEY, idx.filter((m) => m.id !== id));
+  } catch (e) {
+    reportStorageFailure("Could not delete the template", e);
+  }
 }
 
 /** Serialise a project + its media to a portable JSON file. */

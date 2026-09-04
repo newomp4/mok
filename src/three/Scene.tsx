@@ -334,11 +334,13 @@ function BackdropKey({ floorY, fitSize, soft, opacity }: { floorY: number; fitSi
         <orthographicCamera attach="shadow-camera" args={[-f * 1.6, f * 1.6, f * 1.6, -f * 1.6, 0.1, f * 22]} />
       </directionalLight>
       {!transparent && (
-        // sits just under the contact blob and writes no depth, so the two shadows blend instead of
-        // clipping each other
-        // double-sided so the shadow still reads from the low camera angles most presets use
+        // Sits just under the contact blob and writes no depth, so the two shadows blend instead of
+        // clipping each other, and is double-sided so it still reads from the low camera angles most
+        // presets use. It is sized to the shadow camera above: past that boundary the shadow lookup
+        // clamps to the edge of the map and paints a flat tint with a hard straight edge, which on a
+        // smooth backdrop shows up as a line ruled across the frame.
         <mesh position={[0, -0.006, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-          <planeGeometry args={[f * 30, f * 30]} />
+          <planeGeometry args={[f * 3.2, f * 3.2]} />
           <shadowMaterial ref={mat} transparent depthWrite={false} opacity={base} side={THREE.DoubleSide} />
         </mesh>
       )}
