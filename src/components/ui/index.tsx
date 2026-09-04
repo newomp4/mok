@@ -340,11 +340,13 @@ export function KeyButton({ state, onClick, disabled }: { state: KeyState; onCli
 
 /* ---------- Number row (scrubbable) ---------- */
 export function NumberRow({
-  label, value, min, max, step = 1, onChange, onDragStart, onDragEnd, digits, hint, unit, keyState, onKey, disabled, className, sensitivity,
+  label, value, min, max, step = 1, onChange, onDragStart, onDragEnd, digits, hint, unit, keyState, onKey, disabled, className, sensitivity, resetTo,
 }: {
   label: ReactNode; value: number; min: number; max: number; step?: number; onChange: (v: number) => void;
   onDragStart?: () => void; onDragEnd?: () => void; digits?: number; hint?: string; unit?: string;
   keyState?: KeyState; onKey?: () => void; disabled?: boolean; className?: string; sensitivity?: number;
+  /** right-clicking the row puts the control back to this value */
+  resetTo?: number;
 }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState("");
@@ -418,6 +420,8 @@ export function NumberRow({
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        // a right-click puts the control back where it started, without a menu in the way
+        onContextMenu={resetTo === undefined || disabled ? undefined : (e) => { e.preventDefault(); e.stopPropagation(); commit(resetTo); }}
         onPointerCancel={cancelDrag}
         onLostPointerCapture={cancelDrag}
         onDoubleClick={() => { if (!disabled) { setText(value.toFixed(d)); setEditing(true); } }}

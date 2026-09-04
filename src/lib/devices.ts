@@ -1,4 +1,6 @@
 export type DeviceFamily = "phone" | "tablet" | "laptop" | "watch" | "desktop" | "flat";
+/** Only used to group the picker: an Android phone renders exactly like any other phone. */
+export type DeviceBrand = "android";
 
 export interface Finish {
   id: string;
@@ -49,6 +51,7 @@ export interface DeviceSpec {
   id: string;
   name: string;
   family: DeviceFamily;
+  brand?: DeviceBrand;
   /** optional real 3D model — replaces the procedural geometry */
   model?: GlbModel;
   /** contoured edge radius in mm (procedural bodies) */
@@ -216,6 +219,7 @@ export const DEVICES: DeviceSpec[] = [
     id: "pixel-9-pro",
     name: "Pixel 9 Pro",
     family: "phone",
+    brand: "android",
     screenPx: [1280, 2856],
     screenMm: [64.6, 143.9],
     screenRadius: 14,
@@ -240,6 +244,7 @@ export const DEVICES: DeviceSpec[] = [
     hidden: true,
     name: "Pixel 9 Pro XL",
     family: "phone",
+    brand: "android",
     screenPx: [1344, 2992],
     screenMm: [69.5, 154.7],
     screenRadius: 15,
@@ -261,6 +266,7 @@ export const DEVICES: DeviceSpec[] = [
     id: "galaxy-s25-ultra",
     name: "Galaxy S25 Ultra",
     family: "phone",
+    brand: "android",
     screenPx: [1440, 3120],
     screenMm: [71.9, 155.7],
     screenRadius: 6,
@@ -395,7 +401,6 @@ export const DEVICES: DeviceSpec[] = [
   },
   {
     id: "ipad-air-11",
-    hidden: true,
     name: "iPad Air 11\"",
     family: "tablet",
     screenPx: [1640, 2360],
@@ -594,7 +599,6 @@ export const PREFERRED_MODEL: Record<string, string> = {
   "iphone-17-pro-max": "iphone-17-pro-max-glb",
   "iphone-air": "iphone-17-pro-glb",
   "ipad-pro-13": "ipad-pro-13-glb",
-  "ipad-air-11": "ipad-pro-13-glb",
   "macbook-pro-14": "macbook-pro-14-glb",
   "macbook-pro-16": "macbook-pro-16-glb",
   "macbook-air-13": "macbook-pro-14-glb",
@@ -617,11 +621,17 @@ export function getFinish(spec: DeviceSpec, id: string): Finish {
   return spec.finishes.find((f) => f.id === id) ?? spec.finishes[0];
 }
 
-export const FAMILY_LABELS: Record<DeviceFamily, string> = {
+export const FAMILY_LABELS: Record<DeviceFamily | DeviceBrand, string> = {
   flat: "Flat",
   phone: "iPhone",
+  android: "Android",
   tablet: "iPad",
   laptop: "MacBook",
   watch: "Apple Watch",
   desktop: "Desktop",
 };
+
+/** The heading a device sits under in the picker. */
+export function deviceGroup(d: DeviceSpec): DeviceFamily | DeviceBrand {
+  return d.brand ?? d.family;
+}

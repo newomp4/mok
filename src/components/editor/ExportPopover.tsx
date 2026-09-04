@@ -1,9 +1,10 @@
 "use client";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useEditor } from "@/store/editor";
 import { useUI } from "@/store/ui";
 import { Button, IconButton, NumberRow, Popover, Segmented, SelectRow, ToggleRow } from "@/components/ui";
 import { EXPORT_SIZES, getAspect } from "@/lib/presets";
+import { useRenderFlags } from "@/three/registry";
 import { captureImage, estimateBitrate, exportVideo, type ImageFormat, type VideoQuality } from "@/export/capture";
 import { downloadBlob } from "@/lib/persistence";
 import { totalDuration } from "@/lib/animation";
@@ -22,8 +23,17 @@ export function CaptureButton() {
   );
 }
 
+/** The viewport previews the transparent frame while the menu is open, and goes back when it closes. */
+function useAlphaPreview(open: boolean) {
+  useEffect(() => {
+    if (!open) useRenderFlags.getState().setTransparent(false);
+  }, [open]);
+  useEffect(() => () => useRenderFlags.getState().setTransparent(false), []);
+}
+
 export function ExportButton() {
   const [open, setOpen] = useState(false);
+  useAlphaPreview(open);
   const [tab, setTab] = useState<"image" | "video">("image");
   const ref = useRef<HTMLButtonElement>(null);
   const [, force] = useState(0);
@@ -111,7 +121,8 @@ export function ExportButton() {
               onChange={(v) => { imageState.format = v; if (v === "jpg") imageState.transparent = false; rerender(); }}
               options={[{ value: "png", label: "PNG — best quality" }, { value: "webp", label: "WebP — small + sharp" }, { value: "jpg", label: "JPG — smallest file" }]}
             />
-            <ToggleRow label="Transparent background" checked={imageState.transparent} onChange={(v) => { imageState.transparent = v; rerender(); }} disabled={imageState.format === "jpg"} />
+            {/* JPEG has no alpha channel, so asking for transparency picks the format that does */}
+            <ToggleRow label="Transparent background" checked={imageState.transparent} onChange={(v) => { imageState.transparent = v; if (v && imageState.format === "jpg") imageState.format = "png"; useRenderFlags.getState().setTransparent(v); rerender(); }} />
             <Label>Orientation</Label>
             <Segmented size="sm" value={fixed ? fixedOrientation : imageState.orientation} onChange={(v) => { imageState.orientation = v; rerender(); }} options={orientationOptions.map((o) => ({ ...o, disabled: fixed && o.value !== fixedOrientation }))} />
             <Label>Size</Label>

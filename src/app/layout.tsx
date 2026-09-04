@@ -18,7 +18,8 @@ const themeScript = `(function(){try{var t=localStorage.getItem('mok:theme');if(
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable}`} suppressHydrationWarning>
+    // in-page translation rewrites text nodes React still owns, which crashes the editor outright
+    <html lang="en" translate="no" className={`notranslate ${GeistSans.variable} ${GeistMono.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>

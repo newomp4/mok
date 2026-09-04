@@ -14,8 +14,8 @@ import { CARD_Z } from "@/three/CardLayer";
 export function PostFX() {
   const blurMode = useEditor((s) => s.project.blur.mode);
   const bokeh = useEditor((s) => s.project.blur.bokeh);
-  const blurAngle = useEditor((s) => s.project.blur.angle ?? 0);
   const effects = useEditor((s) => s.project.effects);
+  const borderRadius = useEditor((s) => s.project.mockup.borderRadius);
   const composerRef = useRef<EffectComposerImpl>(null);
 
   const focus = useMemo(() => new FocusBlurEffect(), []);
@@ -66,14 +66,17 @@ export function PostFX() {
     const k = param("fisheye", "amount");
     lens.distortion.set(k, k);
     ghost.set(param("ghost", "offset"), param("ghost", "angle"), param("ghost", "opacity"), param("ghost", "blur"));
-    liquid.set(param("liquidGlass", "x"), param("liquidGlass", "y"), param("liquidGlass", "width"), param("liquidGlass", "height"), param("liquidGlass", "radius"), param("liquidGlass", "refraction"), param("liquidGlass", "tint"), param("liquidGlass", "dispersion"), param("liquidGlass", "shine"));
+    // the pane is glass laid over the mockup, so by default its corners are the mockup's corners
+    const follow = param("liquidGlass", "follow") >= 0.5;
+    const radius = follow ? Math.min(0.5, borderRadius * 4) : param("liquidGlass", "radius");
+    liquid.set(param("liquidGlass", "x"), param("liquidGlass", "y"), param("liquidGlass", "width"), param("liquidGlass", "height"), radius, param("liquidGlass", "refraction"), param("liquidGlass", "tint"), param("liquidGlass", "dispersion"), param("liquidGlass", "shine"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effects, sharpen, glass, lens, ghost, liquid]);
+  }, [effects, sharpen, glass, lens, ghost, liquid, borderRadius]);
 
   useFrame((state) => {
     const v = anim.values;
     if (!v) return;
-    focus.setParams(v["blur.focusX"], 1 - v["blur.focusY"], v["blur.focusSize"], v["blur.falloff"], blurMode === "linear" ? "linear" : blurMode === "directional" ? "directional" : "radial", v["blur.strength"], bokeh, blurAngle);
+    focus.setParams(v["blur.focusX"], 1 - v["blur.focusY"], v["blur.focusSize"], v["blur.falloff"], blurMode === "linear" ? "linear" : blurMode === "directional" ? "directional" : "radial", v["blur.strength"], bokeh, v["blur.angle"]);
     const dof = dofRef.current;
     if (dof) {
       // focal point: the surface under the focus position (autofocus), smoothed so it never pops
@@ -123,7 +126,10 @@ export function PostFX() {
     ghost.ignoreDepth = anim.card;
     // cover mode drops the placement sliders and lays the pane over the mockup's own footprint,
     // which has to be measured every frame because both the camera and the device keep moving
-    if (on("liquidGlass") && param("liquidGlass", "cover") >= 0.5) {
+    const coverMode = on("liquidGlass") ? Math.round(param("liquidGlass", "cover")) : 0;
+    // 2 is the whole frame, which needs no measurement at all
+    if (coverMode === 2) liquid.setRect(0.5, 0.5, 1, 1);
+    if (coverMode === 1) {
       const device = anim.card ? null : scene.getObjectByName("device");
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, ok = false;
       if (device) {

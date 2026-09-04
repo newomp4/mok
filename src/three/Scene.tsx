@@ -352,6 +352,9 @@ export function SceneRoot() {
   const contactShadow = useEditor((s) => s.project.scene.contactShadow);
   const shadowSoft = useEditor((s) => s.project.scene.shadowSoft ?? 0.5);
   const shadowOpacity = useEditor((s) => s.project.scene.shadowOpacity ?? 0.5);
+  // a lit scene shows a flat colour behind it, and the floor terminates on that colour so the two
+  // meet without a horizon line
+  const backdrop = useEditor((s) => s.project.scene.background.color);
   const shadowsOn = scenePreset !== "custom";
   return (
     <>
@@ -363,7 +366,7 @@ export function SceneRoot() {
       </Suspense>
       <Suspense fallback={null}>
         <SceneLightRig preset={scenePreset} floorY={layout.floorY}>
-          <EnvScene preset={scenePreset} floorY={layout.floorY} fitSize={layout.fitSize} />
+          <EnvScene preset={scenePreset} floorY={layout.floorY} fitSize={layout.fitSize} backdrop={backdrop} />
           {scenePreset === "custom" && contactShadow && <BackdropKey floorY={layout.floorY} fitSize={layout.fitSize} soft={shadowSoft} opacity={shadowOpacity} />}
         </SceneLightRig>
       </Suspense>

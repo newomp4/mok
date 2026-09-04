@@ -191,7 +191,7 @@ export function Timeline() {
       { label: "Duration", icon: "clock", right: <ShotDuration shot={shot} /> },
       { divider: true, label: "" },
       { label: "Rename", icon: "text-cursor", onSelect: () => setRenaming(shotId) },
-      ...(kind === "media" ? [{ label: "Upload media…", icon: "upload", onSelect: () => void pickFiles(ACCEPTED_TYPES).then((f) => importFilesToShot(f, shotId)) }] : []),
+      ...(kind === "media" ? [{ label: "Upload media…", icon: "upload", onSelect: () => void pickFiles(ACCEPTED_TYPES, true).then((f) => importFilesToShot(f, shotId)) }] : []),
       ...(kind === "logo" ? [{ label: "Replace logo…", icon: "image", onSelect: () => void pickFiles(ACCEPTED_IMAGES).then(([f]) => f && importLogo(f, shotId)) }] : []),
       { label: "Duplicate", icon: "copy", shortcut: "⌘D", onSelect: () => duplicateShot(shotId) },
       // a playing playhead can cross the shot's edge between the render that enabled this item and

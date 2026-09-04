@@ -4,9 +4,9 @@ import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { useEditor, redo, undo, beginInteraction, endInteraction } from "@/store/editor";
 import { useUI } from "@/store/ui";
-import { ANIM_LABELS, type AnimProp, type BlurMode, type EffectId, type EnterExit, type EnterExitEffect, type FitMode, type LogoEffect, type Shot, type TextStyle } from "@/lib/types";
+import { ANIM_LABELS, ANIM_PROPS, type AnimProp, type BlurMode, type EffectId, type EnterExit, type EnterExitEffect, type FitMode, type LogoEffect, type Shot, type TextStyle } from "@/lib/types";
 import { hasKeyframeAt, locate, sampleTrack, getBase } from "@/lib/animation";
-import { DEVICES, FAMILY_LABELS, getDevice, getFinish, type DeviceFamily } from "@/lib/devices";
+import { DEVICES, FAMILY_LABELS, deviceGroup, getDevice, getFinish, type DeviceBrand, type DeviceFamily } from "@/lib/devices";
 import { BG_PRESETS, CAMERA_PRESETS, EFFECT_DEFS, LIGHTINGS, SCENES, getBgPreset, getEffectDef, getScene } from "@/lib/presets";
 import { paintPreset } from "@/three/background";
 import { Button, ColorRow, Hint, IconButton, MenuList, NumberRow, Popover, Section, Segmented, SelectRow, TextAreaRow, ToggleRow, type KeyState, KeyButton } from "@/components/ui";
@@ -19,11 +19,17 @@ import { resolveShotView } from "@/lib/shotView";
 import { applyCameraPreset, importBackgroundImage, importFilesToShot, importLogo, importScreenBackground, resetBlur, resetCamera, setShotMedia, applySampleScreen } from "@/lib/actions";
 import { SAMPLE_SCREENS, drawSampleScreen } from "@/lib/screens";
 import { pickFiles } from "./hooks";
-import { defaultLogoStyle, defaultTextStyle, shotKind } from "@/lib/defaults";
+import { createProject, defaultLogoStyle, defaultTextStyle, shotKind } from "@/lib/defaults";
 import { FONTS, cssFamily, ensureFont, getFont, nearestWeight, type FontDef } from "@/lib/fonts";
 import { anim } from "@/three/anim";
 
 /* ---------- animated value helpers ---------- */
+/** What each animated property ships at, so a right-click on its row can put it back. */
+const ANIM_DEFAULTS: Record<AnimProp, number> = (() => {
+  const p = createProject();
+  return Object.fromEntries(ANIM_PROPS.map((k) => [k, getBase(p, k)])) as Record<AnimProp, number>;
+})();
+
 function useAnimRow(prop: AnimProp) {
   const setValue = useEditor((s) => s.setValue);
   const toggleKeyframe = useEditor((s) => s.toggleKeyframe);
@@ -57,6 +63,7 @@ function AnimRow({ prop, label, min, max, step, hint, unit, disabled, sensitivit
       onChange={row.onChange}
       onDragStart={beginInteraction}
       onDragEnd={endInteraction}
+      resetTo={ANIM_DEFAULTS[prop]}
       keyState={row.keyState}
       onKey={row.onKey}
     />
@@ -82,7 +89,7 @@ function MediaEditor({ shot }: { shot: Shot | null }) {
   const media = useMedia(shot?.media);
   const update = useEditor((s) => s.update);
   const updateShot = useEditor((s) => s.updateShot);
-  const pick = () => void pickFiles(ACCEPTED_TYPES).then((f) => importFilesToShot(f, shot?.id));
+  const pick = () => void pickFiles(ACCEPTED_TYPES, true).then((f) => importFilesToShot(f, shot?.id));
   if (!media) {
     return (
       <div className="flex flex-col gap-2">
@@ -364,9 +371,10 @@ function SceneSection() {
       <AnimRow prop="scene.lightRotY" label="Light rotation Y" min={0} max={360} step={1} />
       <AnimRow prop="scene.lightIntensity" label="Light intensity" min={0} max={3} step={0.01} />
       {custom && <ToggleRow label="Contact shadow" checked={scene.contactShadow} onChange={(v) => update((p) => { p.scene.contactShadow = v; })} />}
-      {custom && scene.contactShadow && (
+      {/* the lit scenes cast their own shadows, so softness and opacity belong to them too */}
+      {(!custom || scene.contactShadow) && (
         <>
-          <NumberRow label="Shadow soft" value={scene.shadowSoft ?? 0.5} min={0} max={1} step={0.01} onChange={(v) => update((p) => { p.scene.shadowSoft = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+          <NumberRow label="Shadow softness" value={scene.shadowSoft ?? 0.5} min={0} max={1} step={0.01} onChange={(v) => update((p) => { p.scene.shadowSoft = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
           <NumberRow label="Shadow opacity" value={scene.shadowOpacity ?? 0.5} min={0} max={1} step={0.01} onChange={(v) => update((p) => { p.scene.shadowOpacity = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
         </>
       )}
@@ -578,8 +586,8 @@ function DevicePicker() {
   const [forShot, setForShot] = useState(!!shot?.device);
   const current = shot?.device ?? projectDevice;
   const families = useMemo(() => {
-    const out = new Map<DeviceFamily, typeof DEVICES>();
-    for (const d of DEVICES) if (!d.hidden) out.set(d.family, [...(out.get(d.family) ?? []), d]);
+    const out = new Map<DeviceFamily | DeviceBrand, typeof DEVICES>();
+    for (const d of DEVICES) if (!d.hidden) { const g = deviceGroup(d); out.set(g, [...(out.get(g) ?? []), d]); }
     return out;
   }, []);
   return (

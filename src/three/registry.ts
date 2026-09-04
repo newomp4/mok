@@ -42,6 +42,12 @@ export const useModelBounds = create<{ bounds: Record<string, ModelBounds>; set:
   }),
 }));
 
+/**
+ * One frame's worth of waiting. A hidden tab stops servicing requestAnimationFrame entirely, which
+ * would park an export mid-encode until the window came back, so a timer takes over while the page
+ * is in the background and the export keeps running.
+ */
 export function nextFrame(): Promise<void> {
+  if (typeof document !== "undefined" && document.hidden) return new Promise((r) => setTimeout(r, 16));
   return new Promise((r) => requestAnimationFrame(() => r()));
 }

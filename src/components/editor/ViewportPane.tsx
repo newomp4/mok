@@ -5,6 +5,7 @@ import { useEditor, beginInteraction, endInteraction } from "@/store/editor";
 import { useUI } from "@/store/ui";
 import { getAspect } from "@/lib/presets";
 import { Viewport } from "@/three/Viewport";
+import { useRenderFlags } from "@/three/registry";
 import { extractFiles } from "@/lib/media";
 import { addAudioFile, importFilesToShot } from "@/lib/actions";
 import { Icon } from "@/components/icons";
@@ -100,7 +101,7 @@ function UploadHint() {
       </div>
       <div className="flex items-center gap-3 rounded-full bg-black/85 py-1.5 pl-4 pr-1.5 text-[12px] text-white shadow-lg backdrop-blur">
         <span>Pick a mockup, then upload media — or paste / drop.</span>
-        <button type="button" onClick={() => void pickFiles(ACCEPTED_TYPES).then((f) => importFilesToShot(f))} className="label rounded-full bg-white px-3 py-1.5 text-black">Upload</button>
+        <button type="button" onClick={() => void pickFiles(ACCEPTED_TYPES, true).then((f) => importFilesToShot(f))} className="label rounded-full bg-white px-3 py-1.5 text-black">Upload</button>
       </div>
     </div>
   );
@@ -263,7 +264,9 @@ export function ViewportPane() {
     void importFilesToShot(files);
   };
 
-  const transparent = scenePreset === "custom" && bgType === "transparent";
+  // the export's own transparency preview counts as well, so turning it on shows what you will get
+  const previewAlpha = useRenderFlags((s) => s.transparent);
+  const transparent = previewAlpha || (scenePreset === "custom" && bgType === "transparent");
 
   return (
     <div
@@ -321,6 +324,8 @@ export function ViewportPane() {
   );
 }
 
+const BLUR_PROPS = ["blur.strength", "blur.focusX", "blur.focusY", "blur.focusSize", "blur.falloff", "blur.angle", "blur.focusDistance"] as const;
+
 /**
  * Blur focus guides: a circle for radial, a line for directional, a pair for tilt shift and a
  * crosshair for lens. Solid marks where the blur starts, dashed shows the falloff. They appear
@@ -328,16 +333,16 @@ export function ViewportPane() {
  */
 function FocusMarker() {
   const mode = useEditor((s) => s.project.blur.mode);
-  const angle = useEditor((s) => s.project.blur.angle ?? 0);
+
   const time = useUI((s) => s.time);
   const v = useEditor(useShallow((s) => {
     const loc = locate(s.project, time);
-    const at = (prop: "blur.focusX" | "blur.focusY" | "blur.focusSize" | "blur.falloff") => {
+    const at = (prop: "blur.focusX" | "blur.focusY" | "blur.focusSize" | "blur.falloff" | "blur.angle") => {
       const [, k] = prop.split(".") as [string, keyof typeof s.project.blur];
       const track = loc.shot?.keyframes[prop];
       return track?.length ? sampleTrack(track, loc.localT) : (s.project.blur[k] as number);
     };
-    return { x: at("blur.focusX"), y: at("blur.focusY"), size: at("blur.focusSize"), falloff: at("blur.falloff") };
+    return { x: at("blur.focusX"), y: at("blur.focusY"), size: at("blur.focusSize"), falloff: at("blur.falloff"), angle: at("blur.angle") };
   }));
   const [visible, setVisible] = useState(false);
   useEffect(() => {
@@ -347,7 +352,11 @@ function FocusMarker() {
     // unrelated changes — key on the values that actually place them instead
     const unsub = useEditor.subscribe((s) => {
       const b = s.project.blur;
-      return `${b.mode}|${b.strength}|${b.focusX}|${b.focusY}|${b.focusSize}|${b.falloff}|${b.angle ?? 0}|${b.focusDistance ?? 0}|${b.bokeh}`;
+      // a keyframed blur writes to the shot's tracks, not to these base values, so the guides have
+      // to watch the tracks of the shot under the playhead as well or they never appear for it
+      const shot = locate(s.project, useUI.getState().time).shot;
+      const tracks = BLUR_PROPS.map((k) => shot?.keyframes[k]?.map((x) => `${x.t}:${x.v}`).join(",") ?? "").join("|");
+      return `${b.mode}|${b.strength}|${b.focusX}|${b.focusY}|${b.focusSize}|${b.falloff}|${b.angle ?? 0}|${b.focusDistance ?? 0}|${b.bokeh}|${tracks}`;
     }, show);
     const onKey = (e: KeyboardEvent) => { if (e.key === "Alt") setVisible(true); };
     const onKeyUp = (e: KeyboardEvent) => { if (e.key === "Alt") show(); };
@@ -360,7 +369,7 @@ function FocusMarker() {
   // the shader measures distance with x scaled by the aspect, so the guide is a circle in y units
   const r1 = v.size * 100, r2 = (v.size + v.falloff) * 100;
   const line = (offset: number, dashed: boolean) => (
-    <div key={`${offset}${dashed}`} className="absolute inset-x-[-20%] border-t" style={{ top: `${cy + offset}%`, borderColor: dashed ? "rgba(255,255,255,0.55)" : "rgba(255,255,255,0.9)", borderStyle: dashed ? "dashed" : "solid", transform: mode === "directional" ? `rotate(${-angle}deg)` : undefined, transformOrigin: `${cx}% 50%` }} />
+    <div key={`${offset}${dashed}`} className="absolute inset-x-[-20%] border-t" style={{ top: `${cy + offset}%`, borderColor: dashed ? "rgba(255,255,255,0.55)" : "rgba(255,255,255,0.9)", borderStyle: dashed ? "dashed" : "solid", transform: mode === "directional" ? `rotate(${-v.angle}deg)` : undefined, transformOrigin: `${cx}% 50%` }} />
   );
   return (
     <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden mix-blend-difference">

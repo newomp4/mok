@@ -327,7 +327,8 @@ export const EFFECT_DEFS: EffectDef[] = [
     { key: "tint", label: "Tint", min: 0, max: 1, step: 0.01, default: 0.12 },
     { key: "dispersion", label: "Dispersion", min: 0, max: 1, step: 0.01, default: 0.35 },
     { key: "shine", label: "Shine", min: 0, max: 2, step: 0.01, default: 1 },
-    { key: "cover", label: "Cover mockup", min: 0, max: 1, step: 1, default: 0 },
+    { key: "cover", label: "Cover", min: 0, max: 2, step: 1, default: 0 },
+    { key: "follow", label: "Follow border radius", min: 0, max: 1, step: 1, default: 1 },
   ] },
   { id: "screenFade", name: "Screen fade", icon: "fade", params: [
     { key: "in", label: "Fade in (s)", min: 0, max: 3, step: 0.05, default: 0.6 },
