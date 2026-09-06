@@ -20,6 +20,7 @@ const fontKeyOf = fontKey;
 const cardFrag = /* glsl */ `
 uniform sampler2D map;
 uniform float opacity;
+uniform float blurRadius;
 uniform float time;
 uniform int effect;
 uniform vec2 res;
@@ -37,6 +38,20 @@ float fbm(vec2 p) {
 }
 void main() {
   vec4 tex = texture2D(map, vUv);
+  if (blurRadius > 0.00001) {
+    vec4 sum = vec4(0.0);
+    float weight = 0.0;
+    for (int y = -4; y <= 4; y++) for (int x = -4; x <= 4; x++) {
+      vec2 offset = vec2(float(x), float(y)) * 0.5;
+      float w = exp(-dot(offset, offset) * 0.5);
+      vec2 uv = vUv + offset * blurRadius * vec2(res.y / max(res.x, 1.0), 1.0);
+      vec4 tap = texture2D(map, uv);
+      if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) tap = vec4(0.0);
+      sum += vec4(tap.rgb * tap.a, tap.a) * w;
+      weight += w;
+    }
+    tex = vec4(sum.rgb / max(sum.a, 0.00001), sum.a / weight);
+  }
   vec3 col = tex.rgb;
   float a = tex.a;
   vec2 p = vUv * vec2(res.x / max(res.y, 1.0), 1.0);
@@ -80,8 +95,8 @@ void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(
 function easeOutCubic(t: number) { return 1 - Math.pow(1 - t, 3); }
 
 /** Opacity / offset / scale of the card content from its enter + exit animations. */
-export function enterExitAt(shot: Shot, t: number): { opacity: number; dx: number; dy: number; scale: number } {
-  let opacity = 1, dx = 0, dy = 0, scale = 1;
+export function enterExitAt(shot: Shot, t: number): { opacity: number; dx: number; dy: number; scale: number; blur: number } {
+  let opacity = 1, dx = 0, dy = 0, scale = 1, blur = 0;
   const apply = (fx: EnterExit | undefined, p: number, dir: 1 | -1) => {
     if (!fx || fx.effect === "none" || p >= 1) return;
     const e = easeOutCubic(Math.max(0, p));
@@ -93,12 +108,12 @@ export function enterExitAt(shot: Shot, t: number): { opacity: number; dx: numbe
       case "slideLeft": opacity *= e; dx += 0.12 * r * dir; break;
       case "slideRight": opacity *= e; dx -= 0.12 * r * dir; break;
       case "scale": opacity *= e; scale *= 0.85 + 0.15 * e; break;
-      case "blur": opacity *= e * e; scale *= 1 + 0.05 * r; break;
+      case "blur": opacity *= e; blur = Math.max(blur, 0.018 * r); break;
     }
   };
   if (shot.enter && shot.enter.duration > 0) apply(shot.enter, t / shot.enter.duration, 1);
   if (shot.exit && shot.exit.duration > 0) apply(shot.exit, (shot.duration - t) / shot.exit.duration, -1);
-  return { opacity, dx, dy, scale };
+  return { opacity, dx, dy, scale, blur };
 }
 
 const graphemeSegmenter = typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : null;
@@ -251,7 +266,7 @@ export function CardLayer() {
   }, [canvas]);
   const bgMat = useMemo(() => new THREE.MeshBasicMaterial({ color: "#f2f2f2", toneMapped: false, depthTest: false, depthWrite: false }), []);
   const mat = useMemo(() => new THREE.ShaderMaterial({
-    uniforms: { map: { value: texture }, opacity: { value: 1 }, time: { value: 0 }, effect: { value: 0 }, res: { value: new THREE.Vector2(16, 16) } },
+    uniforms: { map: { value: texture }, opacity: { value: 1 }, blurRadius: { value: 0 }, time: { value: 0 }, effect: { value: 0 }, res: { value: new THREE.Vector2(16, 16) } },
     vertexShader: cardVert,
     fragmentShader: cardFrag,
     transparent: true,
@@ -323,6 +338,7 @@ export function CardLayer() {
     content.scale.set(viewW * fx.scale, viewH * fx.scale, 1);
     content.position.set(fx.dx * viewW, fx.dy * viewH, -CARD_Z);
     mat.uniforms.opacity.value = fx.opacity;
+    mat.uniforms.blurRadius.value = fx.blur;
     mat.uniforms.time.value = anim.localT;
     mat.uniforms.effect.value = effect;
   }, -10);

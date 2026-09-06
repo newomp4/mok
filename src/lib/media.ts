@@ -18,9 +18,21 @@ export interface LoadedMedia {
 interface MediaState {
   items: Record<string, LoadedMedia>;
   loading: Record<string, boolean>;
+  missing: Record<string, boolean>;
 }
 
-export const useMediaStore = create<MediaState>()(() => ({ items: {}, loading: {} }));
+export const useMediaStore = create<MediaState>()(() => ({ items: {}, loading: {}, missing: {} }));
+export type MediaStatus = "empty" | "loading" | "ready" | "missing";
+
+function statusOf(ref: MediaRef | null | undefined, state: MediaState): MediaStatus {
+  if (!ref) return "empty";
+  if (state.items[ref.id]?.kind === ref.kind) return "ready";
+  return state.missing[ref.id] ? "missing" : "loading";
+}
+
+export function getMediaStatus(ref: MediaRef | null | undefined): MediaStatus {
+  return statusOf(ref, useMediaStore.getState());
+}
 
 const pending = new Map<string, Promise<LoadedMedia | null>>();
 const revisions = new Map<string, number>();
@@ -225,9 +237,10 @@ export function getMedia(id: string | undefined | null): LoadedMedia | null {
 export function ensureMedia(ref: MediaRef | null | undefined): Promise<LoadedMedia | null> {
   if (!ref) return Promise.resolve(null);
   const existing = useMediaStore.getState().items[ref.id];
-  if (existing) return Promise.resolve(existing);
+  if (existing?.kind === ref.kind) return Promise.resolve(existing);
   const p = pending.get(ref.id);
   if (p) return p;
+  if (useMediaStore.getState().missing[ref.id]) return Promise.resolve(null);
   const version = revisions.get(ref.id) ?? 0;
   const promise = (async () => {
     useMediaStore.setState((s) => ({ loading: { ...s.loading, [ref.id]: true } }));
@@ -254,7 +267,7 @@ export function ensureMedia(ref: MediaRef | null | undefined): Promise<LoadedMed
         useMediaStore.setState((s) => {
           const loading = { ...s.loading };
           delete loading[ref.id];
-          return { loading };
+          return { loading, missing: { ...s.missing, [ref.id]: s.items[ref.id]?.kind !== ref.kind } };
         });
       }
     }
@@ -264,11 +277,23 @@ export function ensureMedia(ref: MediaRef | null | undefined): Promise<LoadedMed
 }
 
 export function useMedia(ref: MediaRef | null | undefined): LoadedMedia | null {
+  return useMediaResource(ref).media;
+}
+
+/** A referenced file stays loading until storage and decoding finish; failure is persistent. */
+export function useMediaResource(ref: MediaRef | null | undefined): { media: LoadedMedia | null; status: MediaStatus } {
   const item = useMediaStore((s) => (ref ? s.items[ref.id] : undefined));
+  const status = useMediaStore((s) => statusOf(ref, s));
   useEffect(() => {
-    if (ref && !item) void ensureMedia(ref);
-  }, [ref, item]);
-  return item ?? null;
+    if (ref && status === "loading") void ensureMedia(ref);
+  }, [ref, item, status]);
+  return { media: status === "ready" ? item ?? null : null, status };
+}
+
+/** Explicit retry avoids polling storage on every render for an unavailable file. */
+export function retryMedia(ref: MediaRef): Promise<LoadedMedia | null> {
+  useMediaStore.setState((s) => { const missing = { ...s.missing }; delete missing[ref.id]; return { missing }; });
+  return ensureMedia(ref);
 }
 
 export async function deleteMedia(id: string) {
@@ -280,7 +305,7 @@ export async function deleteMedia(id: string) {
     const items = { ...s.items };
     delete items[id];
     const loading = { ...s.loading }; delete loading[id];
-    return { items, loading };
+    return { items, loading, missing: { ...s.missing, [id]: true } };
   });
   try { await idbDel(`media:${id}`); } catch {}
 }
@@ -307,8 +332,17 @@ export async function registerMedia(ref: MediaRef, blob: Blob): Promise<LoadedMe
   if (blob.type === "image/gif" && (await gifIsAnimated(blob))) throw new Error(ANIMATED_GIF_MESSAGE);
   const version = revision(ref.id);
   pending.delete(ref.id);
-  useMediaStore.setState((s) => { const loading = { ...s.loading }; delete loading[ref.id]; return { loading }; });
-  const loaded = await decode(ref, blob);
+  useMediaStore.setState((s) => {
+    const loading = { ...s.loading }; delete loading[ref.id];
+    const missing = { ...s.missing }; delete missing[ref.id];
+    return { loading, missing };
+  });
+  let loaded: LoadedMedia;
+  try { loaded = await decode(ref, blob); }
+  catch (error) {
+    if (version === revisions.get(ref.id)) useMediaStore.setState((s) => ({ missing: { ...s.missing, [ref.id]: true } }));
+    throw error;
+  }
   if (version !== revisions.get(ref.id)) { release(loaded); throw new Error("This media was replaced while it was loading"); }
   try { await idbSet(`media:${ref.id}`, { ref: loaded.ref, blob }); } catch { mediaPersistFailed(ref.name, "storage"); }
   if (version !== revisions.get(ref.id)) { release(loaded); throw new Error("This media was replaced while it was saving"); }

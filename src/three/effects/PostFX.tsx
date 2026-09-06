@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useShotView } from "@/three/Device";
 import { useFrame, useThree } from "@react-three/fiber";
-import { EffectComposer, Bloom, ChromaticAberration, DepthOfField, Noise, Pixelation, SMAA, ToneMapping, Vignette } from "@react-three/postprocessing";
+import { EffectComposer, Bloom, ChromaticAberration, DepthOfField, Noise, SMAA, ToneMapping, Vignette } from "@react-three/postprocessing";
 import { BlendFunction, ToneMappingMode, type DepthOfFieldEffect, type EffectComposer as EffectComposerImpl } from "postprocessing";
 import * as THREE from "three";
 import { useEditor } from "@/store/editor";
@@ -181,7 +181,6 @@ export function PostFX() {
   const chromaAmt = param("chromatic", "amount") * 0.004;
   const grainOn = !!on("grain");
   const vignetteOn = !!on("vignette");
-  const pixelOn = !!on("pixel");
   const fisheyeOn = !!on("fisheye");
   const sharpenOn = !!on("sharpen");
   const glassOn = !!on("glassBorder");
@@ -195,7 +194,6 @@ export function PostFX() {
       {blurMode === "radial" || blurMode === "linear" || blurMode === "directional" ? <primitive object={focus} /> : <></>}
       {chromaOn ? <ChromaticAberration offset={new THREE.Vector2(chromaAmt, chromaAmt)} radialModulation modulationOffset={0.3} /> : <></>}
       {fisheyeOn ? <primitive object={lens} /> : <></>}
-      {pixelOn ? <Pixelation granularity={param("pixel", "size")} /> : <></>}
       {sharpenOn ? <primitive object={sharpen} /> : <></>}
       {ghostOn ? <primitive object={ghost} /> : <></>}
       {liquidOn ? <primitive object={liquid} /> : <></>}

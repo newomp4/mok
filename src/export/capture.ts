@@ -6,16 +6,18 @@ import { anim } from "@/three/anim";
 import { nextFrame, useRenderFlags, viewport } from "@/three/registry";
 import { useEditor } from "@/store/editor";
 import { useUI } from "@/store/ui";
-import { locate, totalDuration } from "@/lib/animation";
+import { locate, totalDuration, MAX_PROJECT_DURATION } from "@/lib/animation";
 import { resolveShotView } from "@/lib/shotView";
 import { getMedia, ensureMedia } from "@/lib/media";
-import { collectMedia } from "@/lib/persistence";
 import { ensureFont } from "@/lib/fonts";
+import { exportAssets, exportSampleTime, type ExportScope } from "@/export/assets";
 
 export interface ExportSessionOptions {
   width: number;
   height: number;
   transparent: boolean;
+  /** Which timeline pixels/sound this capture needs; omitted sessions cover the video endpoint. */
+  scope?: ExportScope;
   /** Lets a long wait inside a frame — a video seek above all — give up as soon as the export is cancelled. */
   signal?: AbortSignal;
 }
@@ -30,7 +32,7 @@ export interface ExportSession {
 function shotViewAt(t: number): string {
   const p = useEditor.getState().project;
   const v = resolveShotView(p, locate(p, t).shot);
-  return `${v.device}|${v.finish}|${v.scene}|${v.lighting}`;
+  return `${v.device}|${v.orientation}|${v.finish}|${v.scene}|${v.lighting}`;
 }
 
 /** Resolves true when the element reports the seek landed, false when it ran out of time or the export was cancelled. */
@@ -73,6 +75,7 @@ function frameWindow(v: HTMLVideoElement): number {
 async function seekVideoForTime(t: number, signal?: AbortSignal) {
   const p = useEditor.getState().project;
   const loc = locate(p, t);
+  if ((loc.shot?.kind ?? "media") !== "media") return;
   const m = loc.shot?.media;
   if (!m || m.kind !== "video") return;
   const lm = getMedia(m.id);
@@ -149,18 +152,20 @@ export async function withExportSession<T>(opts: ExportSessionOptions, fn: (s: E
   const ui = useUI.getState();
   const prevTime = ui.time;
   const wasPlaying = ui.playing;
-  const prev = { w: st.size.width, h: st.size.height, dpr: st.viewport.dpr, frameloop: st.frameloop, transparent: useRenderFlags.getState().transparent, exportTime: anim.exportTime, exporting: anim.exporting };
+  const prev = { w: st.size.width, h: st.size.height, dpr: st.viewport.dpr, frameloop: st.frameloop, transparent: useRenderFlags.getState().transparent, exportQuality: useRenderFlags.getState().exporting, exportTime: anim.exportTime, exporting: anim.exporting };
   let resized = false;
   try {
     if (wasPlaying) ui.setPlaying(false);
     const project = useEditor.getState().project;
-    await abortable(Promise.all(project.shots.filter((sh) => sh.kind === "text" && sh.text).map((sh) => ensureFont(sh.text!.font, sh.text!.weight))), opts.signal);
-    const media = collectMedia(project);
+    const assets = exportAssets(project, opts.scope ?? { type: "video", start: 0, end: totalDuration(project) }, opts.transparent);
+    await abortable(Promise.all(assets.fonts.map((font) => ensureFont(font.font, font.weight))), opts.signal);
+    const media = assets.media;
     const loaded = await abortable(Promise.all(media.map(ensureMedia)), opts.signal);
     const missing = media.filter((_, i) => !loaded[i]);
     if (missing.length) throw new Error(`Missing media: ${missing.slice(0, 3).map((m) => m.name).join(", ")}. Re-add the files before exporting.`);
     await waitForAssets(opts.signal);
     anim.exporting = true;
+    useRenderFlags.getState().setExporting(true);
     resized = true;
     st.setFrameloop("never");
     st.setDpr(1);
@@ -194,6 +199,7 @@ export async function withExportSession<T>(opts: ExportSessionOptions, fn: (s: E
     // exactly as it was before capture, including playback and an existing transparency preview.
     anim.exportTime = prev.exportTime;
     anim.exporting = prev.exporting;
+    useRenderFlags.getState().setExporting(prev.exportQuality);
     useUI.setState({ time: prevTime });
     useRenderFlags.getState().setTransparent(prev.transparent);
     try {
@@ -228,7 +234,7 @@ function flatten(canvas: HTMLCanvasElement, width: number, height: number): HTML
 export async function captureImage(opts: { width: number; height: number; format: ImageFormat; quality?: number; transparent: boolean; time?: number; signal?: AbortSignal }): Promise<Blob> {
   const time = opts.time ?? useUI.getState().time;
   const transparent = opts.transparent && opts.format !== "jpg";
-  return withExportSession({ width: opts.width, height: opts.height, transparent, signal: opts.signal }, async ({ canvas, renderAt }) => {
+  return withExportSession({ width: opts.width, height: opts.height, transparent, scope: { type: "still", time }, signal: opts.signal }, async ({ canvas, renderAt }) => {
     await renderAt(time);
     // a second pass lets lazily-created effect targets settle at the new size
     await renderAt(time);
@@ -343,13 +349,15 @@ export async function exportVideo(opts: VideoExportOptions): Promise<{ blob: Blo
   checkCancelled(opts.signal);
   if (!Number.isFinite(opts.fps) || opts.fps < 1 || opts.fps > 120) throw new Error("Choose a frame rate between 1 and 120 fps");
   if (!Number.isFinite(total) || total <= 0) throw new Error("Add a shot before exporting video");
+  if (total > MAX_PROJECT_DURATION) throw new Error(`Set the video duration to ${MAX_PROJECT_DURATION} seconds or less before exporting.`);
   const frames = Math.max(1, Math.ceil(total * opts.fps - 1e-7));
   const wantWebm = opts.format === "webm" || opts.transparent;
   const codecPrefs: VideoCodec[] = wantWebm ? ["vp9", "av1", "vp8"] : ["avc", "hevc", "av1", "vp9"];
   const codecs = await abortable(encodableCodecs(codecPrefs, opts.width, opts.height), opts.signal);
   if (!codecs.length) throw new Error("This browser cannot encode video (WebCodecs unavailable)");
 
-  return withExportSession({ width: opts.width, height: opts.height, transparent: opts.transparent, signal: opts.signal }, async ({ canvas, renderAt }) => {
+  const scope: ExportScope = { type: "video", start: 0, end: total };
+  return withExportSession({ width: opts.width, height: opts.height, transparent: opts.transparent, scope, signal: opts.signal }, async ({ canvas, renderAt }) => {
     const accum = document.createElement("canvas");
     accum.width = opts.width;
     accum.height = opts.height;
@@ -357,7 +365,7 @@ export async function exportVideo(opts: VideoExportOptions): Promise<{ blob: Blo
 
     // music / voiceover lane
     let mix: AudioBuffer | null = null;
-    if (project.audio) {
+    if (exportAssets(project, scope, opts.transparent).audio) {
       opts.onProgress?.(0, "Mixing audio…");
       mix = await abortable(renderAudioMix(total), opts.signal);
       if (!mix) throw new Error("The soundtrack could not be loaded. Re-add the audio file before exporting.");
@@ -393,7 +401,7 @@ export async function exportVideo(opts: VideoExportOptions): Promise<{ blob: Blo
           const sampleT = samples > 1 ? t + (k / samples) * (shutter / opts.fps) : t;
           // every sample of one output frame shares the frame's clock, so time-driven effects
           // (grain) stay identical across them instead of being averaged away
-          await renderAt(Math.min(sampleT, total), t);
+          await renderAt(exportSampleTime(sampleT, total), t);
           ctx.drawImage(canvas, 0, 0, opts.width, opts.height);
         }
         ctx.globalAlpha = 1;

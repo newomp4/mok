@@ -13,7 +13,7 @@ import * as actions from "@/lib/actions";
 import * as capture from "@/export/capture";
 import { viewport as registryViewport } from "@/three/registry";
 import { anim as animState } from "@/three/anim";
-import { shotStart, totalDuration } from "@/lib/animation";
+import { shotStart, totalDuration, editableDuration } from "@/lib/animation";
 import { captureImage } from "@/export/capture";
 import { getAspect, TEMPLATES, EFFECT_DEFS, SCENES } from "@/lib/presets";
 import { DEVICES, getDevice, preferModel, type DeviceSpec } from "@/lib/devices";
@@ -303,8 +303,8 @@ export function useShortcuts() {
         case "t": case "T": ui.setTimelineOpen(!ui.timelineOpen); break;
         case "r": case "R": ui.setRecording(!ui.recording); break;
         case "?": ui.setModal(ui.modal === "shortcuts" ? null : "shortcuts"); break;
-        case "ArrowLeft": { e.preventDefault(); const step = e.shiftKey ? 1 : 1 / p.fps; ui.setTime(clamp(ui.time - step, 0, totalDuration(p))); break; }
-        case "ArrowRight": { e.preventDefault(); const step = e.shiftKey ? 1 : 1 / p.fps; ui.setTime(clamp(ui.time + step, 0, totalDuration(p))); break; }
+        case "ArrowLeft": { e.preventDefault(); const step = e.shiftKey ? 1 : 1 / p.fps; ui.setTime(clamp(ui.time - step, 0, editableDuration(p))); break; }
+        case "ArrowRight": { e.preventDefault(); const step = e.shiftKey ? 1 : 1 / p.fps; ui.setTime(clamp(ui.time + step, 0, editableDuration(p))); break; }
         case "Home": ui.setTime(0); break;
         case "End": ui.setTime(totalDuration(p)); break;
         case "1": applyCameraPreset("hero"); break;

@@ -196,8 +196,42 @@ export const ANIM_DEFAULT_KEYS: Record<AnimProp, true> = {
   "screen.brightness": true,
 };
 
-export function totalDuration(p: Project): number {
+export function contentDuration(p: Project): number {
   return p.shots.reduce((a, s) => a + Math.max(0, s.gap ?? 0) + s.duration, 0);
+}
+
+export const MAX_PROJECT_DURATION = 180;
+
+export function totalDuration(p: Project): number {
+  return typeof p.duration === "number" && Number.isFinite(p.duration) && p.duration > 0 ? p.duration : contentDuration(p);
+}
+
+/** Editing can inspect retained clips outside the playback/export endpoint. */
+export function editableDuration(p: Project): number {
+  return Math.max(totalDuration(p), contentDuration(p));
+}
+
+/** Trimming or deleting clips keeps the endpoint; extending the sequence can grow it. */
+export function preserveProjectDuration(before: Project, after: Project): void {
+  if (after.duration !== before.duration) return; // explicit endpoint edit or template reset
+  const end = totalDuration(before);
+  after.duration = Math.min(MAX_PROJECT_DURATION, contentDuration(after) > contentDuration(before) + 1e-6 ? Math.max(end, contentDuration(after)) : end);
+}
+
+/** Keep the ruler bounded even when a migrated file retains long clips beyond its endpoint. */
+export function timelineTickStep(end: number, pixelsPerSecond: number): number {
+  const base = pixelsPerSecond < 50 ? 2 : pixelsPerSecond < 90 ? 1 : 0.5;
+  return Math.max(base, Math.ceil(Math.max(0, end) / (1999 * base)) * base);
+}
+
+/** Accept seconds or m:ss[.sss], rejecting incomplete or ambiguous input. */
+export function parseDuration(text: string): number | null {
+  const value = text.trim();
+  if (!/^(?:\d+:)?\d+(?:\.\d{1,3})?$/.test(value)) return null;
+  const parts = value.split(":").map(Number);
+  if (parts.length === 2 && parts[1] >= 60) return null;
+  const seconds = parts.length === 2 ? parts[0] * 60 + parts[1] : parts[0];
+  return seconds >= 0.1 && seconds <= MAX_PROJECT_DURATION ? seconds : null;
 }
 
 export interface Location {
@@ -265,8 +299,8 @@ export function fadeAt(p: Project, t: number): { alpha: number; color: string } 
   let color = p.fade?.color ?? "#000000";
   const total = totalDuration(p);
   const fi = p.fade?.in ?? 0, fo = p.fade?.out ?? 0;
-  if (fi > 0 && t < fi) alpha = Math.max(alpha, 1 - t / fi);
-  if (fo > 0 && t > total - fo) alpha = Math.max(alpha, (t - (total - fo)) / fo);
+  if (fi > 0 && t <= total && t < fi) alpha = Math.max(alpha, 1 - t / fi);
+  if (fo > 0 && t <= total && t > total - fo) alpha = Math.max(alpha, (t - (total - fo)) / fo);
   let start = 0;
   for (let i = 0; i < p.shots.length - 1; i++) {
     const s = p.shots[i];

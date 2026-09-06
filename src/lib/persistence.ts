@@ -319,10 +319,9 @@ export async function exportProjectFile(p: Project): Promise<Blob> {
       if (loaded) media[ref.id] = { ref, data: await blobToDataURL(loaded.blob) };
       else missing.push(ref);
     }
-    // keeping a ref whose blob is gone would import as a screen the crop tools can never fill
-    const project = missing.length ? withoutMedia(p, new Set(missing.map((m) => m.id))) : p;
-    if (missing.length) onStorageError(`Exported without ${mediaNames(missing)} — ${missing.length === 1 ? "that file is" : "those files are"} no longer on this device`);
-    const json = JSON.stringify({ format: "mok", version: 1, project, media });
+    // Missing bytes must not erase the filename or clip settings needed to locate the source later.
+    if (missing.length) onStorageError(`Exported with missing media: ${mediaNames(missing)} — locate ${missing.length === 1 ? "the file" : "those files"} after reopening to restore them`);
+    const json = JSON.stringify({ format: "mok", version: 1, project: p, media });
     return new Blob([json], { type: "application/json" });
   } catch (e) {
     reportStorageFailure(`Could not export “${p.name}”`, e);
@@ -335,10 +334,14 @@ export async function importProjectFile(file: Blob): Promise<Project> {
   if (!data || data.format !== "mok" || !data.project) throw new Error("Not a mok project file");
   if (data.version !== undefined && data.version !== 1) throw new Error("This mok file uses an unsupported version");
   const p = normalizeProject(data.project);
-  const dropped: MediaRef[] = [];
+  const missing: MediaRef[] = [];
   const animated: MediaRef[] = [];
   const replacements = new Map<string, MediaRef>();
   for (const ref of collectMedia(p)) {
+    // Missing references need isolation too: reusing the portable id could silently attach an
+    // unrelated cached upload, and would lose the missing-file repair state.
+    const importedRef = { ...ref, id: uid() };
+    replacements.set(ref.id, importedRef);
     const m = data.media && Object.hasOwn(data.media, ref.id) ? data.media[ref.id] : undefined;
     try {
       const embeddedRef = validateMediaRef(m?.ref);
@@ -346,12 +349,13 @@ export async function importProjectFile(file: Blob): Promise<Project> {
       const blob = await dataURLToBlob(m.data);
       // Portable files keep their source ids. Give every imported blob a new one so opening an
       // older export cannot replace media that a different saved project still references.
-      const loaded = await registerMedia({ ...ref, id: uid() }, blob);
+      const loaded = await registerMedia(importedRef, blob);
       replacements.set(ref.id, loaded.ref);
     } catch (e) {
       console.warn("media restore failed", e);
       if ((e as Error)?.message === ANIMATED_GIF_MESSAGE) animated.push(ref);
-      dropped.push(ref);
+      missing.push(ref);
+      useMediaStore.setState((s) => ({ missing: { ...s.missing, [importedRef.id]: true } }));
     }
   }
   const replace = (ref: MediaRef | null | undefined) => ref ? replacements.get(ref.id) ?? null : null;
@@ -361,14 +365,14 @@ export async function importProjectFile(file: Blob): Promise<Project> {
   if (p.audio) { const media = replace(p.audio.media); p.audio = media ? { ...p.audio, media } : null; }
   if (p.scene.background.type === "image" && !p.scene.background.image) p.scene.background.type = "color";
   if (p.screen.bg?.type === "image" && !p.screen.bg.image) p.screen.bg.type = "color";
-  if (dropped.length) {
+  if (missing.length) {
     // the two reasons are tracked separately, so a file that simply would not decode is not
     // reported as an animated GIF just because another file in the same import was one
-    const unreadable = dropped.filter((m) => !animated.includes(m));
+    const unreadable = missing.filter((m) => !animated.includes(m));
     const parts: string[] = [];
     if (animated.length) parts.push(`${mediaNames(animated)} — animated GIFs are not supported`);
     if (unreadable.length) parts.push(`${mediaNames(unreadable)} — ${unreadable.length === 1 ? "that file" : "those files"} could not be read`);
-    const message = `Imported without ${parts.join("; ")}`;
+    const message = `Imported with missing media: ${parts.join("; ")}. Locate the source files to restore them.`;
     // whoever called this announces the import as soon as it resolves, and only one toast is on screen at a time
     setTimeout(() => onStorageError(message), 0);
   }

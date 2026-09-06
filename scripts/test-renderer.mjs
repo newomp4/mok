@@ -24,9 +24,113 @@ const { deviceLayout, flatSize } = await import("../src/three/devices/layout.ts"
 const { DEVICES, PREFERRED_MODEL, getDevice } = await import("../src/lib/devices.ts");
 const { LIGHTINGS } = await import("../src/lib/presets.ts");
 const { cssFamily, ensureFont, onFontsReady } = await import("../src/lib/fonts.ts");
+const { addEnvironmentGain } = await import("../src/three/environmentGain.ts");
+const { renderQuality, resizeShadowMap } = await import("../src/three/renderQuality.ts");
+const { createContactShadowResources } = await import("../src/three/ContactShadow.tsx");
+const { createScreenMaterial, createFinishMaterials, disposeMaterials } = await import("../src/three/materials.ts");
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const near = (a, b, tolerance = 1e-6) => assert.ok(Math.abs(a - b) <= tolerance, `${a} should equal ${b}`);
 const vectorNear = (a, b) => { near(a.x, b.x); near(a.y, b.y); near(a.z, b.z); };
+
+function compilePhysical(material) {
+  const shader = { uniforms: {}, vertexShader: THREE.ShaderLib.physical.vertexShader, fragmentShader: THREE.ShaderLib.physical.fragmentShader };
+  material.onBeforeCompile(shader, {});
+  return shader;
+}
+
+test("material HDR gain composes with animated scene intensity for diffuse, specular and clearcoat IBL", () => {
+  const material = new THREE.MeshPhysicalMaterial({ envMapIntensity: 0.3, clearcoat: 1 });
+  let previousCalls = 0;
+  material.onBeforeCompile = (shader) => { previousCalls++; shader.uniforms.authored = { value: 7 }; };
+  material.customProgramCacheKey = () => "authored";
+  addEnvironmentGain(material); addEnvironmentGain(material);
+  const shader = compilePhysical(material);
+  assert.equal(previousCalls, 1);
+  assert.equal(shader.uniforms.authored.value, 7);
+  assert.equal(material.customProgramCacheKey(), "authored:environment-gain-v1");
+  assert.equal((shader.fragmentShader.match(/envMapIntensity \* mokEnvironmentGain/g) ?? []).length, 2);
+  assert.ok(shader.fragmentShader.includes("vec3 getIBLIrradiance"));
+  assert.ok(shader.fragmentShader.includes("vec3 getIBLRadiance"));
+  for (const sceneGain of [0, 0.5, 2]) for (const gloss of [0.2, 1, 3]) {
+    material.envMapIntensity = gloss;
+    near(shader.uniforms.mokEnvironmentGain.value * sceneGain, gloss * sceneGain);
+  }
+  material.envMap = new THREE.Texture();
+  assert.equal(shader.uniforms.mokEnvironmentGain.value, 1, "explicit maps already receive material gain from Three");
+  material.envMap.dispose(); material.dispose();
+});
+
+test("screen reflection gain remains live and composes with the existing mirror shader", () => {
+  const texture = new THREE.Texture();
+  const material = createScreenMaterial(texture);
+  const shader = compilePhysical(material);
+  assert.ok(shader.fragmentShader.includes("reflectedLight.indirectSpecular += mirror * mirrorGain"));
+  for (const reflection of [0, 0.2, 1]) {
+    material.envMapIntensity = reflection;
+    assert.equal(shader.uniforms.mokEnvironmentGain.value, reflection);
+  }
+  const mats = createFinishMaterials({ id: "test", name: "Test", color: "#777777", roughness: 0.3 });
+  assert.equal(compilePhysical(mats.lens).uniforms.mokEnvironmentGain.value, 1.4);
+  disposeMaterials(mats); material.dispose(); texture.dispose();
+});
+
+test("reflection and shadow quality tiers obey both texture axes, pixel budgets and GPU limits", () => {
+  const preview = renderQuality(1920, 1080, 2, false, 8192);
+  const exported = renderQuality(3840, 2160, 1, true, 8192);
+  assert.deepEqual([preview.floor, preview.contact, preview.shadow], [1024, 1024, 2048]);
+  assert.deepEqual([exported.floor, exported.contact, exported.shadow], [2048, 2048, 4096]);
+  assert.ok(exported.reflection[0] > preview.reflection[0]);
+  for (const exporting of [false, true]) for (const limit of [512, 2048, 8192]) {
+    for (const [w, h] of [[1, 8192], [8192, 1], [7680, 4320], [4320, 7680], [8192, 8192]]) {
+      const q = renderQuality(w, h, 2, exporting, limit);
+      const [rw, rh] = q.reflection;
+      assert.ok(rw >= 1 && rh >= 1 && Math.max(rw, rh, q.floor, q.contact, q.shadow) <= limit);
+      assert.ok(rw * rh <= (exporting ? 4_000_000 : 1_500_000));
+    }
+  }
+  assert.deepEqual(renderQuality(1920, 1080, 2, false, 8192), preview, "leaving export restores economical preview targets");
+});
+
+test("landscape camera fitting cannot shrink the room or clip a wide device's shadow catcher", () => {
+  for (const spec of DEVICES.filter((s) => s.family === "phone" || s.family === "tablet")) {
+    const portrait = deviceLayout(spec, null, "portrait", 9 / 16);
+    const landscape = deviceLayout(spec, null, "landscape", 2.6);
+    const narrow = deviceLayout(spec, null, "landscape", 0.5);
+    assert.equal(landscape.sceneSize, portrait.sceneSize);
+    assert.equal(narrow.sceneSize, portrait.sceneSize, "canvas aspect changes framing, never physical shadow margins");
+    assert.ok(landscape.sceneSize * 3.2 > Math.max(spec.body.w, spec.body.h) * 0.01 * 2);
+  }
+});
+
+test("shadow resolution changes release both VSM targets exactly once and preserve same-size buffers", () => {
+  const shadow = new THREE.DirectionalLight().shadow;
+  const raw = new THREE.WebGLRenderTarget(2048, 2048), blur = raw.clone();
+  let disposed = 0;
+  raw.addEventListener("dispose", () => disposed++); blur.addEventListener("dispose", () => disposed++);
+  shadow.map = raw; shadow.mapPass = blur;
+  resizeShadowMap(shadow, 2048);
+  assert.equal(disposed, 0); assert.equal(shadow.map, raw);
+  resizeShadowMap(shadow, 4096);
+  assert.equal(disposed, 2); assert.equal(shadow.map, null); assert.equal(shadow.mapPass, null);
+  assert.deepEqual(shadow.mapSize.toArray(), [4096, 4096]);
+  assert.equal(shadow.needsUpdate, true);
+  resizeShadowMap(shadow, 4096);
+  assert.equal(disposed, 2);
+});
+
+test("contact-shadow resize resources own and release every render target, material and geometry", () => {
+  for (const resolution of [1024, 2048]) {
+    const owned = createContactShadowResources(3, resolution);
+    assert.equal(owned.target.width, resolution); assert.equal(owned.blurred.height, resolution);
+    const shader = { fragmentShader: THREE.ShaderLib.depth.fragmentShader };
+    owned.depth.onBeforeCompile(shader, {});
+    assert.ok(shader.fragmentShader.includes("vec4( vec3(0.0), 1.0 - fragCoordZ );"));
+    let disposed = 0;
+    for (const resource of [owned.target, owned.blurred, owned.geometry, owned.depth, owned.horizontal, owned.vertical, owned.catcher]) resource.addEventListener("dispose", () => disposed++);
+    disposeResources(owned);
+    assert.equal(disposed, 7);
+  }
+});
 
 test("canvas font shorthand preserves complete quoted local-font stacks and waits for the bundled face", async () => {
   const previousDocument = globalThis.document, previousStyle = globalThis.getComputedStyle;

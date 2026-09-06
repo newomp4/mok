@@ -1,6 +1,7 @@
 import type { DeviceSpec } from "@/lib/devices";
 import { S } from "@/three/geometry";
-import type { MediaRef } from "@/lib/types";
+import type { DeviceOrientation, MediaRef } from "@/lib/types";
+import { deviceOrientation, orientationFitSize, orientationQuarterTurn } from "@/lib/orientation";
 
 export interface DeviceLayout {
   /** total bounding height in scene units */
@@ -11,10 +12,14 @@ export interface DeviceLayout {
   lean: number;
   /** size used for camera fitting */
   fitSize: number;
+  /** Physical scene/light/shadow scale, independent of camera framing and output aspect. */
+  sceneSize: number;
   /** flat devices derive their size from the media */
   flat?: { w: number; h: number; px: [number, number] };
   /** the device this layout was measured from, which is the one actually on screen */
   spec: DeviceSpec;
+  orientation: DeviceOrientation;
+  quarterTurn: -1 | 0 | 1;
 }
 
 export function flatSize(spec: DeviceSpec, media: MediaRef | null): { w: number; h: number; px: [number, number] } {
@@ -27,15 +32,17 @@ export function flatSize(spec: DeviceSpec, media: MediaRef | null): { w: number;
   return { w, h, px: [px[0], Math.round(px[0] / aspect + px[0] * chrome)] };
 }
 
-export function deviceLayout(spec: DeviceSpec, media: MediaRef | null = null): DeviceLayout {
+export function deviceLayout(spec: DeviceSpec, media: MediaRef | null = null, orientation?: DeviceOrientation, aspect = 1): DeviceLayout {
   const b = spec.body;
+  const quarterTurn = orientationQuarterTurn(spec, orientation);
+  const view = { orientation: deviceOrientation(spec, orientation), quarterTurn, sceneSize: spec.fitSize };
   switch (spec.family) {
     case "phone":
     case "tablet": {
       const lean = 6;
       const a = (lean * Math.PI) / 180;
-      const h = b.h * S, d = b.d * S;
-      return { spec, height: h, floorY: -(h / 2) * Math.cos(a) - (d / 2) * Math.sin(a), lean, fitSize: spec.fitSize };
+      const h = (quarterTurn ? b.w : b.h) * S, w = (quarterTurn ? b.h : b.w) * S, d = b.d * S;
+      return { ...view, spec, height: h, floorY: -(h / 2) * Math.cos(a) - (d / 2) * Math.sin(a), lean, fitSize: orientationFitSize(w, h, spec.fitSize, quarterTurn, aspect) };
     }
     case "laptop": {
       const lid = spec.lid!;
@@ -43,22 +50,23 @@ export function deviceLayout(spec: DeviceSpec, media: MediaRef | null = null): D
       const lidH = (b.h - 3) * S;
       const a = (lid.angle * Math.PI) / 180;
       const height = baseT + Math.abs(Math.sin(a)) * lidH + lid.thickness * S * 0.5;
-      return { spec, height, floorY: -height / 2, lean: 0, fitSize: spec.fitSize };
+      return { ...view, spec, height, floorY: -height / 2, lean: 0, fitSize: spec.fitSize };
     }
     case "watch": {
       const height = (b.h + 2 * 42) * S;
-      return { spec, height, floorY: -height / 2, lean: 0, fitSize: spec.fitSize };
+      return { ...view, spec, height, floorY: -height / 2, lean: 0, fitSize: spec.fitSize };
     }
     case "desktop": {
       const standH = spec.chin ? 60 : 90;
       const height = (b.h + standH) * S;
-      return { spec, height, floorY: -height / 2, lean: 0, fitSize: spec.fitSize };
+      return { ...view, spec, height, floorY: -height / 2, lean: 0, fitSize: spec.fitSize };
     }
     case "flat":
     default: {
       const f = flatSize(spec, media);
       const h = f.h * S;
-      return { spec, height: h, floorY: -h / 2, lean: 0, fitSize: Math.max(f.w, f.h) * S * 1.02, flat: f };
+      const physicalSize = Math.max(f.w, f.h) * S * 1.02;
+      return { ...view, spec, height: h, floorY: -h / 2, lean: 0, fitSize: physicalSize, sceneSize: physicalSize, flat: f };
     }
   }
 }

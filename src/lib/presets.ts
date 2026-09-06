@@ -310,8 +310,12 @@ export const EFFECT_DEFS: EffectDef[] = [
   { id: "sharpen", name: "Sharpen", icon: "sharpen", params: [
     { key: "amount", label: "Amount", min: 0, max: 1, step: 0.01, default: 0.35 },
   ] },
+  { id: "depth", name: "Depth", icon: "layers", params: [
+    { key: "amount", label: "Extrusion", min: 0, max: 1, step: 0.01, default: 0.2 },
+  ] },
   { id: "pixel", name: "Pixel grid", icon: "pixel", params: [
-    { key: "size", label: "Size", min: 1, max: 40, step: 1, default: 6 },
+    { key: "size", label: "Pixel size", min: 1, max: 40, step: 1, default: 6 },
+    { key: "amount", label: "Strength", min: 0, max: 1, step: 0.01, default: 0.6 },
   ] },
   { id: "fisheye", name: "Fish eye", icon: "fisheye", params: [
     { key: "amount", label: "Amount", min: -1, max: 1, step: 0.01, default: 0.3 },

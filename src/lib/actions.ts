@@ -2,11 +2,13 @@
 import { useEditor, beginInteraction, endInteraction } from "@/store/editor";
 import { useUI } from "@/store/ui";
 import { CAMERA_PRESETS, MOTION_PRESETS, TEMPLATES, getScene } from "./presets";
-import type { AnimProp, Keyframe, MediaRef, Project, Shot } from "./types";
+import type { AnimProp, FitMode, FocusArea, Keyframe, MediaRef, Project, Shot } from "./types";
 import { importMedia, mediaType } from "./media";
 import { getDevice } from "./devices";
 import { getSampleScreen, sampleScreenBlob } from "./screens";
-import { sampleTrack, shotBase, shotStart } from "./animation";
+import { contentDuration, MAX_PROJECT_DURATION, sampleTrack, shotBase, shotStart } from "./animation";
+import { resolveShotView } from "./shotView";
+import { orientedScreenMillimeters, orientedScreenPixels } from "./orientation";
 import { createLogoShot, createProject, createShot, createTextShot, defaultLogoStyle, shotKind } from "./defaults";
 import { deviceLayout } from "@/three/devices/layout";
 import { S } from "@/three/geometry";
@@ -88,6 +90,7 @@ export function applyTemplate(id: string) {
   ed.update((p) => {
     const spec = getDevice(t.device);
     p.mockup.device = spec.id;
+    delete p.mockup.orientation;
     p.mockup.finish = spec.finishes.some((f) => f.id === t.finish) ? t.finish : spec.finishes[0].id;
     p.mockup.rotX = t.rot.x; p.mockup.rotY = t.rot.y; p.mockup.rotZ = t.rot.z;
     const s = getScene(t.scene);
@@ -136,6 +139,7 @@ export function applyTemplate(id: string) {
         // framing, device or lens silently takes precedence over the template we just applied.
         delete shot.pose;
         delete shot.device;
+        delete shot.orientation;
         delete shot.finish;
         delete shot.scene;
         delete shot.lighting;
@@ -147,6 +151,7 @@ export function applyTemplate(id: string) {
   });
   const first = useEditor.getState().project.shots[0]?.id ?? null;
   if (t.motion && !t.sequence) applyMotionPreset(t.motion, first ?? undefined);
+  ed.update((p) => { p.duration = Math.min(MAX_PROJECT_DURATION, contentDuration(p)); });
   useUI.getState().setActiveShot(first);
   // a fade-in means t=0 is a blank frame, so park the playhead just past it
   const fadeIn = useEditor.getState().project.fade?.in ?? 0;
@@ -371,7 +376,7 @@ export async function applySampleScreen(id: string, shotId?: string | null) {
   // it was designed for and the shot's fit mode places it.
   const landscape = screen.shape === "landscape";
   const design = landscape ? 1.6 : 0.46;
-  let [w, h] = spec.screenPx;
+  let [w, h] = orientedScreenPixels(spec, resolveShotView(ed.project, shot).orientation);
   if (spec.family === "flat") [w, h] = landscape ? [1600, 1000] : [1206, 2622];
   else if (Math.abs(w / h - design) / design > 0.15) {
     const long = Math.max(w, h);
@@ -402,22 +407,55 @@ export async function importScreenBackground(file: File) {
   }
 }
 
-/** Build camera keyframes that glide between the shot's focus areas. */
+/** Map a source-image region to the visible device screen using the same fit as ScreenSurface. */
+export function mapFocusAreaToScreen(area: FocusArea, media: Pick<MediaRef, "width" | "height">, screen: { width: number; height: number; chromeHeight?: number }, fit: FitMode): FocusArea | null {
+  const { width: W, height: H } = screen;
+  const top = screen.chromeHeight ?? 0, contentH = H - top;
+  if (![area.x, area.y, area.w, area.h, media.width, media.height, W, H, top].every(Number.isFinite) || area.w <= 0 || area.h <= 0 || media.width <= 0 || media.height <= 0 || W <= 0 || contentH <= 0 || top < 0) return null;
+  let dw = W, dh = contentH, dx = 0, dy = top;
+  if (fit !== "stretch") {
+    const scale = fit === "contain" ? Math.min(W / media.width, contentH / media.height) : Math.max(W / media.width, contentH / media.height);
+    dw = media.width * scale; dh = media.height * scale;
+    dx = (W - dw) / 2;
+    // Cover aligns tall screenshots to the top so their headers remain visible.
+    if (fit === "contain") dy += (contentH - dh) / 2;
+  }
+  const left = Math.max(0, dx + Math.max(0, area.x) * dw);
+  const right = Math.min(W, dx + Math.min(1, area.x + area.w) * dw);
+  const upper = Math.max(top, dy + Math.max(0, area.y) * dh);
+  const lower = Math.min(H, dy + Math.min(1, area.y + area.h) * dh);
+  if (right <= left || lower <= upper) return null;
+  return { id: area.id, x: left / W, y: upper / H, w: (right - left) / W, h: (lower - upper) / H };
+}
+
+/** Source frame for a shot, including trim, speed and the same looping used by the renderer. */
+export function autoMotionMediaTime(shot: Pick<Shot, "duration" | "trimStart" | "speed" | "media">, localT: number): number {
+  const duration = shot.media?.duration;
+  if (!duration || !Number.isFinite(duration) || duration <= 0) return 0;
+  const t = Number.isFinite(localT) ? Math.max(0, Math.min(shot.duration, localT)) : 0;
+  return ((shot.trimStart ?? 0) + t * (shot.speed ?? 1)) % duration;
+}
+
+/** Build camera keyframes that glide between visible focus areas; return how many were composed. */
 export function composeAutoMotion(shotId: string, shuffleSeed = 0) {
   const ed = useEditor.getState();
   const p = ed.project;
   const shot = p.shots.find((s) => s.id === shotId);
-  if (!shot || shotKind(shot) !== "media" || shot.focusAreas.length === 0) return;
+  if (!shot || shotKind(shot) !== "media" || !shot.media || shot.focusAreas.length === 0) return 0;
   shuffleSeed = Number.isFinite(shuffleSeed) ? Math.max(0, Math.floor(shuffleSeed)) : 0;
   const spec = getDevice(shot.device ?? p.mockup.device);
-  const layout = deviceLayout(spec, shot.media);
-  const fov = 24;
-  const viewH1 = layout.fitSize * 1.18; // view height at zoom 1
   const ui = useUI.getState();
   const viewAspect = ui.viewport.w / Math.max(1, ui.viewport.h);
-  const [sw, sh] = spec.family === "flat" && layout.flat ? [layout.flat.w * S, layout.flat.h * S] : [spec.screenMm[0] * S, spec.screenMm[1] * S];
-  const areas = shot.focusAreas.filter((area) => [area.x, area.y, area.w, area.h].every(Number.isFinite) && area.w > 0 && area.h > 0);
-  if (!areas.length) return;
+  const orientation = resolveShotView(p, shot).orientation;
+  const layout = deviceLayout(spec, shot.media, orientation, viewAspect);
+  const fov = 24;
+  const viewH1 = layout.fitSize * 1.18; // view height at zoom 1
+  const [screenMmW, screenMmH] = orientedScreenMillimeters(spec, orientation);
+  const [sw, sh] = spec.family === "flat" && layout.flat ? [layout.flat.w * S, layout.flat.h * S] : [screenMmW * S, screenMmH * S];
+  const [screenW, screenH] = layout.flat?.px ?? orientedScreenPixels(spec, orientation);
+  const screen = { width: screenW, height: screenH, chromeHeight: spec.id === "browser" ? Math.round(screenW * 0.045) : 0 };
+  const areas = shot.focusAreas.map((area) => mapFocusAreaToScreen(area, shot.media!, screen, shot.fit)).filter((area): area is FocusArea => area !== null);
+  if (!areas.length) return 0;
   if (shuffleSeed) {
     // deterministic shuffle
     let seed = shuffleSeed;
@@ -460,6 +498,7 @@ export function composeAutoMotion(shotId: string, shuffleSeed = 0) {
     s.keyframes["camera.fov"] = [{ t: 0, v: fov, ease: "smooth" }];
   });
   ui.setTime(shotStart(useEditor.getState().project, shotId));
+  return areas.length;
 }
 
 export function newProject() {

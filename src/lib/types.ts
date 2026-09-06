@@ -66,6 +66,7 @@ export const ANIM_LABELS: Record<AnimProp, string> = {
 };
 
 export type FitMode = "cover" | "contain" | "stretch";
+export type DeviceOrientation = "portrait" | "landscape";
 
 export interface FocusArea {
   id: string;
@@ -131,6 +132,8 @@ export interface Shot {
   transitionOut?: Transition;
   /** per-shot overrides: a sequence can cut between devices, scenes and lighting */
   device?: string;
+  /** Screen orientation; absent inherits the project or the device's native orientation. */
+  orientation?: DeviceOrientation;
   finish?: string;
   scene?: ScenePresetId;
   lighting?: LightingId;
@@ -165,7 +168,7 @@ export type ScenePresetId = "custom" | "studio" | "concrete" | "darkroom" | "gal
 export type LightingId = "default" | "soft" | "bright" | "contrast" | "neon" | "cool" | "lightbox" | "dramatic";
 export type BlurMode = "off" | "radial" | "directional" | "linear" | "depth";
 export type EffectId =
-  | "vignette" | "grain" | "bloom" | "chromatic" | "sharpen" | "pixel" | "fisheye" | "glassBorder" | "screenFade" | "ghost" | "liquidGlass";
+  | "depth" | "vignette" | "grain" | "bloom" | "chromatic" | "sharpen" | "pixel" | "fisheye" | "glassBorder" | "screenFade" | "ghost" | "liquidGlass";
 
 export interface EffectInstance {
   id: EffectId;
@@ -200,6 +203,7 @@ export interface Project {
   };
   mockup: {
     device: string;
+    orientation?: DeviceOrientation;
     finish: string;
     reflection: number;
     /** environment reflectivity of glTF body materials (1 = as authored) */
@@ -249,6 +253,8 @@ export interface Project {
   effects: EffectInstance[];
   shots: Shot[];
   fps: number;
+  /** Playback/export endpoint, independent of clip trims. Older projects derive it from shots. */
+  duration?: number;
   audio?: AudioTrack | null;
   /** fade the whole video in from / out to a colour */
   fade?: { in: number; out: number; color: string };

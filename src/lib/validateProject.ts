@@ -1,7 +1,7 @@
 import { ANIM_PROPS, type MediaRef, type Project, type Shot, type Keyframe, type AnimProp } from "./types";
 import { DEVICES } from "./devices";
 import { ASPECTS, EFFECT_DEFS, LIGHTINGS, SCENES } from "./presets";
-import { EASES } from "./animation";
+import { EASES, MAX_PROJECT_DURATION } from "./animation";
 import { uid } from "./ids";
 
 type Obj = Record<string, unknown>;
@@ -58,6 +58,9 @@ export function validateProject(value: unknown, defaults: Project): Project {
   p.scene.background.blur = num(p.scene.background.blur, 0.6, 0, 1);
   p.mockup = fields(src.mockup, defaults.mockup);
   p.mockup.device = choice(p.mockup.device, DEVICES.map((x) => x.id), defaults.mockup.device);
+  const orientation = object(src.mockup).orientation;
+  if (orientation === "portrait" || orientation === "landscape") p.mockup.orientation = orientation;
+  else delete p.mockup.orientation;
   p.mockup.bandColor = typeof object(src.mockup).bandColor === "string" ? object(src.mockup).bandColor as string : null;
   p.mockup.reflection = num(p.mockup.reflection, 0.35, 0, 1);
   p.mockup.gloss = num(p.mockup.gloss, 1, 0.2, 3);
@@ -110,6 +113,7 @@ export function validateProject(value: unknown, defaults: Project): Project {
     if (Object.keys(pose).length) shot.pose = pose;
     if (Array.isArray(s.focusAreas)) shot.focusAreas = s.focusAreas.map((v) => { const f = object(v); return { id: validId(f.id) ? f.id as string : uid(), x: num(f.x, 0, 0, 1), y: num(f.y, 0, 0, 1), w: num(f.w, 0.2, 0.001, 1), h: num(f.h, 0.2, 0.001, 1) }; });
     if (DEVICES.some((x) => x.id === s.device)) shot.device = s.device as string;
+    if (s.orientation === "portrait" || s.orientation === "landscape") shot.orientation = s.orientation;
     if (typeof s.finish === "string") shot.finish = s.finish;
     if (SCENES.some((x) => x.id === s.scene)) shot.scene = s.scene as Shot["scene"];
     if (LIGHTINGS.some((x) => x.id === s.lighting)) shot.lighting = s.lighting as Shot["lighting"];
@@ -126,6 +130,8 @@ export function validateProject(value: unknown, defaults: Project): Project {
     if (s.transitionOut) shot.transitionOut = { type: choice(object(s.transitionOut).type, ["cut", "fade"], "cut"), duration: num(object(s.transitionOut).duration, 0.4, 0, shot.duration), color: str(object(s.transitionOut).color, "#000000") };
     return shot;
   });
+  const contentLength = p.shots.reduce((sum, shot) => sum + (shot.gap ?? 0) + shot.duration, 0) || 0.1;
+  p.duration = num(src.duration, Math.min(MAX_PROJECT_DURATION, contentLength), 0.1, MAX_PROJECT_DURATION);
   const effects = Array.isArray(src.effects) ? src.effects : [];
   p.effects = effects.flatMap((raw) => { const e = object(raw), def = EFFECT_DEFS.find((d) => d.id === e.id); return def ? [{ id: def.id, enabled: e.enabled !== false, params: Object.fromEntries(def.params.map((d) => [d.key, num(object(e.params)[d.key], d.default, d.min, d.max)])) }] : []; });
   return p;

@@ -7,7 +7,7 @@ import { useUI } from "@/store/ui";
 import { getAspect } from "@/lib/presets";
 import { Viewport } from "@/three/Viewport";
 import { useRenderFlags } from "@/three/registry";
-import { extractFiles } from "@/lib/media";
+import { extractFiles, mediaType } from "@/lib/media";
 import { addAudioFile, importFilesToShot } from "@/lib/actions";
 import { Icon } from "@/components/icons";
 import { cn, clamp } from "@/lib/cn";
@@ -265,9 +265,13 @@ export function ViewportPane() {
     if (useUI.getState().exporting) return;
     const files = extractFiles(e.dataTransfer);
     if (!files.length) return;
-    const audio = files[0].type.startsWith("audio/");
-    if (zone === "audio" || audio) { void addAudioFile(files[0]); return; }
-    if (zone === "new") {
+    if (zone === "audio") {
+      const audio = files.find((file) => mediaType(file).startsWith("audio/"));
+      if (audio) void addAudioFile(audio);
+      else useUI.getState().showToast("Drop an audio file to add a soundtrack");
+      return;
+    }
+    if (zone === "new" && files.some((file) => !mediaType(file).startsWith("audio/"))) {
       const ed = useEditor.getState();
       const id = ed.addShot("media", useUI.getState().activeShotId ?? undefined);
       void importFilesToShot(files, id);

@@ -12,10 +12,13 @@ import { paintPreset } from "@/three/background";
 import { Button, ColorRow, Hint, IconButton, MenuList, NumberRow, Popover, Section, Segmented, SelectRow, TextAreaRow, ToggleRow, type KeyState, KeyButton } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/cn";
-import { useMedia, ACCEPTED_TYPES, ACCEPTED_IMAGES } from "@/lib/media";
+import { useMediaResource, ACCEPTED_TYPES, ACCEPTED_IMAGES } from "@/lib/media";
+import { MediaRecovery } from "./MediaRecovery";
 import { useModelBounds } from "@/three/registry";
 import { useActiveShot, useRenderShot } from "@/three/Device";
 import { resolveShotView } from "@/lib/shotView";
+import { deviceOrientation, effectiveKeyboardCase, keyboardCaseAvailable, nativeOrientation, orientedScreenPixels, supportsOrientation } from "@/lib/orientation";
+import type { DeviceOrientation } from "@/lib/types";
 import { applyCameraPreset, importBackgroundImage, importFilesToShot, importLogo, importScreenBackground, resetBlur, resetCamera, setShotMedia, applySampleScreen } from "@/lib/actions";
 import { SAMPLE_SCREENS, drawSampleScreen } from "@/lib/screens";
 import { pickFiles } from "./hooks";
@@ -125,10 +128,11 @@ function ShotSection() {
 }
 
 function MediaEditor({ shot }: { shot: Shot | null }) {
-  const media = useMedia(shot?.media);
+  const { media, status } = useMediaResource(shot?.media);
   const update = useEditor((s) => s.update);
   const updateShot = useEditor((s) => s.updateShot);
   const pick = () => void pickFiles(ACCEPTED_TYPES, true).then((f) => importFilesToShot(f, shot?.id));
+  if (!media && shot?.media) return <MediaRecovery media={shot.media} status={status} target={{ kind: "shot", shotId: shot.id }} />;
   if (!media) {
     return (
       <div className="flex flex-col gap-2">
@@ -337,7 +341,7 @@ const LOGO_EFFECTS: { value: LogoEffect; label: string; preview: string }[] = [
 function LogoEditor({ shot }: { shot: Shot }) {
   const updateShot = useEditor((s) => s.updateShot);
   const st = shot.logo ?? defaultLogoStyle();
-  const media = useMedia(st.media);
+  const { media, status } = useMediaResource(st.media);
   const set = (mut: (l: NonNullable<Shot["logo"]>) => void) => updateShot(shot.id, (s) => { if (!s.logo) s.logo = defaultLogoStyle(); mut(s.logo); });
   const pick = () => void pickFiles(ACCEPTED_IMAGES).then(([f]) => f && importLogo(f, shot.id));
   return (
@@ -351,6 +355,8 @@ function LogoEditor({ shot }: { shot: Shot }) {
             <IconButton icon="trash" label="Remove" onClick={() => set((l) => { l.media = null; })} className="h-6 w-6 bg-panel/90" />
           </div>
         </div>
+      ) : st.media ? (
+        <MediaRecovery media={st.media} status={status} target={{ kind: "logo", shotId: shot.id }} />
       ) : (
         <button type="button" onClick={pick} className="flex h-24 w-full flex-col items-center justify-center gap-1.5 rounded-md border border-dashed border-line-2 bg-panel-2 text-fg-2 transition-colors hover:border-fg-2 hover:text-fg">
           <Icon name="logo" size={16} />
@@ -543,6 +549,7 @@ function MockupSection() {
   const view = useEditor(useShallow((s) => resolveShotView(s.project, renderShot)));
   const spec = getDevice(view.device);
   const finish = getFinish(spec, view.finish);
+  const screenPixels = orientedScreenPixels(spec, view.orientation);
   const features = useModelBounds((s) => s.bounds[view.device]?.features);
   if (picker === "device") return <DevicePicker />;
   return (
@@ -553,7 +560,7 @@ function MockupSection() {
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="label flex items-center gap-1.5 truncate text-fg">{spec.name}{renderShot?.device && <Hint>this shot</Hint>}</span>
-          <span className="label-sm text-muted">{spec.screenPx[0].toLocaleString()} × {spec.screenPx[1].toLocaleString()}</span>
+          <span className="label-sm text-muted">{screenPixels[0].toLocaleString()} × {screenPixels[1].toLocaleString()}</span>
         </div>
         <Button variant="outline" size="sm" onClick={() => setPicker("device")}>Change</Button>
       </div>
@@ -566,6 +573,16 @@ function MockupSection() {
         setProject={(v) => update((p) => { p.mockup.finish = v; })}
       />
       <NumberRow label="Reflection" value={mockup.reflection} min={0} max={1} step={0.01} onChange={(v) => update((p) => { p.mockup.reflection = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+      {supportsOrientation(spec) && (
+        <ShotOverrideRow
+          label="Orientation"
+          options={[{ value: "portrait", label: "Portrait" }, { value: "landscape", label: "Landscape" }]}
+          project={deviceOrientation(spec, mockup.orientation)}
+          read={(sh) => sh.orientation}
+          write={(sh, v) => { sh.orientation = v as DeviceOrientation | undefined; }}
+          setProject={(v) => update((p) => { p.mockup.orientation = v as DeviceOrientation; })}
+        />
+      )}
       {spec.model && (
         <NumberRow label="Body gloss" value={mockup.gloss ?? 1.3} min={0.2} max={3} step={0.05} onChange={(v) => update((p) => { p.mockup.gloss = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
       )}
@@ -584,7 +601,10 @@ function MockupSection() {
           setProject={(v) => update((p) => { p.mockup.notch = v; })}
         />
       )}
-      {features?.caseParts && <ToggleRow label="Case + keyboard" checked={mockup.caseKeyboard ?? true} onChange={(v) => update((p) => { p.mockup.caseKeyboard = v; })} />}
+      {features?.caseParts && <>
+        <ToggleRow label="Case + keyboard" checked={effectiveKeyboardCase(spec, view.orientation, mockup.caseKeyboard ?? true)} disabled={!keyboardCaseAvailable(spec, view.orientation)} onChange={(v) => update((p) => { p.mockup.caseKeyboard = v; })} />
+        {!keyboardCaseAvailable(spec, view.orientation) && <div className="label-sm px-0.5 leading-snug text-muted">Keyboard case is available in {nativeOrientation(spec)}. Your setting is kept when you rotate back.</div>}
+      </>}
       {features?.band && (
         <div className="flex h-8 items-center justify-between rounded-md bg-fill px-2.5">
           <span className="label text-fg-2">Band colour</span>
@@ -926,6 +946,8 @@ function BlurSection() {
 
 /* ---------- Effects ---------- */
 function EffectsSection() {
+  const shot = useRenderShot();
+  const family = useEditor((s) => getDevice(resolveShotView(s.project, shot).device).family);
   const effects = useEditor((s) => s.project.effects);
   const update = useEditor((s) => s.update);
   const [menu, setMenu] = useState(false);
@@ -963,6 +985,8 @@ function EffectsSection() {
               <IconButton icon={e.enabled ? "eye" : "eye-off"} size={12} label={e.enabled ? "Disable" : "Enable"} onClick={() => update((p) => { const x = p.effects.find((y) => y.id === e.id); if (x) x.enabled = !x.enabled; })} className="h-6 w-6" />
               <IconButton icon="trash" size={12} label="Remove" onClick={() => update((p) => { p.effects = p.effects.filter((y) => y.id !== e.id); })} className="h-6 w-6" />
             </div>
+            {e.id === "depth" && family !== "flat" && <p className="label-sm px-1 text-muted">Applies to flat and browser mockups.</p>}
+            {e.id === "pixel" && <p className="label-sm px-1 text-muted">RGB detail on the display. Zoom in to see individual pixels.</p>}
             {def.params.map((prm) => (
               <NumberRow
                 key={prm.key}
@@ -971,7 +995,7 @@ function EffectsSection() {
                 min={prm.min}
                 max={prm.max}
                 step={prm.step}
-                disabled={!e.enabled}
+                disabled={!e.enabled || (e.id === "depth" && family !== "flat")}
                 onChange={(v) => update((p) => { const x = p.effects.find((y) => y.id === e.id); if (x) x.params[prm.key] = v; })}
                 onDragStart={beginInteraction}
                 onDragEnd={endInteraction}

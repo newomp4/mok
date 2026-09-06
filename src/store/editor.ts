@@ -4,7 +4,7 @@ import { subscribeWithSelector } from "zustand/middleware";
 import { temporal } from "zundo";
 import type { AnimProp, AudioTrack, Keyframe, Project, Shot, ShotKind, Transition } from "@/lib/types";
 import { createLogoShot, createProject, createShot, createTextShot, normalizeProject } from "@/lib/defaults";
-import { hasKeyframeAt, inHandleOf, locate, removeKeyframe, reverseTrack, sampleTrack, setInHandle, shotBase, splitTrack, totalDuration, upsertKeyframe, shotStart } from "@/lib/animation";
+import { hasKeyframeAt, inHandleOf, locate, removeKeyframe, reverseTrack, sampleTrack, setInHandle, shotBase, splitTrack, totalDuration, editableDuration, preserveProjectDuration, upsertKeyframe, shotStart } from "@/lib/animation";
 import { uid } from "@/lib/ids";
 import { useUI } from "./ui";
 import { getDevice } from "@/lib/devices";
@@ -83,7 +83,7 @@ function clone<T>(v: T): T {
 /** Discrete commands each get an undo step, even when clicked within a typing/drag burst. */
 function commitProject(p: Project, set: (state: { project: Project }) => void) {
   beginInteraction();
-  try { p.updatedAt = Date.now(); set({ project: p }); }
+  try { preserveProjectDuration(useEditor.getState().project, p); p.updatedAt = Date.now(); set({ project: p }); }
   finally { endInteraction(); }
 }
 
@@ -141,6 +141,7 @@ export const useEditor = create<EditorState>()(
         update: (mut) => {
           const p = clone(get().project);
           mut(p);
+          preserveProjectDuration(get().project, p);
           p.updatedAt = Date.now();
           set({ project: p });
         },
@@ -261,7 +262,7 @@ export const useEditor = create<EditorState>()(
             if (source) {
               shot.media = source.media;
               shot.fit = source.fit;
-              for (const key of ["device", "finish", "scene", "lighting", "blurMode", "bokeh", "notch"] as const) Object.assign(shot, { [key]: source[key] });
+              for (const key of ["device", "orientation", "finish", "scene", "lighting", "blurMode", "bokeh", "notch"] as const) Object.assign(shot, { [key]: source[key] });
               shot.pose = Object.fromEntries([...SHOT_SCOPED].map((prop) => [prop, closingValue(p, source, prop)]));
             }
           }
@@ -291,6 +292,7 @@ export const useEditor = create<EditorState>()(
           const s = p.shots.find((x) => x.id === id);
           if (!s) return;
           mut(s);
+          preserveProjectDuration(get().project, p);
           p.updatedAt = Date.now();
           set({ project: p });
         },
@@ -650,7 +652,7 @@ function restoreHistory(direction: "undo" | "redo") {
   if (p === before) return;
   preservePlayhead(before, p);
   const ui = useUI.getState();
-  const time = Math.max(0, Math.min(totalDuration(p), ui.time));
+  const time = Math.max(0, Math.min(editableDuration(p), ui.time));
   useUI.setState({
     time, playing: false,
     activeShotId: p.shots.some((s) => s.id === ui.activeShotId) ? ui.activeShotId : locate(p, time).shot?.id ?? null,

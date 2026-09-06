@@ -13,6 +13,8 @@ import { useEditor } from "@/store/editor";
 import { disposeModelResources, ownModelResource, tintBandMaterials } from "@/three/resources";
 import { visibleBounds } from "@/three/bounds";
 import { addMetalSurfaceDetail } from "@/three/surfaceDetail";
+import { addEnvironmentGain } from "@/three/environmentGain";
+import { effectiveKeyboardCase } from "@/lib/orientation";
 
 let ktx2: KTX2Loader | null = null;
 
@@ -227,7 +229,7 @@ export interface DeviceFeatures {
  */
 function deviceInverse(o: THREE.Object3D): THREE.Matrix4 {
   let n: THREE.Object3D | null = o;
-  while (n && n.name !== "device") n = n.parent;
+  while (n && n.name !== "device-orientation" && n.name !== "device") n = n.parent;
   const m = new THREE.Matrix4();
   if (n) { n.updateWorldMatrix(true, false); m.copy(n.matrixWorld).invert(); }
   return m;
@@ -237,10 +239,27 @@ function deviceInverse(o: THREE.Object3D): THREE.Matrix4 {
 /** Maps a point from the device's own frame into `root`'s local space. */
 function deviceLocal(root: THREE.Object3D): THREE.Matrix4 {
   let n: THREE.Object3D | null = root;
-  while (n && n.name !== "device") n = n.parent;
+  while (n && n.name !== "device-orientation" && n.name !== "device") n = n.parent;
   const m = new THREE.Matrix4();
   if (n) { n.updateWorldMatrix(true, false); root.updateWorldMatrix(true, false); m.copy(root.matrixWorld).invert().multiply(n.matrixWorld); }
   return m;
+}
+
+/** Visibility, display tilt and centering share one effective attachment state. */
+export function applyKeyboardCase(root: THREE.Object3D, parts: readonly THREE.Object3D[], tilt: number, enabled: boolean): void {
+  for (const part of parts) part.visible = enabled;
+  const yawGroup = root.getObjectByName("autoYaw");
+  if (!yawGroup || !tilt) return;
+  yawGroup.rotation.order = "XYZ";
+  yawGroup.rotation.x = enabled ? 0 : tilt;
+  yawGroup.position.set(0, 0, 0);
+  root.updateWorldMatrix(true, true);
+  const bounds = visibleBounds(root, deviceInverse(root), new THREE.Box3(), true);
+  if (!bounds.isEmpty()) {
+    // Measure in the native device frame so user rotation never shifts the tablet's centre.
+    const center = bounds.getCenter(new THREE.Vector3()).applyMatrix4(deviceLocal(root));
+    yawGroup.position.sub(center);
+  }
 }
 
 function screenFrame(screen: THREE.Mesh) {
@@ -430,8 +449,10 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
     if (viewport.glbInfo === root.userData.glbInfo) viewport.glbInfo = null;
   }, [root]);
 
-  const notch = useShotView().notch;
-  const caseKeyboard = useEditor((s) => s.project.mockup.caseKeyboard ?? true);
+  const view = useShotView();
+  const notch = view.notch;
+  const casePreference = useEditor((s) => s.project.mockup.caseKeyboard ?? true);
+  const caseKeyboard = effectiveKeyboardCase(spec, view.orientation, casePreference);
   const bandColor = useEditor((s) => s.project.mockup.bandColor ?? null);
   const scene = useThree((s) => s.scene);
 
@@ -514,24 +535,7 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
     const features = root.userData.features as DeviceFeatures;
     // toggles: Dynamic Island, keyboard case (tablet lies flat facing the camera without it), band tint
     for (const m of features.island) m.visible = notch;
-    for (const m of features.caseParts) m.visible = caseKeyboard;
-    const yawGroup = root.getObjectByName("autoYaw") as THREE.Group | undefined;
-    if (yawGroup && features.tilt) {
-      yawGroup.rotation.order = "XYZ";
-      yawGroup.rotation.x = caseKeyboard ? 0 : features.tilt;
-      // keep the visible part centred on the origin
-      yawGroup.position.set(0, 0, 0);
-      root.updateWorldMatrix(true, true);
-      const vb = visibleBounds(root, deviceInverse(root), new THREE.Box3(), true);
-      if (!vb.isEmpty()) {
-        // the centre is taken in the device's frame first: rotating a world box and then taking its
-        // centre is not the same point for an asymmetric model, so the offset used to drift with
-        // whatever rotation the mockup was holding when the case was toggled
-        const c = vb.getCenter(new THREE.Vector3());
-        const local = c.clone().applyMatrix4(deviceLocal(root));
-        yawGroup.position.sub(local);
-      }
-    }
+    applyKeyboardCase(root, features.caseParts, features.tilt, caseKeyboard);
     viewport.glbInfo = root.userData.glbInfo = () => {
       root.updateWorldMatrix(true, true);
       const out: Record<string, unknown>[] = [];
@@ -603,6 +607,7 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
           }
           if (t.normalMap) t.normalScale = t.normalScale.clone().multiplyScalar(0.65);
           addMetalSurfaceDetail(t);
+          addEnvironmentGain(t);
           cache.set(x, t);
         }
         const baseColor = t.userData.baseColor as THREE.Color | null;
@@ -641,7 +646,7 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
     const b = visibleBounds(root, inv, new THREE.Box3(), true);
     const sz = new THREE.Vector3();
     b.getSize(sz);
-    useModelBounds.getState().set(spec.id, { minY: b.min.y, maxY: b.max.y, width: sz.x, height: sz.y });
+    useModelBounds.getState().set(spec.id, { minX: b.min.x, maxX: b.max.x, minY: b.min.y, maxY: b.max.y, width: sz.x, height: sz.y });
   }, [root, spec.id, yawApplied, caseKeyboard]);
 
   // Declared after both effects above, so a model is only ever announced once its screen, its

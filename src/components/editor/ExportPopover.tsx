@@ -7,6 +7,7 @@ import { EXPORT_SIZES, getAspect } from "@/lib/presets";
 import { useRenderFlags } from "@/three/registry";
 import { captureImage, estimateBitrate, exportVideo, type ImageFormat, type VideoQuality } from "@/export/capture";
 import { downloadBlob } from "@/lib/persistence";
+import { exportAssets } from "@/export/assets";
 import { totalDuration } from "@/lib/animation";
 import { exportSizeFor, quickCapture, slug } from "./hooks";
 import { chime } from "@/lib/sounds";
@@ -106,6 +107,7 @@ export function ExportButton() {
   };
 
   const duration = totalDuration(project);
+  const exportPlan = exportAssets(project, { type: "video", start: 0, end: duration }, videoState.transparent);
   const mbps = estimateBitrate(vidDims[0], vidDims[1], videoState.fps, videoState.quality) / 1e6;
   const orientationOptions = [
     { value: "landscape" as Orientation, label: "Landscape", icon: "landscape" },
@@ -163,7 +165,7 @@ export function ExportButton() {
             <Label>Container</Label>
             <Segmented size="sm" value={videoState.transparent ? "webm" : videoState.format} onChange={(v) => { videoState.format = v; rerender(); }} options={[{ value: "mp4", label: "MP4 · H.264", disabled: videoState.transparent }, { value: "webm", label: "WebM · VP9" }]} />
             <ToggleRow label="Transparent background" checked={videoState.transparent} onChange={(v) => { videoState.transparent = v; rerender(); }} hint="WebM" />
-            <Summary title={`${vidDims[0]} × ${vidDims[1]}`} tag={`${videoState.fps} fps · ~${mbps.toFixed(0)} Mbps`} sub={`${duration.toFixed(1)}s · ${project.shots.length} shot${project.shots.length === 1 ? "" : "s"} back to back${project.audio ? " · audio" : ""}${videoState.blur !== "off" ? ` · ${BLUR_SAMPLES[videoState.blur]}× motion blur` : ""}`} />
+            <Summary title={`${vidDims[0]} × ${vidDims[1]}`} tag={`${videoState.fps} fps · ~${mbps.toFixed(0)} Mbps`} sub={`${duration.toFixed(1)}s · ${exportPlan.shots.length} shot${exportPlan.shots.length === 1 ? "" : "s"} in range${exportPlan.audio ? " · audio" : ""}${videoState.blur !== "off" ? ` · ${BLUR_SAMPLES[videoState.blur]}× motion blur` : ""}`} />
             <Button variant="solid" size="lg" onClick={() => void runVideo()} className="mt-1 w-full">Export video</Button>
             <p className="px-0.5 pt-1 text-[10px] leading-relaxed text-muted">Frames are rendered one by one and encoded with WebCodecs, so the export is deterministic at any frame rate.</p>
           </div>

@@ -5,13 +5,16 @@ import { useUI } from "@/store/ui";
 import { useMedia } from "@/lib/media";
 import { useActiveShot } from "@/three/Device";
 import { Button, IconButton } from "@/components/ui";
-import { composeAutoMotion } from "@/lib/actions";
+import { autoMotionMediaTime, composeAutoMotion } from "@/lib/actions";
+import { shotStart } from "@/lib/animation";
 import { uid } from "@/lib/ids";
 import type { FocusArea } from "@/lib/types";
 
 export function AutoMotionOverlay() {
   const shot = useActiveShot();
   const media = useMedia(shot?.media);
+  const project = useEditor((s) => s.project);
+  const time = useUI((s) => s.time);
   const update = useEditor((s) => s.update);
   const setAutoMotion = useUI((s) => s.setAutoMotion);
   const toast = useUI((s) => s.showToast);
@@ -22,6 +25,7 @@ export function AutoMotionOverlay() {
   const drawing = useRef<{ shotId: string; area: FocusArea } | null>(null);
   const [space, setSpace] = useState({ width: 0, height: 0 });
   const areas = shot?.focusAreas ?? [];
+  useEffect(() => { useUI.getState().setPlaying(false); }, []);
   useEffect(() => {
     const el = stage.current;
     if (!el) return;
@@ -66,12 +70,13 @@ export function AutoMotionOverlay() {
     if (!shot) return;
     const nextSeed = shuffle ? seed + 1 : seed;
     setSeed(nextSeed);
-    composeAutoMotion(shot.id, nextSeed);
-    toast(`Auto-motion composed for ${shot.name}`);
+    const count = composeAutoMotion(shot.id, nextSeed);
+    if (!count) { toast("These focus areas are cropped out. Choose a visible area or switch the media fit to Contain."); return; }
+    toast(`Auto-motion composed for ${shot.name}${count < areas.length ? ` · ${areas.length - count} cropped-out area${areas.length - count === 1 ? "" : "s"} skipped` : ""}`);
     if (!shuffle) setAutoMotion(false);
   };
-  const el = media?.element;
   const src = media?.url;
+  const previewTime = shot ? autoMotionMediaTime(shot, time - shotStart(project, shot.id)) : 0;
   const ar = media ? media.width / media.height : 16 / 10;
   const width = Math.min(space.width, space.height * ar);
 
@@ -95,8 +100,8 @@ export function AutoMotionOverlay() {
             onPointerUp={onUp}
             onPointerCancel={() => { drawing.current = null; setDraft(null); }}
           >
-            {el instanceof HTMLVideoElement ? (
-              <video src={src} muted className="pointer-events-none h-full w-full object-contain" />
+            {media?.kind === "video" ? (
+              <AutoMotionVideo src={src} time={previewTime} />
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={src} alt="" className="pointer-events-none h-full w-full object-contain" draggable={false} />
@@ -124,6 +129,25 @@ export function AutoMotionOverlay() {
       </div>
     </div>
   );
+}
+
+/** Keep the region picker on the frame currently visible in the editor, including trimmed clips. */
+function AutoMotionVideo({ src, time }: { src: string; time: number }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const video = ref.current;
+    if (!video) return;
+    const sync = () => {
+      if (video.readyState < 1 || video.seeking) return;
+      if (Math.abs(video.currentTime - time) > 1 / 240) video.currentTime = time;
+    };
+    video.pause();
+    video.addEventListener("loadedmetadata", sync);
+    video.addEventListener("seeked", sync);
+    sync();
+    return () => { video.removeEventListener("loadedmetadata", sync); video.removeEventListener("seeked", sync); };
+  }, [src, time]);
+  return <video ref={ref} src={src} muted playsInline preload="auto" className="pointer-events-none h-full w-full object-contain" />;
 }
 
 function normalize(a: FocusArea): FocusArea {

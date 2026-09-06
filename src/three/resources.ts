@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import * as THREE from "three";
+import { addEnvironmentGain } from "@/three/environmentGain";
 
 type Disposable = { dispose(): void };
 
@@ -34,7 +35,11 @@ export function tintBandMaterials(root: THREE.Object3D, mesh: THREE.Mesh, origin
   const cache = (mesh.userData.bandTint ??= new Map<THREE.Material, THREE.Material>()) as Map<THREE.Material, THREE.Material>;
   const materials = (Array.isArray(original) ? original : [original]).map((source) => {
     let material = cache.get(source);
-    if (!material) { material = ownModelResource(root, source.clone()); cache.set(source, material); }
+    if (!material) {
+      material = ownModelResource(root, source.clone());
+      if ((material as THREE.MeshStandardMaterial).isMeshStandardMaterial) addEnvironmentGain(material as THREE.MeshStandardMaterial);
+      cache.set(source, material);
+    }
     if ("color" in material) (material as THREE.MeshStandardMaterial).color.set(color);
     if ("fog" in material) material.fog = false;
     return material;

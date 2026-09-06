@@ -24,9 +24,18 @@ import { useModelBounds, useShownDevice } from "@/three/registry";
 import { useShallow } from "zustand/react/shallow";
 import { locate } from "@/lib/animation";
 import { resolveShotView, type ShotView } from "@/lib/shotView";
+import { orientationFitSize, orientationQuarterTurn, orientedBounds, orientedScreenPixels, supportsOrientation } from "@/lib/orientation";
 import { Suspense } from "react";
+import type { Project } from "@/lib/types";
 
 const DEG = Math.PI / 180;
+
+/** Empty timeline gaps and an extended project tail hold a frame instead of playing its source. */
+export function shouldPlayShotVideo(project: Project, time: number, playing: boolean, exporting = false): boolean {
+  if (!playing || exporting) return false;
+  const loc = locate(project, time);
+  return !loc.inGap && !!loc.shot && shotKind(loc.shot) === "media" && loc.localT < loc.shot.duration;
+}
 
 export function useActiveShot() {
   const activeId = useUI((s) => s.activeShotId);
@@ -89,10 +98,11 @@ export function Device({ layout }: { layout: DeviceLayout }) {
   // follows the layout's device rather than the picked one, so the model being held while a new one
   // loads keeps its own screen shape instead of being re-rasterised to the incoming aspect.
   useEffect(() => {
+    surface.setQuarterTurn(layout.quarterTurn);
     if (layout.spec.family === "flat" && layout.flat) surface.setSize(layout.flat.px[0], layout.flat.px[1]);
     else surface.setSize(layout.spec.screenPx[0], layout.spec.screenPx[1]);
     invalidate();
-  }, [layout.spec, surface, layout.flat, invalidate]);
+  }, [layout.spec, surface, layout.flat, layout.quarterTurn, invalidate]);
 
   useEffect(() => {
     surface.setMedia(media, shot?.fit ?? "cover", { kind: spec.id === "browser" ? "browser" : "none", dark: finish.id === "dark" });
@@ -114,7 +124,8 @@ export function Device({ layout }: { layout: DeviceLayout }) {
     if (screenCfg.bg?.type === "image" && screenBgImage?.kind === "image") img = screenBgImage.element as HTMLImageElement;
     else if (screenCfg.bg?.type === "gradient") {
       gradientCanvas.width = 1024;
-      gradientCanvas.height = Math.round(1024 * (spec.screenPx[1] / spec.screenPx[0]));
+      const [w, h] = orientedScreenPixels(layout.spec, layout.orientation);
+      gradientCanvas.height = Math.round(1024 * (h / w));
       const ctx = gradientCanvas.getContext("2d");
       if (ctx) {
         paintPreset(ctx, gradientCanvas.width, gradientCanvas.height, getBgPreset(screenCfg.bg.preset ?? "whisp"), 0);
@@ -124,7 +135,7 @@ export function Device({ layout }: { layout: DeviceLayout }) {
     surface.setBackground(screenCfg.bg?.color ?? "#000000", img);
     surface.setStatusBar(!!screenCfg.statusBar && spec.family === "phone");
     invalidate();
-  }, [screenCfg.bg?.type, screenCfg.bg?.color, screenCfg.bg?.preset, screenCfg.statusBar, screenBgImage, spec.family, spec.screenPx, surface, gradientCanvas, invalidate]);
+  }, [screenCfg.bg?.type, screenCfg.bg?.color, screenCfg.bg?.preset, screenCfg.statusBar, screenBgImage, spec.family, layout.spec, layout.orientation, surface, gradientCanvas, invalidate]);
 
   useEffect(() => {
     screenMat.clearcoat = reflection;
@@ -134,15 +145,27 @@ export function Device({ layout }: { layout: DeviceLayout }) {
   }, [reflection, screenMat, invalidate]);
 
   const group = useRef<THREE.Group>(null);
+  const orientationGroup = useRef<THREE.Group>(null);
   const standing = scenePreset !== "custom" && !spec.model && (spec.family === "phone" || spec.family === "tablet");
   const smoothRot = useRef<[number, number, number] | null>(null);
 
   useFrame((state, delta) => {
     const v = anim.values;
     if (!v || !group.current) return;
+    const currentView = resolveShotView(anim.project ?? useEditor.getState().project, anim.shot);
+    const quarterTurn = orientationQuarterTurn(layout.spec, currentView.orientation);
+    if (orientationGroup.current) orientationGroup.current.rotation.z = quarterTurn * Math.PI / 2;
+    surface.setQuarterTurn(quarterTurn);
     const pixels = layout.spec.family === "flat" && layout.flat ? layout.flat.px : layout.spec.screenPx;
     const exportEdge = Math.min(state.gl.capabilities.maxTextureSize, Math.max(state.size.width, state.size.height));
     surface.setSize(pixels[0], pixels[1], anim.exporting ? exportEdge : 2560, anim.exporting);
+    const screenGrid = screenMat.userData.screenGrid;
+    if (screenGrid) {
+      const pixel = (anim.project ?? useEditor.getState().project).effects.find((effect) => effect.id === "pixel" && effect.enabled);
+      screenGrid.strength.value = pixel ? (pixel.params.amount ?? 0.6) : 0;
+      screenGrid.pitch.value = pixel?.params.size ?? 4;
+      screenGrid.resolution.value.set(pixels[0], pixels[1]);
+    }
     // the shot under the playhead decides what the screen shows (exports step through shots without React)
     const cur = anim.shot;
     group.current.visible = !anim.card;
@@ -179,7 +202,7 @@ export function Device({ layout }: { layout: DeviceLayout }) {
       const dur = vid.duration || 1;
       const speed = cur?.speed ?? 1;
       const t = ((cur?.trimStart ?? 0) + anim.localT * speed) % dur;
-      const playing = useUI.getState().playing && !anim.exporting;
+      const playing = shouldPlayShotVideo(anim.project ?? useEditor.getState().project, anim.time, useUI.getState().playing, anim.exporting);
       if (playing) {
         if (vid.playbackRate !== speed) vid.playbackRate = speed;
         if (vid.paused) vid.play().catch(() => {});
@@ -218,7 +241,9 @@ export function Device({ layout }: { layout: DeviceLayout }) {
   return (
     <>
       <group ref={group} name="device">
-        <group position={[0, yOffset, 0]}>{model}</group>
+        <group ref={orientationGroup} name="device-orientation" rotation={[0, 0, layout.quarterTurn * Math.PI / 2]}>
+          <group position={[0, yOffset, 0]}>{model}</group>
+        </group>
       </group>
       <ScreenReflection material={screenMat} amount={reflection} />
     </>
@@ -226,7 +251,9 @@ export function Device({ layout }: { layout: DeviceLayout }) {
 }
 
 export function useDeviceLayout(): DeviceLayout {
-  const deviceId = useShotView().device;
+  const view = useShotView();
+  const deviceId = view.device;
+  const aspect = useThree((s) => s.size.width / Math.max(1, s.size.height));
   const shot = useRenderShot();
   // while a newly picked glTF model prepares, the one still on screen keeps the framing: fitting the
   // camera to a device that has not arrived yet would shrink and re-frame the one you are looking at
@@ -235,10 +262,12 @@ export function useDeviceLayout(): DeviceLayout {
   const spec = getDevice(held);
   const bounds = useModelBounds((s) => s.bounds[held]);
   return useMemo(() => {
-    const base = deviceLayout(spec, shot?.media ?? null);
+    const base = deviceLayout(spec, shot?.media ?? null, view.orientation, aspect);
     if (spec.model && bounds) {
-      return { ...base, floorY: bounds.minY, height: bounds.height, lean: 0, fitSize: Math.max(bounds.width, bounds.height) * 1.04 };
+      const oriented = orientedBounds(bounds, base.quarterTurn);
+      const legacyFit = Math.max(bounds.width, bounds.height) * 1.04;
+      return { ...base, floorY: oriented.floorY, height: oriented.height, lean: 0, sceneSize: legacyFit, fitSize: supportsOrientation(spec) ? orientationFitSize(oriented.width, oriented.height, legacyFit, base.quarterTurn, aspect) : legacyFit };
     }
     return base;
-  }, [spec, shot?.media, bounds]);
+  }, [spec, shot?.media, bounds, view.orientation, aspect]);
 }

@@ -343,7 +343,7 @@ export const SAMPLE_SCREENS: SampleScreen[] = [
         const y = cy + h * 0.12 + i * h * 0.082;
         p.card(lx + w * 0.018, y - w * 0.01, w * 0.02, w * 0.02, w * 0.006, `hsl(${(i * 65 + 20) % 360} 55% 55%)`);
         p.text(n, lx + w * 0.048, y, w * 0.016, "rgba(255,255,255,0.85)");
-        p.text(`$${(9 - i) * 1.7}k`, w - w * 0.05, y, w * 0.016, "rgba(255,255,255,0.5)", 500, "right");
+        p.text(`$${((9 - i) * 1.7).toFixed(1)}k`, w - w * 0.05, y, w * 0.016, "rgba(255,255,255,0.5)", 500, "right");
       });
     },
   },

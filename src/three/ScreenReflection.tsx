@@ -5,11 +5,7 @@ import * as THREE from "three";
 import { anim } from "@/three/anim";
 import type { ScreenMaterial } from "@/three/materials";
 import { readScreenPlane } from "@/three/screenPlane";
-
-/** Seen through glass at a fraction of a frame's brightness, the mirror needs nothing like full resolution. */
-const SCALE = 0.6;
-const MIN_WIDTH = 128;
-const MAX_WIDTH = 1440;
+import { useRenderQuality } from "@/three/renderQuality";
 
 /**
  * A true planar mirror for the display.
@@ -25,13 +21,11 @@ const MAX_WIDTH = 1440;
  * At Reflection 0 no render target is allocated and the second pass never runs.
  */
 export function ScreenReflection({ material, amount }: { material: ScreenMaterial; amount: number }) {
-  const size = useThree((s) => s.size);
   const invalidate = useThree((s) => s.invalidate);
+  const quality = useRenderQuality();
   const active = amount > 0.002;
   // the mirrored camera borrows the real one's projection, so the buffer has to share its aspect
-  const aspect = size.width > 0 && size.height > 0 ? size.width / size.height : 16 / 9;
-  const width = active ? Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(size.width * SCALE))) : 0;
-  const height = active ? Math.max(2, Math.round(width / aspect)) : 0;
+  const [width, height] = active ? quality.reflection : [0, 0];
 
   const target = useMemo(() => {
     if (!active) return null;

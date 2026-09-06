@@ -92,7 +92,7 @@ Open http://localhost:3000. Production build: `pnpm build && pnpm start`. Deploy
 - **Rendering** — three.js r185 via React Three Fiber. Devices are extruded rounded-rect solids with
   bevels, physically based materials (metallic frames, clear-coated back glass) and a screen material
   whose emissive map is the uploaded media, with a clear coat so the HDRI reflects across the glass
-  like real cover glass. The renderer uses Khronos Neutral tone mapping so screenshot colors stay true.
+  like real cover glass. The renderer uses Khronos Neutral tone mapping; lighting and glass can affect displayed screenshot colors.
 - **Speed** — the scene only re-renders on demand (state changes, playback, export), textures are
   uploaded at native screen resolution once, HDRIs are 1k and pre-filtered with PMREM, and MSAA runs
   inside the post-processing composer.
@@ -150,7 +150,7 @@ node scripts/use-central-icons.mjs --revert                       # back to the 
 ## Development
 
 - `pnpm dev` — dev server · `pnpm typecheck` · `pnpm lint`
-- `pnpm test` — regression checks for templates, per-shot focus, studio looks and screen geometry
+- `pnpm test` — regression checks for timeline, persistence, media recovery, orientation, export scope and rendering
   (Node 22.15+ or 24; uses the existing TypeScript compiler, no extra test dependency).
 - `scripts/qa-shot.mjs out.png "<js>"` — headless screenshot of the editor for visual QA
   (needs Playwright's Chromium; `window.__mok` exposes the stores, actions and export API in the page)
@@ -163,3 +163,7 @@ node scripts/use-central-icons.mjs --revert                       # back to the 
 - Type: [Geist](https://vercel.com/font) by Vercel
 
 Device names are used descriptively; this project is not affiliated with Apple.
+
+## September 2026 comparison pass
+
+See [the UltraMock comparison](docs/ultramock-comparison.md) for observed functionality, rendering findings and remaining hardware gaps. New features include upright phone/tablet orientation, independent project length, named missing-file recovery, RGB screen detail and flat extrusion. Reflection gains and export buffer quality are corrected; card Blur transitions now blur.

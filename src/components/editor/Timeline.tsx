@@ -3,7 +3,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "
 import { useEditor, beginInteraction, endInteraction, hasShotClipboard, clampKeyTime } from "@/store/editor";
 import { useUI } from "@/store/ui";
 import { ANIM_LABELS, type AnimProp, type Keyframe, type Shot, type Transition, type AudioTrack } from "@/lib/types";
-import { EASES, formatTime, shotStart, totalDuration, inHandleOf, setInHandle } from "@/lib/animation";
+import { EASES, formatTime, shotStart, totalDuration, editableDuration, contentDuration, parseDuration, timelineTickStep, inHandleOf, setInHandle } from "@/lib/animation";
 import { MOTION_PRESETS } from "@/lib/presets";
 import { Button, IconButton, Popover, Segmented, MenuList, ContextMenu, NumberRow, ColorRow, type MenuItem } from "@/components/ui";
 import { Icon } from "@/components/icons";
@@ -11,7 +11,8 @@ import { cn, clamp } from "@/lib/cn";
 import { useShallow } from "zustand/react/shallow";
 import { applyMotionPreset, importFilesToShot, addAudioFile, importLogo, addShotFromCamera } from "@/lib/actions";
 import { pickFiles } from "./hooks";
-import { ACCEPTED_AUDIO, ACCEPTED_IMAGES, ACCEPTED_TYPES, useMedia } from "@/lib/media";
+import { ACCEPTED_AUDIO, ACCEPTED_IMAGES, ACCEPTED_TYPES, useMedia, useMediaResource } from "@/lib/media";
+import { MediaRecovery } from "./MediaRecovery";
 import { audioLength } from "@/lib/audio";
 import { shotKind } from "@/lib/defaults";
 import { blip } from "@/lib/sounds";
@@ -101,6 +102,7 @@ export function Timeline() {
     setSelectedKeys: s.setSelectedKeys, setSelectedShots: s.setSelectedShots, setTimelineOpen: s.setTimelineOpen, showToast: s.showToast,
   })));
   const total = totalDuration(project);
+  const editEnd = editableDuration(project);
   const pps = 96 * ui.timelineZoom;
   const selectedShots = ui.selectedShots;
   const setSelectedShots = (next: string[] | ((cur: string[]) => string[])) =>
@@ -143,7 +145,6 @@ export function Timeline() {
     }
     return { starts, total: disp };
   }, [project.shots]);
-  const dispTotal = advanced ? total : packed.total;
   const toDisplayTime = (t: number) => {
     if (advanced) return t;
     for (const s of project.shots) {
@@ -151,7 +152,7 @@ export function Timeline() {
       if (t < st.real) return st.disp;
       if (t < st.real + s.duration) return st.disp + (t - st.real);
     }
-    return packed.total;
+    return packed.total + Math.max(0, t - contentDuration(project));
   };
   const toRealTime = (d: number) => {
     if (advanced) return d;
@@ -161,15 +162,17 @@ export function Timeline() {
     }
     const last = project.shots[project.shots.length - 1];
     const st = last && packed.starts.get(last.id);
-    return st ? st.real + last.duration : 0;
+    return (st ? st.real + last.duration : 0) + Math.max(0, d - packed.total);
   };
+  const displayEnd = toDisplayTime(total);
+  const dispTotal = Math.max(displayEnd, advanced ? contentDuration(project) : packed.total);
 
   const seekFromEvent = (e: React.PointerEvent | PointerEvent) => {
     const el = scrollRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
     const x = e.clientX - r.left + el.scrollLeft - 8;
-    ui.setTime(clamp(toRealTime(clamp(x / pps, 0, dispTotal)), 0, total));
+    ui.setTime(clamp(toRealTime(clamp(x / pps, 0, dispTotal)), 0, editEnd));
   };
   const scrubbing = useRef(false);
   const onRulerDown = (e: React.PointerEvent) => {
@@ -207,7 +210,7 @@ export function Timeline() {
   const ticks = useMemo(() => {
     const out: number[] = [];
     const end = Math.max(dispTotal, 12) + 2;
-    const step = pps < 50 ? 2 : pps < 90 ? 1 : 0.5;
+    const step = timelineTickStep(end, pps);
     for (let t = 0; t <= end; t += step) out.push(Math.round(t * 100) / 100);
     return out;
   }, [dispTotal, pps]);
@@ -249,7 +252,7 @@ export function Timeline() {
     ui.setActiveShot(id);
     if (additive) { setSelectedShots((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id])); return; }
     setSelectedShots([id]);
-    ui.setTime(clamp((packed.starts.get(id)?.real ?? 0) + 0.0001, 0, total));
+    ui.setTime(clamp((packed.starts.get(id)?.real ?? 0) + 0.0001, 0, editEnd));
   };
 
   // a shot the sequence no longer holds must not linger in the selection and be deleted twice
@@ -419,6 +422,7 @@ export function Timeline() {
           <span className="text-muted">/</span>
           <span className="text-muted">{formatTime(total)}</span>
         </div>
+        <ProjectLength value={total} />
         <button type="button" onClick={cycleFps} className="label flex h-6 items-center gap-1 rounded-md bg-fill px-2 text-fg-2 hover:text-fg" title="Timeline frame rate">
           <Icon name="clock" size={11} />{project.fps} fps
         </button>
@@ -609,7 +613,7 @@ export function Timeline() {
                           onSelect={(additive) => {
                             if (additive) setSelected(isSel ? selected.filter((s) => !(s.shotId === shot.id && props.includes(s.prop) && Math.abs(s.t - t) < 0.0005)) : [...selected, ...keys]);
                             else if (!isSel) setSelected(keys);
-                            ui.setTime(clamp(realStart + t, 0, total));
+                            ui.setTime(clamp(realStart + t, 0, editEnd));
                           }}
                           preview={(dt) => {
                             const d = snapDetail(t + dt, pps, useUI.getState().time - realStart);
@@ -689,7 +693,7 @@ export function Timeline() {
                               if (additive) setSelected(isSel ? selected.filter((s) => !(s.shotId === shot.id && s.prop === prop && Math.abs(s.t - k.t) < 0.0005)) : [...selected, key]);
                               else if (!isSel) setSelected([key]);
                               // a keyframe can sit outside the sequence, and the playhead cannot
-                              ui.setTime(clamp(start + k.t, 0, total));
+                              ui.setTime(clamp(start + k.t, 0, editEnd));
                             }}
                             preview={(dt, alt) => {
                               // a group drag moves everything by the raw delta, alt scales it around
@@ -745,6 +749,9 @@ export function Timeline() {
             {marquee && (
               <div className="pointer-events-none absolute z-30 rounded-sm border border-accent bg-accent/15" style={{ left: marquee.x0, top: marquee.y0, width: marquee.x1 - marquee.x0, height: marquee.y1 - marquee.y0 }} />
             )}
+            <div className="pointer-events-none absolute bottom-0 top-0 z-10 border-l border-dashed border-accent/50 bg-panel/30" style={{ left: 8 + displayEnd * pps, right: 0 }} aria-hidden="true">
+              <span className="label-sm absolute left-1 top-0.5 text-accent">End</span>
+            </div>
             {/* playhead */}
             <Playhead pps={pps} toDisplay={toDisplayTime} />
           </div>
@@ -804,6 +811,28 @@ function PresetThumb({ id }: { id: string }) {
       </div>
     </div>
   );
+}
+
+/** A deliberate endpoint edit never stretches or destroys the user's shots. */
+function ProjectLength({ value }: { value: number }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const cancelled = useRef(false);
+  const display = formatTime(value);
+  const commit = () => {
+    if (cancelled.current) { cancelled.current = false; setDraft(null); return; }
+    const next = parseDuration(draft ?? display);
+    setDraft(null);
+    if (next === null) { useUI.getState().showToast("Use seconds or m:ss, from 0.1 seconds to 3 minutes"); return; }
+    if (Math.abs(next - value) < 0.001) return;
+    beginInteraction();
+    try { useEditor.getState().update((p) => { p.duration = next; }); } finally { endInteraction(); }
+    const ui = useUI.getState();
+    if (ui.time > next) { ui.setPlaying(false); ui.setTime(next); }
+  };
+  return <label className="num flex h-6 items-center gap-1 rounded-md border border-line bg-fill px-1.5 text-[11px]" title="Project endpoint — trims keep this length; extending clips can grow it">
+    <Icon name="clock" size={11} className="text-muted" />
+    <input aria-label="Project length (minutes:seconds)" className="w-[64px] bg-transparent text-center outline-none focus:text-accent" value={draft ?? display} onFocus={(e) => { cancelled.current = false; setDraft(display); e.currentTarget.select(); }} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") { cancelled.current = true; e.currentTarget.blur(); } }} />
+  </label>;
 }
 
 /** The playhead moves every frame, so its readouts subscribe on their own. */
@@ -910,7 +939,9 @@ function ShotBlock({ shot, start, pps, active, selected, dx, onSelect, onExpand,
   renaming?: boolean; onRenameEnd?: () => void;
 }) {
   const update = useEditor((s) => s.update);
-  const media = useMedia(shot.media);
+  const source = shotKind(shot) === "logo" ? shot.logo?.media : shotKind(shot) === "media" ? shot.media : null;
+  const { media, status } = useMediaResource(source);
+  const missing = status === "missing";
   const resize = useRef<{ x: number; d: number } | null>(null);
   const trimLeft = useRef<{ x: number; d: number; trim: number; keys: Shot["keyframes"] } | null>(null);
   const move = useRef<{ x: number; moved: boolean } | null>(null);
@@ -920,7 +951,8 @@ function ShotBlock({ shot, start, pps, active, selected, dx, onSelect, onExpand,
   return (
     <div
       data-shot={shot.id}
-      className={cn("absolute top-1 flex h-[22px] cursor-pointer select-none items-center gap-1.5 overflow-hidden rounded-md border px-2 transition-colors", active ? "border-accent bg-accent text-white" : kind === "media" ? "border-line-2 bg-fill text-fg-2 hover:bg-fill-2" : "border-line-2 bg-panel-2 text-fg-2 hover:bg-fill", selected && "ring-1 ring-fg", dx !== 0 && "z-30 opacity-90 shadow-lg")}
+      className={cn("absolute top-1 flex h-[22px] cursor-pointer select-none items-center gap-1.5 overflow-hidden rounded-md border px-2 transition-colors", missing ? "border-dashed border-amber-500/60 bg-amber-500/10 text-amber-800 dark:text-amber-300" : active ? "border-accent bg-accent text-white" : kind === "media" ? "border-line-2 bg-fill text-fg-2 hover:bg-fill-2" : "border-line-2 bg-panel-2 text-fg-2 hover:bg-fill", active && missing && "ring-1 ring-accent", selected && "ring-1 ring-fg", dx !== 0 && "z-30 opacity-90 shadow-lg")}
+      title={missing ? `Missing source: ${source?.name}. Select this shot to locate the file.` : status === "loading" ? `Loading ${source?.name}…` : undefined}
       style={{ left: 8 + start * pps, width: Math.max(24, shot.duration * pps), transform: dx ? `translateX(${dx}px)` : undefined }}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onMenu({ x: e.clientX, y: e.clientY }); }}
       onPointerDown={(e) => {
@@ -951,6 +983,7 @@ function ShotBlock({ shot, start, pps, active, selected, dx, onSelect, onExpand,
         <span className="pointer-events-none absolute inset-y-0 left-0 w-6 rounded-l-md opacity-80" style={{ backgroundImage: `url(${media.url})`, backgroundSize: "cover", backgroundPosition: "center top" }} />
       )}
       <span className="shrink-0" style={{ width: media && kind === "media" ? 20 : 0 }} />
+      {(missing || status === "loading") && <Icon name={missing ? "info" : "spinner"} size={10} className={cn("relative shrink-0", status === "loading" && "spin")} />}
       {hasKeys && <Icon name="diamond" size={8} className="relative" />}
       {kind !== "media" && <Icon name={KIND_ICON[kind]} size={10} className="relative" />}
       {renaming
@@ -1040,22 +1073,24 @@ function TransitionMarker({ shot, x, open, onOpen, onClose }: { shot: Shot; x: n
 
 function AudioLabel({ track, onRemove }: { track: AudioTrack; onRemove: () => void }) {
   const setAudio = useEditor((s) => s.setAudio);
+  const { status } = useMediaResource(track.media);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   return (
     <div className="group flex items-center gap-1.5 border-b border-line px-2" style={{ height: ROW_H }}>
-      <Icon name="headphones" size={11} className="text-muted" />
+      <Icon name={status === "missing" ? "info" : "headphones"} size={11} className={status === "missing" ? "text-amber-600 dark:text-amber-400" : "text-muted"} />
       <button ref={ref} type="button" onClick={() => setOpen((o) => !o)} className="label min-w-0 flex-1 truncate text-left text-fg" title={track.media.name}>{track.media.name}</button>
       <span className="num text-[10px] text-muted">{audioLength(track).toFixed(1)}s</span>
       <IconButton icon="trash" size={10} label="Remove audio" onClick={onRemove} className="hidden h-5 w-5 group-hover:flex" />
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} className="w-64 p-2">
         <div className="label px-1 pb-2 pt-1 text-fg">Audio</div>
         <div className="flex flex-col gap-1">
+          {(status === "missing" || status === "loading") && <MediaRecovery media={track.media} status={status} target={{ kind: "audio" }} />}
           <NumberRow label="Volume" value={track.volume} min={0} max={1} step={0.01} onChange={(v) => setAudio({ ...track, volume: v })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
           <NumberRow label="Fade in" value={track.fadeIn} min={0} max={5} step={0.1} unit="s" onChange={(v) => setAudio({ ...track, fadeIn: v })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
           <NumberRow label="Fade out" value={track.fadeOut} min={0} max={5} step={0.1} unit="s" onChange={(v) => setAudio({ ...track, fadeOut: v })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
           <NumberRow label="Trim start" value={track.trimStart} min={0} max={Math.max(0, (track.media.duration ?? 0) - 0.5)} step={0.1} unit="s" onChange={(v) => setAudio({ ...track, trimStart: v })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
-          <Button variant="ghost" size="sm" icon="upload" onClick={() => void pickFiles(ACCEPTED_AUDIO).then(([f]) => f && addAudioFile(f))} className="justify-start text-muted">Replace file…</Button>
+          {status === "ready" && <Button variant="ghost" size="sm" icon="upload" onClick={() => void pickFiles(ACCEPTED_AUDIO).then(([f]) => f && addAudioFile(f))} className="justify-start text-muted">Replace file…</Button>}
         </div>
       </Popover>
     </div>
@@ -1064,7 +1099,8 @@ function AudioLabel({ track, onRemove }: { track: AudioTrack; onRemove: () => vo
 
 function AudioBlock({ track, pps, total, toDisplay, toReal }: { track: AudioTrack; pps: number; total: number; toDisplay: (t: number) => number; toReal: (t: number) => number }) {
   const setAudio = useEditor((s) => s.setAudio);
-  const loaded = useMedia(track.media);
+  const { media: loaded, status } = useMediaResource(track.media);
+  const missing = status === "missing";
   const drag = useRef<{ x: number; start: number } | null>(null);
   const len = audioLength(track);
   const clipped = Math.min(len, Math.max(0, total - track.start));
@@ -1072,7 +1108,8 @@ function AudioBlock({ track, pps, total, toDisplay, toReal }: { track: AudioTrac
     <div className="relative border-b border-line" style={{ height: ROW_H }}>
       <div
         data-clip=""
-        className="absolute top-1 flex h-[22px] cursor-grab items-center gap-1.5 overflow-hidden rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2 text-emerald-700 dark:text-emerald-300"
+        className={cn("absolute top-1 flex h-[22px] cursor-grab items-center gap-1.5 overflow-hidden rounded-md border px-2", missing ? "border-dashed border-amber-500/60 bg-amber-500/10 text-amber-800 dark:text-amber-300" : "border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300")}
+        title={missing ? `Missing audio: ${track.media.name}. Click its name on the left to locate the file.` : status === "loading" ? `Loading ${track.media.name}…` : track.media.name}
         style={{ left: 8 + toDisplay(track.start) * pps, width: Math.max(24, len * pps) }}
         onPointerDown={(e) => { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); drag.current = { x: e.clientX, start: track.start }; beginInteraction(); }}
         // the clip is dragged where it is drawn, so the delta is read off the ruler and mapped back
@@ -1081,7 +1118,7 @@ function AudioBlock({ track, pps, total, toDisplay, toReal }: { track: AudioTrac
         onPointerCancel={() => { drag.current = null; endInteraction(); }}
       >
         <Waveform loaded={loaded} />
-        <Icon name="volume" size={10} className="relative" />
+        <Icon name={missing ? "info" : status === "loading" ? "spinner" : "volume"} size={10} className={cn("relative", status === "loading" && "spin")} />
         <span className="label relative truncate">{track.media.name}</span>
         {clipped < len && <span className="label-sm relative ml-auto opacity-70">trimmed to end</span>}
       </div>

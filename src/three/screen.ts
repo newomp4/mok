@@ -25,6 +25,7 @@ export class ScreenSurface {
   private placeholderKey = "";
   bg: { color: string; image: HTMLImageElement | HTMLCanvasElement | null } = { color: "#000000", image: null };
   statusBar = false;
+  quarterTurn: -1 | 0 | 1 = 0;
   private probe: HTMLCanvasElement | null = null;
   private avg: HTMLCanvasElement | null = null;
 
@@ -81,14 +82,34 @@ export class ScreenSurface {
     this.draw(true);
   }
 
+  setQuarterTurn(turn: -1 | 0 | 1) {
+    if (this.quarterTurn === turn) return;
+    this.quarterTurn = turn;
+    this.lastVideoTime = -1;
+    this.placeholderKey = "";
+    this.draw(true);
+  }
+
+  get contentWidth(): number { return this.quarterTurn ? this.height : this.width; }
+  get contentHeight(): number { return this.quarterTurn ? this.width : this.height; }
+
   get chromeHeight(): number {
     if (this.chrome.kind !== "browser") return 0;
-    return Math.round(this.width * 0.045);
+    return Math.round(this.contentWidth * 0.045);
   }
 
   /** Draw the current source. Returns true if the texture changed. */
   draw(force = false): boolean {
-    const { ctx, width, height } = this;
+    this.ctx.save();
+    // The device rotates in world space; turn the picture in its native texture so it stays upright.
+    if (this.quarterTurn < 0) { this.ctx.translate(0, this.height); this.ctx.rotate(-Math.PI / 2); }
+    else if (this.quarterTurn > 0) { this.ctx.translate(this.width, 0); this.ctx.rotate(Math.PI / 2); }
+    try { return this.drawContent(force); }
+    finally { this.ctx.restore(); }
+  }
+
+  private drawContent(force: boolean): boolean {
+    const ctx = this.ctx, width = this.contentWidth, height = this.contentHeight;
     const m = this.media;
     if (!m) {
       const key = `${width}x${height}:${this.chrome.kind}`;
@@ -96,6 +117,7 @@ export class ScreenSurface {
       this.placeholderKey = key;
       this.drawPlaceholder();
       this.drawChrome();
+      if (this.statusBar) this.drawStatusBar();
       this.texture.needsUpdate = true;
       return true;
     }
@@ -142,19 +164,28 @@ export class ScreenSurface {
 
   /** iOS-style status bar (time, signal, Wi-Fi, battery); ink picks black or white from what is underneath. */
   private drawStatusBar() {
-    const { ctx, width: W, height: H } = this;
+    const ctx = this.ctx, W = this.contentWidth, H = this.contentHeight;
+    const unit = Math.min(W, H);
+    const barHeight = Math.max(1, Math.round(unit * 0.11));
     const top = this.chromeHeight;
     // sample the strip under the bar at a tiny resolution to choose the ink colour
     if (!this.probe) { this.probe = document.createElement("canvas"); this.probe.width = 16; this.probe.height = 2; }
     const pc = this.probe.getContext("2d", { willReadFrequently: true })!;
-    pc.drawImage(this.canvas, 0, top, W, Math.max(1, Math.round(H * 0.05)), 0, 0, 16, 2);
+    if (this.quarterTurn) {
+      pc.save();
+      pc.scale(16 / W, 2 / barHeight);
+      if (this.quarterTurn < 0) { pc.translate(W, 0); pc.rotate(Math.PI / 2); }
+      else { pc.translate(0, H); pc.rotate(-Math.PI / 2); }
+      pc.drawImage(this.canvas, 0, 0);
+      pc.restore();
+    } else pc.drawImage(this.canvas, 0, top, W, barHeight, 0, 0, 16, 2);
     const d = pc.getImageData(0, 0, 16, 2).data;
     let lum = 0;
     for (let i = 0; i < d.length; i += 4) lum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
     lum /= d.length / 4;
     const ink = lum > 150 ? "#000000" : "#ffffff";
-    const y = top + H * 0.0245;
-    const size = W * 0.037;
+    const y = top + unit * 0.055;
+    const size = unit * 0.037;
     ctx.save();
     ctx.fillStyle = ink;
     ctx.strokeStyle = ink;
@@ -163,35 +194,35 @@ export class ScreenSurface {
     ctx.textAlign = "left";
     ctx.fillText("9:41", W * 0.083, y);
     // battery
-    const bw = W * 0.034, bh = W * 0.016, bx = W * 0.915 - bw, br = bh * 0.3;
+    const bw = unit * 0.034, bh = unit * 0.016, bx = W * 0.915 - bw, br = bh * 0.3;
     ctx.globalAlpha = 0.4;
-    ctx.lineWidth = Math.max(1, W * 0.0012);
+    ctx.lineWidth = Math.max(1, unit * 0.0012);
     roundRect(ctx, bx, y - bh / 2, bw, bh, br); ctx.stroke();
-    ctx.beginPath(); ctx.arc(bx + bw + W * 0.003, y, bh * 0.16, -Math.PI / 2, Math.PI / 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(bx + bw + unit * 0.003, y, bh * 0.16, -Math.PI / 2, Math.PI / 2); ctx.fill();
     ctx.globalAlpha = 1;
-    const inset = W * 0.0025;
+    const inset = unit * 0.0025;
     roundRect(ctx, bx + inset, y - bh / 2 + inset, (bw - inset * 2) * 0.82, bh - inset * 2, br * 0.6); ctx.fill();
     // wifi: three arcs
-    const wx = bx - W * 0.026, wr = W * 0.014;
+    const wx = bx - unit * 0.026, wr = unit * 0.014;
     for (let i = 0; i < 3; i++) {
       ctx.beginPath();
-      ctx.lineWidth = Math.max(1, W * 0.0028);
+      ctx.lineWidth = Math.max(1, unit * 0.0028);
       ctx.arc(wx, y + wr * 0.55, wr * (0.34 + i * 0.33), Math.PI * 1.25, Math.PI * 1.75);
       ctx.stroke();
     }
-    ctx.beginPath(); ctx.arc(wx, y + wr * 0.55, W * 0.0022, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(wx, y + wr * 0.55, unit * 0.0022, 0, Math.PI * 2); ctx.fill();
     // signal: four bars
-    const sx = wx - W * 0.03, gap = W * 0.0045, barW = W * 0.0035;
+    const sx = wx - unit * 0.03, gap = unit * 0.0045, barW = unit * 0.0035;
     for (let i = 0; i < 4; i++) {
-      const h = W * (0.006 + i * 0.0032);
-      roundRect(ctx, sx + i * (barW + gap), y + W * 0.008 - h, barW, h, barW * 0.3); ctx.fill();
+      const h = unit * (0.006 + i * 0.0032);
+      roundRect(ctx, sx + i * (barW + gap), y + unit * 0.008 - h, barW, h, barW * 0.3); ctx.fill();
     }
     ctx.restore();
   }
 
   private drawChrome() {
     if (this.chrome.kind !== "browser") return;
-    const { ctx, width } = this;
+    const ctx = this.ctx, width = this.contentWidth;
     const h = this.chromeHeight;
     const dark = !!this.chrome.dark;
     ctx.fillStyle = dark ? "#1f1f22" : "#f3f3f4";
@@ -222,7 +253,7 @@ export class ScreenSurface {
 
   /** A tasteful fake app screen so the mockup looks finished before media is added. */
   private drawPlaceholder() {
-    const { ctx, width: W, height: H } = this;
+    const ctx = this.ctx, W = this.contentWidth, H = this.contentHeight;
     const top = this.chromeHeight;
     const h = H - top;
     const portrait = W < h;
@@ -250,8 +281,10 @@ export class ScreenSurface {
     const pad = u * 1.4;
     if (portrait) {
       // status bar
-      text("9:41", pad, top + u * 1.6, u * 0.78, "#fff", 600);
-      text("●●● ▲ ▮", W - pad, top + u * 1.6, u * 0.6, "#fff", 500, "right");
+      if (!this.statusBar) {
+        text("9:41", pad, top + u * 1.6, u * 0.78, "#fff", 600);
+        text("●●● ▲ ▮", W - pad, top + u * 1.6, u * 0.6, "#fff", 500, "right");
+      }
       // header
       text("Good morning", pad, top + u * 4.4, u * 0.75, "rgba(255,255,255,0.55)");
       text("Overview", pad, top + u * 5.9, u * 1.5, "#fff", 700);

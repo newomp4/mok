@@ -1,6 +1,8 @@
+import { installScreenGrid } from "@/three/screenGrid";
 import * as THREE from "three";
 import type { Finish } from "@/lib/devices";
 import { addMetalSurfaceDetail } from "@/three/surfaceDetail";
+import { addEnvironmentGain } from "@/three/environmentGain";
 
 export interface FinishMaterials {
   frame: THREE.MeshStandardMaterial;
@@ -56,7 +58,7 @@ export function createFinishMaterials(f: Finish): FinishMaterials {
   const all = { frame, back, glass, lens, lensRing, dark, band, keys };
   addMetalSurfaceDetail(frame);
   addMetalSurfaceDetail(lensRing);
-  for (const mat of Object.values(all)) mat.fog = false;
+  for (const mat of Object.values(all)) { mat.fog = false; addEnvironmentGain(mat); }
   return all;
 }
 
@@ -137,6 +139,8 @@ ${shader.fragmentShader}`
       );
   };
   m.customProgramCacheKey = () => "mok-screen-glass-v2";
+  addEnvironmentGain(m);
+  installScreenGrid(m);
   m.fog = false;
   return m;
 }
