@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { Finish } from "@/lib/devices";
+import { addMetalSurfaceDetail } from "@/three/surfaceDetail";
 
 export interface FinishMaterials {
   frame: THREE.MeshStandardMaterial;
@@ -22,9 +23,9 @@ export function createFinishMaterials(f: Finish): FinishMaterials {
   const back = new THREE.MeshPhysicalMaterial({
     color: new THREE.Color(f.back ?? f.color),
     metalness: 0.1,
-    roughness: 0.32,
-    clearcoat: 1,
-    clearcoatRoughness: 0.12,
+    roughness: 0.34,
+    clearcoat: 0.55,
+    clearcoatRoughness: 0.22,
     envMapIntensity: 1,
   });
   const glass = new THREE.MeshPhysicalMaterial({
@@ -37,9 +38,10 @@ export function createFinishMaterials(f: Finish): FinishMaterials {
   });
   const lens = new THREE.MeshPhysicalMaterial({
     color: new THREE.Color("#07070a"),
-    metalness: 0.2,
+    metalness: 0,
     roughness: 0.05,
-    clearcoat: 1,
+    ior: 1.52,
+    clearcoat: 0.35,
     clearcoatRoughness: 0.02,
     envMapIntensity: 1.4,
   });
@@ -52,6 +54,8 @@ export function createFinishMaterials(f: Finish): FinishMaterials {
   const band = new THREE.MeshStandardMaterial({ color: new THREE.Color(f.band ?? "#2a2a2c"), metalness: 0.05, roughness: 0.75 });
   const keys = new THREE.MeshStandardMaterial({ color: new THREE.Color("#1b1b1d"), metalness: 0.1, roughness: 0.6 });
   const all = { frame, back, glass, lens, lensRing, dark, band, keys };
+  addMetalSurfaceDetail(frame);
+  addMetalSurfaceDetail(lensRing);
   for (const mat of Object.values(all)) mat.fog = false;
   return all;
 }
@@ -82,6 +86,10 @@ export function createScreenMaterial(texture: THREE.Texture): ScreenMaterial {
     emissiveIntensity: 1,
     roughness: 0.08,
     metalness: 0,
+    ior: 1.5,
+    // The clear coat supplies the air/glass reflection. Keep the layer below it subtle so the
+    // display does not receive two equally bright glass highlights over the uploaded artwork.
+    specularIntensity: 0.25,
     clearcoat: 1,
     clearcoatRoughness: 0.04,
     envMapIntensity: 1,
@@ -113,22 +121,22 @@ ${shader.fragmentShader}`
       )
       .replace(
         "#include <aomap_fragment>",
-        // the mirrored render of the room, projected back onto the glass at the fragment's own
-        // screen position. It opens up towards grazing angles the way real glass does, but keeps a
-        // floor at head-on so a display seen square still shows the deck in front of it.
+        // The glass is mostly transparent head-on and reflects more at grazing angles. Projected
+        // coordinates outside the mirror camera must not clamp into streaks along the screen edge.
         `if ( reflectAmount > 0.0 && vReflectUv.w > 0.0 ) {
-        vec3 mirror = texture2DProj( reflectMap, vReflectUv ).rgb;
+        vec2 mirrorUv = vReflectUv.xy / vReflectUv.w;
+        vec2 mirrorEdge = smoothstep(vec2(0.0), vec2(0.01), mirrorUv) *
+                          smoothstep(vec2(0.0), vec2(0.01), vec2(1.0) - mirrorUv);
+        vec3 mirror = texture2D( reflectMap, mirrorUv ).rgb;
         float grazing = pow( 1.0 - saturate( dot( geometryNormal, geometryViewDir ) ), 5.0 );
-        // Glass is not a mirror: even at full Reflection the display has to stay the brighter of the
-        // two, so the mirror comes in on a curve and never takes more than a third of the surface
-        // head on, opening up towards grazing angles where a real screen does reflect the room.
-        float mirrorGain = reflectAmount * reflectAmount * mix( 0.1, 0.42, grazing );
+        float mirrorGain = pow(clamp(reflectAmount, 0.0, 1.0), 1.5) * mix(0.035, 0.55, grazing);
+        mirrorGain *= mirrorEdge.x * mirrorEdge.y;
         reflectedLight.indirectSpecular += mirror * mirrorGain;
       }
       #include <aomap_fragment>`,
       );
   };
-  m.customProgramCacheKey = () => "mok-screen";
+  m.customProgramCacheKey = () => "mok-screen-glass-v2";
   m.fog = false;
   return m;
 }

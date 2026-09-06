@@ -8,12 +8,13 @@ uniform float mode;    // 0 = radial, 1 = linear (tilt shift), 2 = directional
 uniform float active;  // mask gain, 0 while the strength is zero
 uniform float uAspect;
 uniform vec2 dir;      // directional blur vector (texel units × strength)
+uniform vec2 focusNormal; // normal to the rotated tilt-shift band
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
   // the blurred copy is half resolution, so at zero strength the frame has to pass straight
   // through rather than pick up the softness of the downsample
   if (active <= 0.0) { outputColor = inputColor; return; }
   vec2 p = (uv - params.xy) * vec2(uAspect, 1.0);
-  float d = mode < 0.5 ? length(p) : (mode < 1.5 ? abs(p.y) : length(p));
+  float d = mode < 0.5 ? length(p) : (mode < 1.5 ? abs(dot(p, focusNormal)) : length(p));
   float m = smoothstep(params.z, params.z + max(params.w, 0.001), d) * active;
   vec4 b;
   if (mode > 1.5) {
@@ -46,6 +47,7 @@ export class FocusBlurEffect extends Effect {
         ["active", new THREE.Uniform(1)],
         ["uAspect", new THREE.Uniform(1)],
         ["dir", new THREE.Uniform(new THREE.Vector2(0, 0))],
+        ["focusNormal", new THREE.Uniform(new THREE.Vector2(0, 1))],
       ]),
     });
     this.renderTarget = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false });
@@ -61,6 +63,7 @@ export class FocusBlurEffect extends Effect {
     u.set(focusX, focusY, size, falloff);
     this.uniforms.get("mode")!.value = mode === "linear" ? 1 : mode === "directional" ? 2 : 0;
     const a = (angleDeg * Math.PI) / 180;
+    (this.uniforms.get("focusNormal")!.value as THREE.Vector2).set(-Math.sin(a), Math.cos(a));
     const len = (strength / 20) * 0.06;
     (this.uniforms.get("dir")!.value as THREE.Vector2).set(Math.cos(a) * len / Math.max(0.01, this.uniforms.get("uAspect")!.value as number), Math.sin(a) * len);
     const k = bokeh ? KernelSize.HUGE : KernelSize.LARGE;

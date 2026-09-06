@@ -1,12 +1,14 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useFrame, useLoader, useThree } from "@react-three/fiber";
-import { MeshReflectorMaterial } from "@react-three/drei";
+import { MeshReflectorMaterial as FloorMaterial } from "@react-three/drei/materials/MeshReflectorMaterial.js";
+import { BlurPass } from "@react-three/drei/materials/BlurPass.js";
 import { anim } from "@/three/anim";
 import { useRenderFlags } from "@/three/registry";
 import { useEditor } from "@/store/editor";
 import type { ScenePresetId } from "@/lib/types";
+import { findDisplay, readScreenPlane } from "@/three/screenPlane";
 
 /** The screen glow only lights the room, never the device: a point light next to a glossy screen
  *  would otherwise show up as a specular dot on the glass. Floors opt in to this layer. */
@@ -133,33 +135,29 @@ function ScreenGlow({ distance, intensity, height, floorY }: { distance: number;
   const light = useRef<THREE.PointLight>(null);
   const target = useMemo(() => new THREE.Color("#ffffff"), []);
   const pos = useMemo(() => new THREE.Vector3(), []);
+  const normal = useMemo(() => new THREE.Vector3(), []);
   useFrame((state, delta) => {
     const l = light.current;
     if (!l) return;
+    if (anim.card) { l.intensity = 0; return; }
     const c = anim.screenColor;
     if (c) target.setRGB(c[0], c[1], c[2]);
     const k = 1 - Math.exp(-Math.min(delta, 0.05) * 6);
     const converged = Math.abs(l.color.r - target.r) + Math.abs(l.color.g - target.g) + Math.abs(l.color.b - target.b) < 0.004;
     if (converged || anim.exporting) l.color.copy(target);
     else l.color.lerp(target, k);
-    // sit the glow off the face of the display itself; fall back to a yaw guess if it is unknown
-    const sp = anim.screenPos, sd = anim.screenDir;
-    if (sp && sd) {
-      const yaw = (anim.values?.["mockup.rotY"] ?? 0) * (Math.PI / 180);
-      const c = Math.cos(yaw), s2 = Math.sin(yaw);
-      // the device group is yawed by rotY, so rotate the published local frame to match
-      const px = sp[0] * c + sp[2] * s2, pz = -sp[0] * s2 + sp[2] * c;
-      const dx = sd[0] * c + sd[2] * s2, dz = -sd[0] * s2 + sd[2] * c;
-      // sit it in front of and below the display: the spill lands on the deck and floor rather than
-      // reflecting straight back off the glass as a hotspot
-      pos.set(px + dx * distance, sp[1] + sd[1] * distance - height, pz + dz * distance);
-      // the light lives in a group translated to the floor, so undo that offset
+    // Read the rendered screen itself so pitch, roll, a moving lid and device changes all move
+    // its light with it. The old cached frame only followed yaw and could belong to another model.
+    const device = state.scene.getObjectByName("device");
+    device?.updateWorldMatrix(true, true);
+    const display = device ? findDisplay(device) : null;
+    if (display) {
+      readScreenPlane(display, pos, normal);
+      pos.addScaledVector(normal, distance);
+      pos.y -= height;
       l.position.set(pos.x, pos.y - floorY, pos.z);
-    } else {
-      const yaw = (anim.values?.["mockup.rotY"] ?? 0) * (Math.PI / 180);
-      l.position.set(Math.sin(yaw) * distance, height, Math.cos(yaw) * distance);
     }
-    l.intensity = intensity * (anim.values?.["screen.brightness"] ?? 1);
+    l.intensity = display ? intensity * (anim.values?.["screen.brightness"] ?? 1) * anim.screenFade : 0;
     // only keep rendering while the glow is still easing toward the new screen colour
     if (!converged && !anim.exporting) state.invalidate();
   }, -18);
@@ -167,30 +165,106 @@ function ScreenGlow({ distance, intensity, height, floorY }: { distance: number;
 }
 
 /**
- * The darkroom's mirror floor. Its two 1024² render targets are allocated inside the reflector and
- * never released, so leaving and re-entering the preset used to leak another pair each time. It is
- * mounted the first time the darkroom is used and hidden after that, rather than torn down.
+ * Own the reflector's buffers so leaving the darkroom stops its render pass and releases them.
+ * Drei's component restores its parent's visibility every frame, even when mounted hidden.
  */
-function MirrorFloor({ active, size }: { active: boolean; size: number }) {
-  const [ever, setEver] = useState(active);
-  useEffect(() => { if (active) setEver(true); }, [active]);
-  if (!ever) return null;
+function MirrorFloor({ size }: { size: number }) {
+  const gl = useThree((s) => s.gl);
+  const mesh = useRef<THREE.Mesh>(null);
+  const buffers = useMemo(() => {
+    const resolution = 1024;
+    const options = { type: THREE.HalfFloatType, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter };
+    const raw = new THREE.WebGLRenderTarget(resolution, resolution, options);
+    raw.depthTexture = new THREE.DepthTexture(resolution, resolution, THREE.UnsignedShortType);
+    const blurred = new THREE.WebGLRenderTarget(resolution, resolution, { ...options, depthBuffer: false });
+    const blur = new BlurPass({ gl, resolution, width: 300, height: 90, minDepthThreshold: 0.4, maxDepthThreshold: 1.35, depthScale: 1.1 });
+    const matrix = new THREE.Matrix4();
+    const material = new FloorMaterial();
+    material.color.set("#0a0a0c");
+    material.roughness = 0.85;
+    material.metalness = 0.35;
+    material.mirror = 0.6;
+    material.mixBlur = 1;
+    material.mixStrength = 34;
+    material.depthScale = 1.1;
+    material.minDepthThreshold = 0.4;
+    material.maxDepthThreshold = 1.35;
+    material.hasBlur = true;
+    material.tDiffuse = raw.texture;
+    material.tDepth = raw.depthTexture;
+    material.tDiffuseBlur = blurred.texture;
+    material.textureMatrix = matrix;
+    material.defines = { ...material.defines, USE_BLUR: "", USE_DEPTH: "" };
+    return { raw, blurred, blur, material, matrix };
+  }, [gl]);
+  useEffect(() => () => {
+    buffers.raw.dispose(); buffers.blurred.dispose();
+    buffers.blur.renderTargetA.dispose(); buffers.blur.renderTargetB.dispose();
+    buffers.blur.convolutionMaterial.dispose(); buffers.blur.screen.geometry.dispose();
+    buffers.material.dispose();
+  }, [buffers]);
+  const rig = useMemo(() => ({
+    camera: new THREE.PerspectiveCamera(), center: new THREE.Vector3(), eye: new THREE.Vector3(),
+    view: new THREE.Vector3(), look: new THREE.Vector3(), target: new THREE.Vector3(),
+    normal: new THREE.Vector3(), rotation: new THREE.Matrix4(), normalMatrix: new THREE.Matrix3(),
+    plane: new THREE.Plane(), clip: new THREE.Vector4(), q: new THREE.Vector4(), hidden: [] as THREE.Object3D[],
+  }), []);
+  useFrame((state) => {
+    const floor = mesh.current;
+    if (!floor || anim.card) return;
+    floor.updateWorldMatrix(true, false);
+    const camera = state.camera;
+    camera.updateWorldMatrix(true, false);
+    const r = rig, virtual = r.camera;
+    r.center.setFromMatrixPosition(floor.matrixWorld);
+    r.eye.setFromMatrixPosition(camera.matrixWorld);
+    r.normal.set(0, 0, 1).applyNormalMatrix(r.normalMatrix.getNormalMatrix(floor.matrixWorld));
+    r.view.subVectors(r.center, r.eye);
+    if (r.view.dot(r.normal) >= -1e-4) return;
+    virtual.position.copy(r.view.reflect(r.normal).negate().add(r.center));
+    r.rotation.extractRotation(camera.matrixWorld);
+    r.look.set(0, 0, -1).applyMatrix4(r.rotation).add(r.eye);
+    r.target.subVectors(r.center, r.look).reflect(r.normal).negate().add(r.center);
+    virtual.up.set(0, 1, 0).applyMatrix4(r.rotation).reflect(r.normal);
+    virtual.lookAt(r.target);
+    virtual.near = camera.near; virtual.far = camera.far;
+    virtual.layers.mask = camera.layers.mask;
+    virtual.updateMatrixWorld();
+    virtual.projectionMatrix.copy(camera.projectionMatrix);
+    buffers.matrix.set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1)
+      .multiply(virtual.projectionMatrix).multiply(virtual.matrixWorldInverse).multiply(floor.matrixWorld);
+    r.plane.setFromNormalAndCoplanarPoint(r.normal, r.center).applyMatrix4(virtual.matrixWorldInverse);
+    r.clip.set(r.plane.normal.x, r.plane.normal.y, r.plane.normal.z, r.plane.constant);
+    const p = virtual.projectionMatrix.elements;
+    r.q.set((Math.sign(r.clip.x) + p[8]) / p[0], (Math.sign(r.clip.y) + p[9]) / p[5], -1, (1 + p[10]) / p[14]);
+    const denominator = r.clip.dot(r.q);
+    if (Math.abs(denominator) < 1e-6) return;
+    r.clip.multiplyScalar(2 / denominator);
+    p[2] = r.clip.x; p[6] = r.clip.y; p[10] = r.clip.z + 1; p[14] = r.clip.w;
+    virtual.projectionMatrixInverse.copy(virtual.projectionMatrix).invert();
+    const previousTarget = gl.getRenderTarget(), previousXr = gl.xr.enabled, previousShadows = gl.shadowMap.autoUpdate;
+    floor.visible = false;
+    for (const child of camera.children) if (child.visible) { child.visible = false; r.hidden.push(child); }
+    try {
+      gl.xr.enabled = false;
+      gl.shadowMap.autoUpdate = false;
+      gl.setRenderTarget(buffers.raw);
+      gl.clear();
+      gl.render(state.scene, virtual);
+      buffers.blur.render(gl, buffers.raw, buffers.blurred);
+    } finally {
+      gl.setRenderTarget(previousTarget);
+      gl.xr.enabled = previousXr;
+      gl.shadowMap.autoUpdate = previousShadows;
+      floor.visible = true;
+      for (const child of r.hidden) child.visible = true;
+      r.hidden.length = 0;
+    }
+  }, 0.6);
   return (
-    <mesh ref={litByGlow} rotation={[-Math.PI / 2, 0, 0]} receiveShadow visible={active}>
+    <mesh ref={(m) => { mesh.current = m; litByGlow(m); }} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
       <planeGeometry args={[size, size]} />
-      <MeshReflectorMaterial
-        blur={[300, 90]}
-        resolution={1024}
-        mixBlur={1}
-        mixStrength={34}
-        depthScale={1.1}
-        minDepthThreshold={0.4}
-        maxDepthThreshold={1.35}
-        roughness={0.85}
-        color="#0a0a0c"
-        metalness={0.35}
-        mirror={0.6}
-      />
+      <primitive object={buffers.material} attach="material" />
     </mesh>
   );
 }
@@ -241,7 +315,7 @@ export function EnvScene({ preset, floorY, fitSize, backdrop }: { preset: SceneP
           <hemisphereLight intensity={0.26} color="#8fa0bd" groundColor="#332f2a" />
         </>
       )}
-      <MirrorFloor active={preset === "darkroom" && !noRoom} size={f * 30} />
+      {preset === "darkroom" && !noRoom && <MirrorFloor size={f * 30} />}
       {preset === "darkroom" && (
         // black mirror floor, one cool rim, and the screen lighting its own surroundings
         <>

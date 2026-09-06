@@ -20,6 +20,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored WebAssembly loader from the Basis transcoder, not application source.
+    "public/basis/**",
   ]),
 ]);
 

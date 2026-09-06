@@ -21,7 +21,7 @@ function ExportProgress() {
           <span className="num text-[11px] text-muted">{Math.round(exporting.progress * 100)}%</span>
         </div>
         <ProgressBar value={exporting.progress} />
-        <p className="text-[11px] leading-relaxed text-muted">Keep this tab visible while exporting. Rendering happens in your browser, nothing is uploaded.</p>
+        <p className="text-[11px] leading-relaxed text-muted">Rendering on your device. You can switch tabs; keep the editor open until your download is ready.</p>
         {exporting.cancel && (
           <div className="flex justify-end">
             <Button variant="soft" onClick={exporting.cancel}>Cancel</Button>

@@ -631,14 +631,26 @@ function DevicePicker() {
   const setPicker = useUI((s) => s.setPicker);
   const shot = useRenderShot();
   const [forShot, setForShot] = useState(!!shot?.device);
+  const [query, setQuery] = useState("");
   const current = shot?.device ?? projectDevice;
   const families = useMemo(() => {
     const out = new Map<DeviceFamily | DeviceBrand, typeof DEVICES>();
-    for (const d of DEVICES) if (!d.hidden) { const g = deviceGroup(d); out.set(g, [...(out.get(g) ?? []), d]); }
+    const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    for (const d of DEVICES) {
+      if (d.hidden) continue;
+      const g = deviceGroup(d);
+      const searchable = `${d.name} ${d.family} ${FAMILY_LABELS[g]}`.toLowerCase();
+      if (terms.every((term) => searchable.includes(term))) out.set(g, [...(out.get(g) ?? []), d]);
+    }
     return out;
-  }, []);
+  }, [query]);
   return (
     <Section title="Mockup" right={<Button variant="ghost" size="sm" icon="arrow-left" onClick={() => setPicker(null)}>Back</Button>}>
+      <div className="flex h-9 items-center gap-2 rounded-md border border-line bg-panel-2 px-2 focus-within:border-accent">
+        <Icon name="search" size={13} className="shrink-0 text-muted" />
+        <input autoFocus aria-label="Search mockups" placeholder="Search mockups…" value={query} onChange={(e) => setQuery(e.target.value)} className="label min-w-0 flex-1 bg-transparent text-fg outline-none placeholder:text-muted" />
+        {query && <IconButton icon="x" size={11} label="Clear search" onClick={() => setQuery("")} className="h-5 w-5 shrink-0" />}
+      </div>
       {shot && (
         <Segmented
           size="sm"
@@ -652,6 +664,7 @@ function DevicePicker() {
           options={[{ value: "project", label: "Whole project" }, { value: "shot", label: shot.name }]}
         />
       )}
+      {families.size === 0 && <div className="px-2 py-5 text-center text-[11px] leading-relaxed text-muted">No mockups match “{query}”. Try a device name or “phone”, “tablet” or “laptop”.</div>}
       {[...families.entries()].map(([family, list]) => (
         <div key={family} className="flex flex-col gap-1.5">
           <div className="label-sm pt-1 text-muted">{FAMILY_LABELS[family]}</div>
@@ -855,6 +868,7 @@ const BLUR_MODES: { value: BlurMode; label: string }[] = [
 
 function BlurSection() {
   const blur = useEditor((s) => s.project.blur);
+  const focusDistance = useAnimRow("blur.focusDistance");
   const update = useEditor((s) => s.update);
   const [open, setOpen] = useState(true);
   const renderShot = useRenderShot();
@@ -878,8 +892,8 @@ function BlurSection() {
       <AnimRow prop="blur.strength" label="Strength" min={0} max={20} step={0.1} disabled={off} />
       {mode === "depth" && (
         <>
-          <Segmented size="sm" value={(blur.focusDistance ?? 0) > 0 ? "manual" : "auto"} onChange={(v) => update((p) => { p.blur.focusDistance = v === "auto" ? 0 : Math.max(0.1, anim.focusDist); })} options={[{ value: "auto", label: "Auto focus", icon: "focus-auto" }, { value: "manual", label: "Manual", icon: "focus-lock" }]} />
-          {(blur.focusDistance ?? 0) > 0 && <AnimRow prop="blur.focusDistance" label="Focus distance" min={0.1} max={40} step={0.05} />}
+          <Segmented size="sm" value={focusDistance.value > 0 ? "manual" : "auto"} onChange={(v) => focusDistance.onChange(v === "auto" ? 0 : Math.max(0.1, anim.focusDist))} options={[{ value: "auto", label: "Auto focus", icon: "focus-auto" }, { value: "manual", label: "Manual", icon: "focus-lock" }]} />
+          {focusDistance.value > 0 && <AnimRow prop="blur.focusDistance" label="Focus distance" min={0.1} max={40} step={0.05} />}
         </>
       )}
       <AnimRow prop="blur.focusSize" label={mode === "depth" ? "Focus range" : "Focus size"} min={0} max={1.5} step={0.01} disabled={off} />

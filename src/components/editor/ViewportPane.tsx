@@ -15,11 +15,13 @@ import { useActiveShot } from "@/three/Device";
 import { AutoMotionOverlay } from "./AutoMotion";
 import { pickFiles } from "./hooks";
 import { anim } from "@/three/anim";
-import { locate, sampleTrack } from "@/lib/animation";
+import { locate, sampleTrack, shotBase } from "@/lib/animation";
 import { useShallow } from "zustand/react/shallow";
 import { ACCEPTED_TYPES } from "@/lib/media";
 import { shotKind } from "@/lib/defaults";
 import { getDevice } from "@/lib/devices";
+import { Button, IconButton } from "@/components/ui";
+import { StudioLooks } from "./StudioLooks";
 
 // the wheel zooms in as far as the inspector's Zoom row does, so the two never disagree, and keeps
 // its own generous reach on the way out
@@ -79,12 +81,12 @@ function UploadHint() {
   const shot = useActiveShot();
   const dragging = useUI((s) => s.dragging);
   const toast = useUI((s) => s.toast);
-  const device = useEditor((s) => s.project.mockup.device);
+  const device = useShotView().device;
   const setDevice = useEditor((s) => s.setDevice);
   if (shot?.media || dragging || toast || shotKind(shot) !== "media") return null;
   return (
-    <div className="pointer-events-auto absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 flex-col items-center gap-2">
-      <div className="flex items-center gap-1 rounded-full bg-black/85 p-1 shadow-lg backdrop-blur">
+    <div className="pointer-events-auto absolute bottom-4 left-1/2 z-10 flex max-w-[calc(100%-24px)] -translate-x-1/2 items-center gap-2 rounded-xl border border-white/15 bg-black/80 p-1.5 text-white shadow-lg backdrop-blur-xl">
+      <div className="hidden items-center gap-0.5 border-r border-white/15 pr-2 xl:flex">
         {STARTER_DEVICES.map((id) => {
           const spec = getDevice(id);
           return (
@@ -100,15 +102,19 @@ function UploadHint() {
           );
         })}
       </div>
-      <div className="flex items-center gap-3 rounded-full bg-black/85 py-1.5 pl-4 pr-1.5 text-[12px] text-white shadow-lg backdrop-blur">
-        <span>Pick a mockup, then upload media — or paste / drop.</span>
-        <button type="button" onClick={() => void pickFiles(ACCEPTED_TYPES, true).then((f) => importFilesToShot(f))} className="label rounded-full bg-white px-3 py-1.5 text-black">Upload</button>
+      <div className="flex items-center gap-3 pl-2 text-[11px]">
+        <span className="whitespace-nowrap">Drop your screen here</span>
+        <button type="button" onClick={() => void pickFiles(ACCEPTED_TYPES, true).then((f) => importFilesToShot(f))} className="label rounded-lg bg-white px-3 py-2 text-black">Upload</button>
       </div>
     </div>
   );
 }
 
 export function ViewportPane() {
+  const view = useShotView();
+  const guides = useUI((s) => s.guides);
+  const timelineOpen = useUI((s) => s.timelineOpen);
+  const active = useActiveShot();
   const aspect = useEditor((s) => s.project.aspect);
   const bgType = useEditor((s) => s.project.scene.background.type);
   const scenePreset = useEditor((s) => s.project.scene.preset);
@@ -270,9 +276,24 @@ export function ViewportPane() {
   const transparent = previewAlpha || (scenePreset === "custom" && bgType === "transparent");
 
   return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-line bg-panel">
+      <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-line px-3">
+        <div className="flex min-w-0 items-center gap-2 text-fg-2">
+          <Icon name={shotKind(active) === "media" ? getDevice(view.device).icon : "image"} size={13} />
+          <span className="label truncate">{shotKind(active) === "media" ? getDevice(view.device).name : active?.name}</span>
+          <span className="label-sm hidden text-muted sm:inline">/ {active?.name ?? "Preview"}</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <StudioLooks />
+          <div className="mx-1 h-4 w-px bg-line" />
+          <IconButton icon="align-center" label="Center framing" onClick={() => useEditor.getState().setValues({ "camera.panX": 0, "camera.panY": 0 })} />
+          <IconButton icon="grid" label="Composition guides" active={guides} aria-pressed={guides} onClick={() => useUI.getState().setGuides(!guides)} />
+          {!timelineOpen && <Button variant="ghost" icon="timeline" onClick={() => useUI.getState().setTimelineOpen(true)}>Timeline</Button>}
+        </div>
+      </div>
     <div
       ref={containerRef}
-      className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-xl border border-line bg-panel-2"
+      className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-panel-2"
       data-tour="viewport"
       onDragOver={(e) => { e.preventDefault(); if (!dragging) setDragging(true); }}
       onDragLeave={(e) => { if (e.currentTarget === e.target) { setDragging(false); setDropZone(null); } }}
@@ -322,6 +343,7 @@ export function ViewportPane() {
         <Hint>Drag · orbit</Hint><Hint>Scroll · zoom</Hint><Hint>Space + drag · pan</Hint>
       </div>
     </div>
+    </div>
   );
 }
 
@@ -339,9 +361,8 @@ function FocusMarker() {
   const v = useEditor(useShallow((s) => {
     const loc = locate(s.project, time);
     const at = (prop: "blur.focusX" | "blur.focusY" | "blur.focusSize" | "blur.falloff" | "blur.angle") => {
-      const [, k] = prop.split(".") as [string, keyof typeof s.project.blur];
       const track = loc.shot?.keyframes[prop];
-      return track?.length ? sampleTrack(track, loc.localT) : (s.project.blur[k] as number);
+      return track?.length ? sampleTrack(track, loc.localT) : shotBase(s.project, loc.shot, prop);
     };
     return { x: at("blur.focusX"), y: at("blur.focusY"), size: at("blur.focusSize"), falloff: at("blur.falloff"), angle: at("blur.angle") };
   }));
@@ -357,7 +378,8 @@ function FocusMarker() {
       // to watch the tracks of the shot under the playhead as well or they never appear for it
       const shot = locate(s.project, useUI.getState().time).shot;
       const tracks = BLUR_PROPS.map((k) => shot?.keyframes[k]?.map((x) => `${x.t}:${x.v}`).join(",") ?? "").join("|");
-      return `${b.mode}|${b.strength}|${b.focusX}|${b.focusY}|${b.focusSize}|${b.falloff}|${b.angle ?? 0}|${b.focusDistance ?? 0}|${b.bokeh}|${tracks}`;
+      const pose = BLUR_PROPS.map((k) => shot?.pose?.[k] ?? "").join("|");
+      return `${shot?.blurMode ?? b.mode}|${b.strength}|${b.focusX}|${b.focusY}|${b.focusSize}|${b.falloff}|${b.angle ?? 0}|${b.focusDistance ?? 0}|${shot?.bokeh ?? b.bokeh}|${tracks}|${pose}`;
     }, show);
     const onKey = (e: KeyboardEvent) => { if (e.key === "Alt") setVisible(true); };
     const onKeyUp = (e: KeyboardEvent) => { if (e.key === "Alt") show(); };
@@ -365,30 +387,22 @@ function FocusMarker() {
     document.addEventListener("keyup", onKeyUp);
     return () => { unsub(); document.removeEventListener("keydown", onKey); document.removeEventListener("keyup", onKeyUp); if (timer) window.clearTimeout(timer); };
   }, []);
+  const viewport = useUI((s) => s.viewport);
   if (mode === "off" || !visible) return null;
-  const cx = v.x * 100, cy = v.y * 100;
-  // the shader measures distance with x scaled by the aspect, so the guide is a circle in y units
+  // SVG units follow viewport height, exactly like the shader's aspect-corrected focus mask.
+  const width = 100 * viewport.w / Math.max(1, viewport.h);
+  const cx = v.x * width, cy = v.y * 100;
   const r1 = v.size * 100, r2 = (v.size + v.falloff) * 100;
   const line = (offset: number, dashed: boolean) => (
-    <div key={`${offset}${dashed}`} className="absolute inset-x-[-20%] border-t" style={{ top: `${cy + offset}%`, borderColor: dashed ? "rgba(255,255,255,0.55)" : "rgba(255,255,255,0.9)", borderStyle: dashed ? "dashed" : "solid", transform: mode === "directional" ? `rotate(${-v.angle}deg)` : undefined, transformOrigin: `${cx}% 50%` }} />
+    <line key={`${offset}${dashed}`} x1={-width * 2} x2={width * 3} y1={cy + offset} y2={cy + offset} strokeOpacity={dashed ? 0.5 : 0.9} strokeDasharray={dashed ? "4 4" : undefined} vectorEffect="non-scaling-stroke" />
   );
   return (
-    <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden mix-blend-difference">
-      {mode === "radial" || mode === "depth" ? (
-        <>
-          {mode === "radial" && [r1, r2].map((r, i) => (
-            <div key={i} className="absolute rounded-full border" style={{ left: `${cx}%`, top: `${cy}%`, width: `${r * 2}%`, aspectRatio: "1", transform: "translate(-50%, -50%)", borderColor: i ? "rgba(255,255,255,0.5)" : "rgba(255,255,255,0.85)", borderStyle: i ? "dashed" : "solid" }} />
-          ))}
-          <div className="absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/90" style={{ left: `${cx}%`, top: `${cy}%` }}>
-            <div className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" />
-          </div>
-        </>
-      ) : mode === "linear" ? (
-        [line(-r1, false), line(r1, false), line(-r2, true), line(r2, true)]
-      ) : (
-        [line(0, false), line(-r2 / 2, true), line(r2 / 2, true)]
-      )}
-    </div>
+    <svg aria-hidden="true" viewBox={`0 0 ${width} 100`} className="pointer-events-none absolute inset-0 z-10 h-full w-full overflow-hidden mix-blend-difference" fill="none" stroke="white" strokeWidth={1}>
+      {(mode === "radial" || mode === "directional") && [r1, r2].map((r, i) => <circle key={i} cx={cx} cy={cy} r={r} strokeOpacity={i ? 0.5 : 0.9} strokeDasharray={i ? "4 4" : undefined} vectorEffect="non-scaling-stroke" />)}
+      {mode === "linear" && <g transform={`rotate(${-v.angle} ${cx} ${cy})`}>{[line(-r1, false), line(r1, false), line(-r2, true), line(r2, true)]}</g>}
+      {mode === "directional" && <path d={`M ${cx - 8} ${cy} h 16 m -3 -2 l 3 2 l -3 2`} transform={`rotate(${-v.angle} ${cx} ${cy})`} vectorEffect="non-scaling-stroke" />}
+      <circle cx={cx} cy={cy} r={1} vectorEffect="non-scaling-stroke" />
+    </svg>
   );
 }
 
@@ -400,6 +414,7 @@ function Guides() {
     <div className="pointer-events-none absolute inset-0 z-10 mix-blend-difference">
       <div className="absolute inset-y-0 left-1/2 w-px bg-white/70" />
       <div className="absolute inset-x-0 top-1/2 h-px bg-white/70" />
+      {[1 / 3, 2 / 3].map((at) => <div key={at} className="absolute inset-0"><div className="absolute inset-y-0 w-px bg-white/25" style={{ left: `${at * 100}%` }} /><div className="absolute inset-x-0 h-px bg-white/25" style={{ top: `${at * 100}%` }} /></div>)}
     </div>
   );
 }

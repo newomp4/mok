@@ -90,19 +90,26 @@ export function PostFX() {
       // the right vector is part of the pose too: rolling the camera leaves its position and its
       // view direction alone, but an off-centre focus point then lands somewhere else entirely
       const m = cam.matrixWorld.elements;
-      const key = `${v["blur.focusX"].toFixed(2)}|${v["blur.focusY"].toFixed(2)}|${m[12].toFixed(2)},${m[13].toFixed(2)},${m[14].toFixed(2)},${m[8].toFixed(2)},${m[9].toFixed(2)},${m[10].toFixed(2)},${m[0].toFixed(2)},${m[1].toFixed(2)},${m[2].toFixed(2)}`;
-      if (focusRayWait.current > 0) focusRayWait.current--;
-      if (key !== lastFocusKey.current) {
+      const device = scene.getObjectByName("device");
+      device?.updateWorldMatrix(true, true);
+      const pose = [...(device?.matrixWorld.elements ?? []), v["mockup.lid"], v["camera.fov"]].map((x) => x.toFixed(3)).join(",");
+      const key = `${view.device}|${pose}|${v["blur.focusX"].toFixed(2)}|${v["blur.focusY"].toFixed(2)}|${m[12].toFixed(2)},${m[13].toFixed(2)},${m[14].toFixed(2)},${m[8].toFixed(2)},${m[9].toFixed(2)},${m[10].toFixed(2)},${m[0].toFixed(2)},${m[1].toFixed(2)},${m[2].toFixed(2)}`;
+      if (anim.exporting) focusRayWait.current = 0;
+      else if (focusRayWait.current > 0) focusRayWait.current--;
+      if (anim.exporting || key !== lastFocusKey.current) {
         if (focusRayWait.current > 0) state.invalidate(); // come back for the cast being skipped
         else {
           lastFocusKey.current = key;
           focusRayWait.current = anim.exporting ? 0 : 4;
           focusNdc.set(v["blur.focusX"] * 2 - 1, 1 - v["blur.focusY"] * 2);
           raycaster.setFromCamera(focusNdc, cam);
-          const device = scene.getObjectByName("device");
           const hits = focusHits.current;
           if (device) raycaster.intersectObject(device, true, hits);
-          const hit = hits.find((h) => h.object.visible);
+          const hit = hits.find((h) => {
+            let object: THREE.Object3D | null = h.object;
+            while (object) { if (!object.visible) return false; object = object.parent; }
+            return true;
+          });
           focusTarget.current = hit ? hit.distance : anim.camDist;
           hits.length = 0; // the intersections hold scene objects; do not keep them alive between casts
         }
@@ -188,8 +195,8 @@ export function PostFX() {
       {sharpenOn ? <primitive object={sharpen} /> : <></>}
       {ghostOn ? <primitive object={ghost} /> : <></>}
       {liquidOn ? <primitive object={liquid} /> : <></>}
-      <ToneMapping mode={ToneMappingMode.NEUTRAL} />
       {bloomOn ? <Bloom mipmapBlur intensity={param("bloom", "intensity")} luminanceThreshold={param("bloom", "threshold")} radius={param("bloom", "radius")} levels={6} /> : <></>}
+      <ToneMapping mode={ToneMappingMode.NEUTRAL} />
       {glassOn ? <primitive object={glass} /> : <></>}
       {grainOn ? <Noise premultiply blendFunction={BlendFunction.SCREEN} opacity={param("grain", "amount") * 0.9} /> : <></>}
       {vignetteOn ? <Vignette darkness={param("vignette", "darkness")} offset={param("vignette", "offset")} eskil={false} /> : <></>}

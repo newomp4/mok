@@ -129,6 +129,9 @@ export function Device({ layout }: { layout: DeviceLayout }) {
   useFrame((state, delta) => {
     const v = anim.values;
     if (!v || !group.current) return;
+    const pixels = layout.spec.family === "flat" && layout.flat ? layout.flat.px : layout.spec.screenPx;
+    const exportEdge = Math.min(state.gl.capabilities.maxTextureSize, Math.max(state.size.width, state.size.height));
+    surface.setSize(pixels[0], pixels[1], anim.exporting ? exportEdge : 2560, anim.exporting);
     // the shot under the playhead decides what the screen shows (exports step through shots without React)
     const cur = anim.shot;
     group.current.visible = !anim.card;
@@ -144,11 +147,6 @@ export function Device({ layout }: { layout: DeviceLayout }) {
     // lit scenes take their screen glow from what is actually on the display, and scrubbing the
     // timeline moves through the video just as much as playing it does
     const liveScreen = shotMedia?.kind === "video";
-    // an export steps frame by frame, so re-sample every frame there or the room keeps the first frame's light
-    if (scenePreset !== "custom" && (liveScreen || anim.exporting || lastSample.current < 0)) {
-      lastSample.current = state.clock.elapsedTime;
-      anim.screenColor = surface.averageColor();
-    }
     const target: [number, number, number] = [v["mockup.rotX"] + (standing ? -layout.lean : 0), v["mockup.rotY"], v["mockup.rotZ"]];
     const exact = anim.exporting || useUI.getState().playing;
     if (exact || !smoothRot.current) smoothRot.current = target;
@@ -180,6 +178,11 @@ export function Device({ layout }: { layout: DeviceLayout }) {
         if (!anim.exporting && Math.abs(vid.currentTime - t) > 0.04) vid.currentTime = t;
       }
       surface.draw();
+    }
+    // Sample after the current video frame is painted, including seeks and screen fades.
+    if (scenePreset !== "custom" && (liveScreen || anim.exporting || lastSample.current < 0)) {
+      lastSample.current = state.clock.elapsedTime;
+      anim.screenColor = surface.averageColor();
     }
   }, -20);
 

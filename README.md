@@ -10,6 +10,13 @@ rendering and encoding happens locally with WebGL and WebCodecs.
 
 ## Features
 
+- **Studio looks**: Softbox, Daylight, Midnight and Warm paper coordinate the lighting, backdrop,
+  shadows and surface reflections while preserving source media, framing, lens settings and relative
+  light animation. Open **Studio looks** above the viewport; one Undo restores the previous set.
+- **Calibrated surfaces**: subtle brushed detail on untextured metals, material-aware body gloss,
+  angle-dependent glass reflections from the actual screen plane, and bloom before tone mapping.
+  New projects start sharp with restrained reflections. Device search and composition controls live
+  alongside the existing editor tools.
 - **10 photoreal device models** (CC-BY glTF from Sketchfab, credits in `CREDITS.md`): iPhone 17 Pro
   (Silver, Cosmic Orange, Deep Blue), 17 Pro Max, 16 Pro Max, iPad Pro 13" on Magic Keyboard (Silver or
   Space Black, case included), MacBook Pro 14" / 16" (Silver or Space Black), Apple Watch Ultra 2 (Natural or
@@ -89,6 +96,10 @@ Open http://localhost:3000. Production build: `pnpm build && pnpm start`. Deploy
 - **Speed** — the scene only re-renders on demand (state changes, playback, export), textures are
   uploaded at native screen resolution once, HDRIs are 1k and pre-filtered with PMREM, and MSAA runs
   inside the post-processing composer.
+- **Screen resolution** — preview screen canvases use up to 2560 pixels on the long edge. Exports
+  increase this to match the output, bounded by a 4096-pixel edge, 12 megapixels and the GPU texture
+  limit. This improves display detail in large captures; it cannot recover detail absent from the
+  uploaded image. Darkroom reflection buffers are released when the scene is closed.
 - **Video** — every frame is rendered deterministically at the requested time, optionally
   super-sampled in time for motion blur, and pushed through `VideoEncoder` with
   [mediabunny](https://github.com/Vanilagy/mediabunny) muxing into MP4 or WebM.
@@ -139,6 +150,8 @@ node scripts/use-central-icons.mjs --revert                       # back to the 
 ## Development
 
 - `pnpm dev` — dev server · `pnpm typecheck` · `pnpm lint`
+- `pnpm test` — regression checks for templates, per-shot focus, studio looks and screen geometry
+  (Node 22.15+ or 24; uses the existing TypeScript compiler, no extra test dependency).
 - `scripts/qa-shot.mjs out.png "<js>"` — headless screenshot of the editor for visual QA
   (needs Playwright's Chromium; `window.__mok` exposes the stores, actions and export API in the page)
 - `scripts/optimize-model.sh in.glb out.glb` — compress a glTF for the web

@@ -10,6 +10,7 @@ import type { DeviceSpec, Finish } from "@/lib/devices";
 import { S } from "@/three/geometry";
 import { useModelBounds, viewport, type ModelFeatures, useShownDevice } from "@/three/registry";
 import { useEditor } from "@/store/editor";
+import { addMetalSurfaceDetail } from "@/three/surfaceDetail";
 
 let ktx2: KTX2Loader | null = null;
 
@@ -607,30 +608,46 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
         if (!t) {
           t = std.clone();
           t.userData.baseRoughness = std.roughness;
+          t.userData.baseEnvIntensity = std.envMapIntensity;
           t.userData.baseColor = "color" in std ? std.color.clone() : null;
-          // photogrammetry-style normal maps are high-frequency noise; without mip filtering they
-          // alias into sparkles under a bright HDRI, so filter them properly and tame the strength
+          // Filter detail at grazing angles without requesting generated mip levels from KTX2
+          // textures. Compressed textures carry their own chain; a single-level asset must use
+          // linear sampling, otherwise WebGL can treat the texture as incomplete.
           for (const map of [t.normalMap, t.map, t.roughnessMap, t.metalnessMap, t.aoMap]) {
             if (!map) continue;
-            map.anisotropy = maxAniso;
-            map.minFilter = THREE.LinearMipmapLinearFilter;
-            map.magFilter = THREE.LinearFilter;
-            map.generateMipmaps = true;
-            map.needsUpdate = true;
+            const compressed = (map as THREE.CompressedTexture).isCompressedTexture;
+            const canMip = !compressed || map.mipmaps.length > 1;
+            const minFilter = canMip ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
+            const generateMipmaps = !compressed && map.mipmaps.length === 0;
+            if (map.anisotropy !== maxAniso || map.minFilter !== minFilter ||
+                map.magFilter !== THREE.LinearFilter || map.generateMipmaps !== generateMipmaps) {
+              map.anisotropy = maxAniso;
+              map.minFilter = minFilter;
+              map.magFilter = THREE.LinearFilter;
+              map.generateMipmaps = generateMipmaps;
+              map.needsUpdate = true;
+            }
           }
           if (t.normalMap) t.normalScale = t.normalScale.clone().multiplyScalar(0.65);
+          addMetalSurfaceDetail(t);
           cache.set(x, t);
         }
         const baseColor = t.userData.baseColor as THREE.Color | null;
         if (tintable) t.color.set(finish.color);
         else if (baseColor && "color" in t) t.color.copy(baseColor);
         if ("envMapIntensity" in t) {
-          t.envMapIntensity = gloss;
           const base = t.userData.baseRoughness as number;
-          // gloss polishes the surface a little, never to a mirror: a noisy normal map on a near-mirror
-          // surface is what produces speckle, so keep a floor when one is present
-          const polished = base * Math.max(0.7, 1.08 - gloss * 0.12);
-          t.roughness = Math.max(t.normalMap ? 0.22 : 0.05, Math.min(1, polished));
+          const metal = t.metalness >= 0.45;
+          const coated = (t as THREE.MeshPhysicalMaterial).clearcoat > 0;
+          const glass = !metal && base < 0.14;
+          const polishable = metal || coated || glass;
+          // Body gloss controls reflective finishes. Keys, antenna strips and rubber retain their
+          // authored roughness instead of becoming plastic-looking versions of the metal body.
+          const envGain = polishable ? gloss : 1 + (gloss - 1) * 0.2;
+          t.envMapIntensity = (t.userData.baseEnvIntensity as number) * envGain;
+          const polished = base * (polishable ? Math.max(0.76, 1 - (gloss - 1) * 0.12) : 1);
+          const floor = t.normalMap && metal ? Math.min(base, 0.22) : Math.min(base, 0.025);
+          t.roughness = Math.max(floor, Math.min(1, polished));
         }
         t.fog = false;
         return t;

@@ -42,13 +42,18 @@ export class ScreenSurface {
     this.texture.flipY = true;
   }
 
-  setSize(w: number, h: number) {
-    const max = 2560;
-    const scale = Math.min(1, max / Math.max(w, h));
-    const nw = Math.round(w * scale), nh = Math.round(h * scale);
+  setSize(w: number, h: number, maxEdge = 2560, upscale = false) {
+    // Preview stays economical. Export can use a larger raster for source images and browser
+    // chrome, with both edge and area limits so an 8K export cannot allocate a huge screen canvas.
+    const max = Math.max(1, Math.min(4096, maxEdge));
+    const edgeScale = max / Math.max(1, w, h);
+    const scale = Math.min(upscale ? edgeScale : Math.min(1, edgeScale), Math.sqrt(12_000_000 / Math.max(1, w * h)));
+    const nw = Math.max(1, Math.floor(w * scale)), nh = Math.max(1, Math.floor(h * scale));
     if (nw === this.width && nh === this.height) return;
     this.width = nw; this.height = nh;
     this.canvas.width = nw; this.canvas.height = nh;
+    this.ctx.imageSmoothingEnabled = true;
+    this.ctx.imageSmoothingQuality = "high";
     // GPU storage is immutable once allocated: drop it and attach a fresh Source so
     // three re-allocates at the new size (dispose alone keeps the cached source version)
     this.texture.dispose();
@@ -355,8 +360,8 @@ export class ScreenSurface {
     let r = 0, g = 0, b = 0;
     for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
     const n = (d.length / 4) * 255;
-    // sRGB -> linear, then lift so a dark screen still tints rather than going black
-    const lin = (v: number) => Math.pow(Math.max(0.04, v / n), 2.2);
+    // A black display emits no light. Match three's sRGB conversion instead of lifting blacks.
+    const lin = (v: number) => { const x = v / n; return x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); };
     return [lin(r), lin(g), lin(b)];
   }
 

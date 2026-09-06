@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.7.0";
+export const APP_VERSION = "0.8.0";
 
 export interface ChangelogEntry {
   version: string;
@@ -8,6 +8,19 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.8.0",
+    date: "Sep 6, 2026",
+    title: "Better light, sharper screens and a calmer workspace",
+    items: [
+      "Studio looks pairs lighting, background, shadows and surface settings in one click. Choose Softbox, Daylight, Midnight or Warm paper from the viewport toolbar; your media, framing and lens stay in place.",
+      "New projects open with a sharp lens, softer reflections and balanced studio lighting. Untextured metal has subtle brushed detail, while rubber, keys and textured finishes retain their material character.",
+      "Glass reflections follow the actual display plane, including tilted screens and moving laptop lids. Screen glow follows the device and fades with the display; bloom retains bright highlights before tone mapping.",
+      "Export screen detail now scales with the output up to a 4096-pixel edge and 12-megapixel surface budget. The darkroom mirror stops rendering and releases its buffers when you leave the scene.",
+      "Search the device picker by name or family. Center the framing and toggle composition guides directly above the viewport. Blur guides now match the shot, canvas aspect and tilt-shift angle.",
+      "Templates reliably replace previous shot overrides. Manual focus stays on its shot, and transparent export previews follow the active format and Image / Video tab.",
+    ],
+  },
   {
     version: "0.7.0",
     date: "Sep 4, 2026",

@@ -4,6 +4,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { anim } from "@/three/anim";
 import type { ScreenMaterial } from "@/three/materials";
+import { readScreenPlane } from "@/three/screenPlane";
 
 /** Seen through glass at a fraction of a frame's brightness, the mirror needs nothing like full resolution. */
 const SCALE = 0.6;
@@ -104,13 +105,7 @@ export function ScreenReflection({ material, amount }: { material: ScreenMateria
       if (span > best) { best = span; panel = m; }
     }
 
-    // the panel is a flat slab: its thinnest axis is the direction the display faces
-    const box = panel.geometry.boundingBox!;
-    box.getCenter(v.localCenter);
-    box.getSize(v.localSize);
-    const flat = v.localSize.x <= v.localSize.y && v.localSize.x <= v.localSize.z ? 0 : v.localSize.y <= v.localSize.z ? 1 : 2;
-    v.normal.set(flat === 0 ? 1 : 0, flat === 1 ? 1 : 0, flat === 2 ? 1 : 0).transformDirection(panel.matrixWorld);
-    v.center.copy(v.localCenter).applyMatrix4(panel.matrixWorld);
+    readScreenPlane(panel, v.center, v.normal);
 
     v.camPos.setFromMatrixPosition(camera.matrixWorld);
     v.view.subVectors(v.center, v.camPos);
@@ -128,6 +123,8 @@ export function ScreenReflection({ material, amount }: { material: ScreenMateria
     cam.up.set(0, 1, 0).applyMatrix4(v.rot).reflect(v.normal);
     cam.lookAt(v.aim);
     cam.layers.mask = camera.layers.mask;
+    cam.near = camera.near;
+    cam.far = camera.far;
     cam.updateMatrixWorld();
     cam.projectionMatrix.copy(camera.projectionMatrix);
 
@@ -156,15 +153,15 @@ export function ScreenReflection({ material, amount }: { material: ScreenMateria
 
     const gl = state.gl;
     const prev = gl.getRenderTarget();
-    // The backdrop is a flat colour or a screen-space card, not geometry: reflecting it would paint
-    // the whole buffer one shade and cost contrast for no mirror. The shadow maps were rendered for
-    // this frame already, so the mirror pass reuses them rather than drawing them a second time.
+    // ContactShadows has already refreshed this frame's shadow maps at priority 0. Reuse them
+    // here, before the composer at priority 1, without paying for another shadow-map render.
     const bg = state.scene.background;
     const autoShadow = gl.shadowMap.autoUpdate;
     try {
       state.scene.background = null;
       gl.shadowMap.autoUpdate = false;
       gl.setRenderTarget(target);
+      gl.clear();
       gl.render(state.scene, cam);
     } finally {
       // whatever happens in there, the display and the card layers have to come back
@@ -175,7 +172,7 @@ export function ScreenReflection({ material, amount }: { material: ScreenMateria
       hide.length = 0;
     }
     u.amount.value = amount;
-  }, -8);
+  }, 0.5);
 
   return null;
 }

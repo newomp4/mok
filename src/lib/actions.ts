@@ -24,7 +24,7 @@ export function applyCameraPreset(id: string) {
 
 export function resetCamera() {
   useEditor.getState().update((p) => {
-    p.camera = { x: -22, y: -18, z: 0, fov: 24, zoom: 1.12, panX: 0.02, panY: -0.02 };
+    p.camera = { ...createProject().camera };
     p.mockup.rotX = 0; p.mockup.rotY = 0; p.mockup.rotZ = 0;
     const isCamera = (k: AnimProp) => k.startsWith("camera.") || k === "mockup.rotX" || k === "mockup.rotY" || k === "mockup.rotZ";
     for (const s of p.shots) {
@@ -94,7 +94,7 @@ export function applyTemplate(id: string) {
     p.scene.background = { ...s.background, ...(t.background ?? {}) };
     p.camera = { ...t.camera };
     if (t.aspect) p.aspect = t.aspect;
-    p.blur = { ...p.blur, mode: "off", ...(t.blur ?? {}) };
+    p.blur = { ...createProject().blur, mode: "off", ...(t.blur ?? {}) };
     p.effects = t.effects ? t.effects.map((e) => ({ ...e, params: { ...e.params } })) : [];
     p.fade = t.fade ? { ...t.fade } : { in: 0, out: 0, color: "#000000" };
     if (t.sequence) {
@@ -123,7 +123,20 @@ export function applyTemplate(id: string) {
       // plain templates work on media shots only; card shots from a previous template are dropped
       p.shots = p.shots.filter((sh) => shotKind(sh) === "media");
       if (!p.shots.length) p.shots = [createShot("Shot 1", 3), createShot("Shot 2", 3)];
-      for (const shot of p.shots) { shot.keyframes = {}; shot.transitionOut = undefined; }
+      for (const shot of p.shots) {
+        shot.keyframes = {};
+        delete shot.transitionOut;
+        // A template replaces the look as well as the animation. Otherwise a shot's earlier
+        // framing, device or lens silently takes precedence over the template we just applied.
+        delete shot.pose;
+        delete shot.device;
+        delete shot.finish;
+        delete shot.scene;
+        delete shot.lighting;
+        delete shot.blurMode;
+        delete shot.bokeh;
+        delete shot.notch;
+      }
     }
   });
   const first = useEditor.getState().project.shots[0]?.id ?? null;

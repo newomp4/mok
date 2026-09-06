@@ -24,17 +24,19 @@ export function CaptureButton() {
 }
 
 /** The viewport previews the transparent frame while the menu is open, and goes back when it closes. */
-function useAlphaPreview(open: boolean) {
+function useAlphaPreview(open: boolean, transparent: boolean) {
+  const exporting = useUI((s) => s.exporting !== null);
   useEffect(() => {
-    if (!open) useRenderFlags.getState().setTransparent(false);
-  }, [open]);
+    // Once capture starts it owns these flags until its frame has been rendered.
+    if (!exporting) useRenderFlags.getState().setTransparent(open && transparent);
+  }, [open, transparent, exporting]);
   useEffect(() => () => useRenderFlags.getState().setTransparent(false), []);
 }
 
 export function ExportButton() {
   const [open, setOpen] = useState(false);
-  useAlphaPreview(open);
   const [tab, setTab] = useState<"image" | "video">("image");
+  useAlphaPreview(open, tab === "image" ? imageState.transparent && imageState.format !== "jpg" : videoState.transparent);
   const ref = useRef<HTMLButtonElement>(null);
   const [, force] = useState(0);
   const rerender = () => force((n) => n + 1);
@@ -122,7 +124,7 @@ export function ExportButton() {
               options={[{ value: "png", label: "PNG — best quality" }, { value: "webp", label: "WebP — small + sharp" }, { value: "jpg", label: "JPG — smallest file" }]}
             />
             {/* JPEG has no alpha channel, so asking for transparency picks the format that does */}
-            <ToggleRow label="Transparent background" checked={imageState.transparent} onChange={(v) => { imageState.transparent = v; if (v && imageState.format === "jpg") imageState.format = "png"; useRenderFlags.getState().setTransparent(v); rerender(); }} />
+            <ToggleRow label="Transparent background" checked={imageState.transparent} onChange={(v) => { imageState.transparent = v; if (v && imageState.format === "jpg") imageState.format = "png"; rerender(); }} />
             <Label>Orientation</Label>
             <Segmented size="sm" value={fixed ? fixedOrientation : imageState.orientation} onChange={(v) => { imageState.orientation = v; rerender(); }} options={orientationOptions.map((o) => ({ ...o, disabled: fixed && o.value !== fixedOrientation }))} />
             <Label>Size</Label>

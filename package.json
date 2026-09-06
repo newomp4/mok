@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test scripts/test-editor.mjs"
   },
   "dependencies": {
     "@central-icons-react/round-outlined-radius-2-stroke-1.5": "1.1.317",

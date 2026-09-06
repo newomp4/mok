@@ -46,18 +46,18 @@ export function createProject(): Project {
     aspect: "fill",
     scene: {
       preset: "custom",
-      lighting: "default",
+      lighting: "soft",
       lightRotX: 0,
-      lightRotY: 263,
-      lightIntensity: 1,
+      lightRotY: 200,
+      lightIntensity: 0.85,
       contactShadow: true,
       shadowSoft: 0.5,
       shadowOpacity: 0.5,
-      background: { type: "preset", color: "#f2f2f2", preset: "whisp", image: null, blur: 0.85 },
+      background: { type: "preset", color: "#f2f2f2", preset: "paper", image: null, blur: 0.6 },
     },
-    mockup: { device: "iphone-17-pro-glb", finish: "model", reflection: 0.99, gloss: 1.4, borderRadius: 0.04, rotX: 0, rotY: 8, rotZ: 0, lid: 110, notch: true, caseKeyboard: true, bandColor: null },
-    camera: { x: -22, y: -18, z: 0, fov: 24, zoom: 1.12, panX: 0.02, panY: -0.02 },
-    blur: { mode: "radial", strength: 6, focusSize: 0.42, falloff: 0.4, bokeh: true, focusX: 0.5, focusY: 0.4, focusDistance: 0, angle: 0 },
+    mockup: { device: "iphone-17-pro-glb", finish: "model", reflection: 0.35, gloss: 1, borderRadius: 0.04, rotX: 0, rotY: 0, rotZ: 0, lid: 110, notch: true, caseKeyboard: true, bandColor: null },
+    camera: { x: -22, y: 12, z: -3, fov: 30, zoom: 0.92, panX: 0, panY: 0 },
+    blur: { mode: "off", strength: 6, focusSize: 0.42, falloff: 0.4, bokeh: true, focusX: 0.5, focusY: 0.5, focusDistance: 0, angle: 0 },
     screen: { brightness: 1, bg: { type: "color", color: "#000000", image: null }, statusBar: false },
     effects: [],
     shots: [createShot("Shot 1", 3), createShot("Shot 2", 3)],
@@ -99,4 +99,3 @@ export function normalizeProject(p: Project): Project {
   }
   return p;
 }
-
