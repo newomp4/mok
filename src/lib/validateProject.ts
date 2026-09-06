@@ -76,6 +76,7 @@ export function validateProject(value: unknown, defaults: Project): Project {
   }
   p.screen = fields(src.screen, defaults.screen);
   p.screen.brightness = num(p.screen.brightness, 1, 0, 10);
+  p.screen.spill = num(p.screen.spill, 1, 0, 2);
   p.screen.bg = fields(object(src.screen).bg, { type: "color" as const, color: "#000000", image: null, preset: "whisp" });
   p.screen.bg.type = choice(object(object(src.screen).bg).type, ["color", "image", "gradient"], "color");
   p.screen.bg.image = validateMediaRef(object(object(src.screen).bg).image);

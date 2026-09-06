@@ -336,6 +336,38 @@ await assert.rejects(withExportSession({ width: 100, height: 80, transparent: fa
 finishSession(); await running;
 assert.equal(useRenderFlags.getState().exporting, false, 'successful capture restores preview buffer quality');
 
+// The source texture is updated imperatively, but flat geometry and per-shot effects settle in React.
+const boundary = createProject();
+boundary.mockup.device = 'flat'; boundary.shots = [createShot('Tall', 2), createShot('Wide', 2)];
+boundary.shots[0].media = { ...original.ref, width: 300, height: 600 };
+boundary.shots[1].media = { ...original.ref, width: 600, height: 300 };
+boundary.shots[1].fit = 'contain';
+useEditor.getState().replaceProject(boundary);
+useUI.setState({ time: 0.25, playing: false });
+const originalRaf = globalThis.requestAnimationFrame, originalAdvance = state.advance;
+let settledShot = boundary.shots[0].id, boundaryFrames = 0;
+globalThis.requestAnimationFrame = (fn) => originalRaf(() => {
+  settledShot = locate(useEditor.getState().project, useUI.getState().time).shot.id;
+  boundaryFrames++; fn();
+});
+const renderedClocks = [];
+state.advance = (clock) => {
+  assert.equal(settledShot, locate(useEditor.getState().project, useUI.getState().time).shot.id, 'first frame at a same-device cut must wait for current-shot geometry/effects');
+  renderedClocks.push(clock);
+};
+try {
+  await withExportSession({ width: 100, height: 80, transparent: false }, async ({ renderAt }) => {
+    await renderAt(0.25, 0.25);
+    const beforeCut = boundaryFrames;
+    await renderAt(2.25, 2);
+    assert.ok(boundaryFrames > beforeCut, 'same-device shot boundaries must settle before the first captured frame');
+    const afterCut = boundaryFrames;
+    await renderAt(2.35, 2);
+    assert.equal(boundaryFrames, afterCut, 'motion-blur samples inside one shot do not add asset waits');
+  });
+  assert.deepEqual(renderedClocks, [0.25, 2, 2], 'intra-frame samples share the frame clock while sampling distinct timeline times');
+} finally { globalThis.requestAnimationFrame = originalRaf; state.advance = originalAdvance; }
+
 const trimmed = createProject();
 trimmed.shots = [createShot('Visible', 3), createShot('Outside endpoint', 3)];
 trimmed.shots[1].media = { ...originalRef, id: 'missing-outside-export' };

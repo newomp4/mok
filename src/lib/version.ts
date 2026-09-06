@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.8.1";
+export const APP_VERSION = "0.9.0";
 
 export interface ChangelogEntry {
   version: string;
@@ -8,6 +8,17 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.9.0",
+    date: "Sep 6, 2026",
+    title: "The screen lights its own keyboard",
+    items: [
+      "MacBook displays now cast image-colored light onto the keys and soft, view-dependent reflections across the deck. The effect follows the screen image, video, brightness, fades and lid motion in every scene. Adjust Screen lighting under Mockup to change its strength or turn it off.",
+      "Contact shadows clear between frames and exclude transition overlays. Transparent captures exclude ground shadows, and offscreen reflection passes restore rendering state after every pass.",
+      "MacBook lids keep their authored rotation and close above the keyboard instead of sinking through the base. Rough screen reflections fade smoothly at their edges and stay within the display's light budget at narrow lid angles.",
+      "Exports settle each shot's geometry and effects before capturing its first frame. Autofocus and lens-effect bounds refresh when device orientation changes.",
+    ],
+  },
   {
     version: "0.8.1",
     date: "Sep 6, 2026",

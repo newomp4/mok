@@ -8,6 +8,9 @@ import { contourProfile, sweepRoundedRect } from "@/three/sweep";
 import type { FinishMaterials } from "@/three/materials";
 import { useOwnedResources } from "@/three/resources";
 import { anim } from "@/three/anim";
+import { createScreenReceiver, installScreenSpill, updateScreenReceiver } from "@/three/screenSpill";
+import { addMetalSurfaceDetail } from "@/three/surfaceDetail";
+import { addEnvironmentGain } from "@/three/environmentGain";
 
 const DEG = Math.PI / 180;
 
@@ -21,13 +24,13 @@ const ROWS: { h: number; keys: number[] }[] = [
   { h: 1, keys: [1, 1, 1, 1.3, 5.6, 1.3, 1, 1, 1] },
 ];
 
-function Keyboard({ width, mats }: { width: number; mats: FinishMaterials }) {
+function Keyboard({ width, material }: { width: number; material: THREE.MeshStandardMaterial }) {
   const inst = useMemo(() => {
     const u = width / 14.55;
     const gap = 0.12 * u;
     const geo = sweepRoundedRect(1, 1, 0.09, [{ o: -0.06, z: 1 }, { o: 0, z: 0.94 }, { o: 0, z: 0 }], { cornerSegments: 5 });
     const total = ROWS.reduce((a, r) => a + r.keys.length, 0);
-    const m = new THREE.InstancedMesh(geo, mats.keys, total);
+    const m = new THREE.InstancedMesh(geo, material, total);
     const o = new THREE.Object3D();
     let i = 0;
     let z = 0;
@@ -48,8 +51,9 @@ function Keyboard({ width, mats }: { width: number; mats: FinishMaterials }) {
     }
     m.instanceMatrix.needsUpdate = true;
     m.castShadow = true;
+    m.receiveShadow = true;
     return { mesh: m, height: z, u };
-  }, [width, mats.keys]);
+  }, [width, material]);
   useEffect(() => () => { inst.mesh.dispose(); inst.mesh.geometry.dispose(); }, [inst]);
   return <primitive object={inst.mesh} position={[0, 0, -(inst.height / 2) * S]} />;
 }
@@ -82,6 +86,20 @@ export function LaptopModel({ spec, mats, screen, notch = true }: { spec: Device
   const lidH = depth - 3;
   const [sw, sh] = spec.screenMm;
   const air = spec.id.includes("air");
+  const frame = useMemo(() => new THREE.Group(), []);
+  const top = baseT * S;
+  const receiver = useMemo(() => createScreenReceiver(frame, 0, 0), [frame]);
+  useEffect(() => { receiver.height.value.set(top - 1.5 * S, top + 2 * S); }, [receiver, top]);
+  const receiving = useMemo(() => {
+    // The shared finish is also used on the lid: clone only the base and keys, preserving its hooks.
+    const deck = mats.frame.clone(), keys = mats.keys.clone();
+    for (const material of [deck, keys]) {
+      addMetalSurfaceDetail(material); addEnvironmentGain(material); installScreenSpill(material, receiver);
+    }
+    return { deck, keys };
+  }, [mats.frame, mats.keys, receiver]);
+  useOwnedResources(receiving);
+  useFrame(() => updateScreenReceiver(receiver), -17);
   const geos = useMemo(() => {
     const base = sweepRoundedRect(w * S, depth * S, r * S, contourProfile(baseT * S, 1.1 * S, Math.min(3.2, baseT * 0.4) * S, 6), { cornerSegments: 14 });
     base.rotateX(-Math.PI / 2);
@@ -112,25 +130,27 @@ export function LaptopModel({ spec, mats, screen, notch = true }: { spec: Device
   const notchMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#050506", roughness: 0.4 }), []);
   const feetMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#1c1c1c", roughness: 0.9 }), []);
   const grilleMat = useGrilleMaterial();
+  useMemo(() => {
+    for (const material of [wellMat, trackMat, grilleMat]) installScreenSpill(material, receiver);
+  }, [wellMat, trackMat, grilleMat, receiver]);
   useOwnedResources(useMemo(() => ({ wellMat, trackMat, notchMat, feetMat }), [wellMat, trackMat, notchMat, feetMat]));
   const lidRef = useRef<THREE.Group>(null);
   useFrame(() => { if (lidRef.current) lidRef.current.rotation.x = -((anim.values?.["mockup.lid"] ?? lid.angle) - 90) * DEG; }, -25);
-  const top = baseT * S;
   const kbZ = -depth * 0.5 + 14 + geos.kbH / 2; // keyboard centre from base centre (mm)
   const screenY = (lidH - lid.screenTop - sh / 2) * S;
   const notchTopY = (lidH - lid.screenTop + 0.3) * S;
   return (
-    <group>
-      <mesh geometry={geos.base} material={mats.frame} position={[0, top / 2, 0]} castShadow receiveShadow />
+    <primitive object={frame}>
+      <mesh geometry={geos.base} material={receiving.deck} position={[0, top / 2, 0]} castShadow receiveShadow />
       {/* keyboard well, keys, grilles, trackpad */}
-      <mesh geometry={geos.well} material={wellMat} position={[0, top + 0.08 * S, kbZ * S]} />
+      <mesh geometry={geos.well} material={wellMat} position={[0, top + 0.08 * S, kbZ * S]} receiveShadow />
       <group position={[0, top + 0.3 * S, kbZ * S]}>
-        <Keyboard width={geos.kbW} mats={mats} />
+        <Keyboard width={geos.kbW} material={receiving.keys} />
       </group>
       {!air && [1, -1].map((sx) => (
-        <mesh key={sx} geometry={geos.grille} material={grilleMat} position={[sx * (w / 2 - ((w - geos.kbW) / 2 - 12) / 2 - 8) * S, top + 0.25 * S, kbZ * S]} />
+        <mesh key={sx} geometry={geos.grille} material={grilleMat} position={[sx * (w / 2 - ((w - geos.kbW) / 2 - 12) / 2 - 8) * S, top + 0.25 * S, kbZ * S]} receiveShadow />
       ))}
-      <mesh geometry={geos.trackpad} material={trackMat} position={[0, top + 0.2 * S, (depth / 2 - 12 - geos.trackH / 2) * S]} />
+      <mesh geometry={geos.trackpad} material={trackMat} position={[0, top + 0.2 * S, (depth / 2 - 12 - geos.trackH / 2) * S]} receiveShadow />
       <mesh geometry={geos.lip} material={wellMat} position={[0, top - 1.2 * S, (depth / 2) * S + 0.02 * S]} />
       {[-1, 1].map((sx) => [-1, 1].map((sz) => (
         <mesh key={`${sx}${sz}`} geometry={geos.feet} material={feetMat} position={[sx * w * 0.43 * S, 0.4 * S, sz * depth * 0.42 * S]} />
@@ -142,6 +162,6 @@ export function LaptopModel({ spec, mats, screen, notch = true }: { spec: Device
         <mesh geometry={geos.scr} material={screen} position={[0, screenY, (lid.thickness / 2) * S + 0.32 * S]} />
         {notch && geos.notch && <mesh geometry={geos.notch} material={notchMat} position={[0, notchTopY, (lid.thickness / 2) * S + 0.55 * S]} />}
       </group>
-    </group>
+    </primitive>
   );
 }

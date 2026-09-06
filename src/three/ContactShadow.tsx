@@ -6,6 +6,8 @@ import { HorizontalBlurShader } from "three/examples/jsm/shaders/HorizontalBlurS
 import { VerticalBlurShader } from "three/examples/jsm/shaders/VerticalBlurShader.js";
 import { anim } from "@/three/anim";
 import { disposeResources } from "@/three/resources";
+import { isEffectivelyVisible, withHiddenObjects, withOffscreenPass } from "@/three/renderPass";
+import { useRenderFlags } from "@/three/registry";
 
 /** Same depth/blur construction as Drei ContactShadows, with explicit ownership on resize. */
 export function createContactShadowResources(size: number, resolution: number) {
@@ -28,51 +30,56 @@ export function createContactShadowResources(size: number, resolution: number) {
   return { target, blurred, geometry, depth, horizontal, vertical, plane, catcher };
 }
 
+/** Render only the model's depth; camera-mounted cards/fades never cast a contact shadow. */
+export function renderContactShadow(gl: THREE.WebGLRenderer, scene: THREE.Scene, mainCamera: THREE.Camera, shadow: THREE.Object3D, camera: THREE.OrthographicCamera, resources: ReturnType<typeof createContactShadowResources>, blur: number): void {
+  if (!isEffectivelyVisible(shadow)) return;
+  const background = scene.background, override = scene.overrideMaterial;
+  const { target, blurred, depth, plane, horizontal, vertical } = resources;
+  withHiddenObjects([shadow, ...mainCamera.children], () => {
+    try {
+      scene.background = null;
+      scene.overrideMaterial = depth;
+      withOffscreenPass(gl, () => {
+        gl.setRenderTarget(target);
+        gl.render(scene, camera);
+        const soften = (amount: number) => {
+          plane.material = horizontal;
+          horizontal.uniforms.tDiffuse.value = target.texture;
+          horizontal.uniforms.h.value = amount / 256;
+          gl.setRenderTarget(blurred);
+          gl.render(plane, camera);
+          plane.material = vertical;
+          vertical.uniforms.tDiffuse.value = blurred.texture;
+          vertical.uniforms.v.value = amount / 256;
+          gl.setRenderTarget(target);
+          gl.render(plane, camera);
+        };
+        soften(blur);
+        soften(blur * 0.4);
+      }, true);
+    } finally {
+      scene.background = background;
+      scene.overrideMaterial = override;
+    }
+  });
+}
+
 export function ContactShadow({ position, scale, blur, opacity, far, resolution }: {
   position: [number, number, number]; scale: number; blur: number; opacity: number; far: number; resolution: number;
 }) {
   const group = useRef<THREE.Group>(null);
   const camera = useRef<THREE.OrthographicCamera>(null);
+  const transparent = useRenderFlags((s) => s.transparent);
   const resources = useMemo(() => createContactShadowResources(scale, resolution), [scale, resolution]);
   useEffect(() => () => disposeResources(resources), [resources]);
   useEffect(() => { resources.catcher.opacity = opacity; }, [resources, opacity]);
-  useFrame(({ gl, scene }) => {
+  useFrame(({ gl, scene, camera: mainCamera }) => {
     const shadow = group.current, cam = camera.current;
-    if (!shadow || !cam || anim.card) return;
-    for (let parent: THREE.Object3D | null = shadow; parent; parent = parent.parent) if (!parent.visible) return;
-    const previousTarget = gl.getRenderTarget();
-    const previousBackground = scene.background, previousOverride = scene.overrideMaterial;
-    const { target, blurred, depth, plane, horizontal, vertical } = resources;
-    shadow.visible = false;
-    try {
-      scene.background = null;
-      scene.overrideMaterial = depth;
-      gl.setRenderTarget(target);
-      gl.render(scene, cam);
-      const soften = (amount: number) => {
-        plane.material = horizontal;
-        horizontal.uniforms.tDiffuse.value = target.texture;
-        // Drei's blur radius is specified in UV units, so its appearance stays the same at 2K.
-        horizontal.uniforms.h.value = amount / 256;
-        gl.setRenderTarget(blurred);
-        gl.render(plane, cam);
-        plane.material = vertical;
-        vertical.uniforms.tDiffuse.value = blurred.texture;
-        vertical.uniforms.v.value = amount / 256;
-        gl.setRenderTarget(target);
-        gl.render(plane, cam);
-      };
-      soften(blur);
-      soften(blur * 0.4);
-    } finally {
-      gl.setRenderTarget(previousTarget);
-      scene.background = previousBackground;
-      scene.overrideMaterial = previousOverride;
-      shadow.visible = true;
-    }
+    if (!shadow || !cam || anim.card || transparent) return;
+    renderContactShadow(gl, scene, mainCamera, shadow, cam, resources, blur);
   });
   return (
-    <group ref={group} rotation-x={Math.PI / 2} position={position} dispose={null}>
+    <group ref={group} visible={!transparent} rotation-x={Math.PI / 2} position={position} dispose={null}>
       <mesh geometry={resources.geometry} material={resources.catcher} scale={[1, -1, 1]} rotation={[-Math.PI / 2, 0, 0]} />
       <orthographicCamera ref={camera} args={[-scale / 2, scale / 2, scale / 2, -scale / 2, 0, far]} />
     </group>

@@ -12,6 +12,7 @@ import { findDisplay, readScreenPlane } from "@/three/screenPlane";
 import { addScreenGlow, screenGlow } from "@/three/screenGlow";
 import { addEnvironmentGain } from "@/three/environmentGain";
 import { resizeShadowMap, useRenderQuality } from "@/three/renderQuality";
+import { clipReflectionCamera, isEffectivelyVisible, withHiddenObjects, withOffscreenPass } from "@/three/renderPass";
 
 /**
  * A transparent export asks for the device on an empty frame. The lights still belong there, but
@@ -208,11 +209,11 @@ function MirrorFloor({ size }: { size: number }) {
     camera: new THREE.PerspectiveCamera(), center: new THREE.Vector3(), eye: new THREE.Vector3(),
     view: new THREE.Vector3(), look: new THREE.Vector3(), target: new THREE.Vector3(),
     normal: new THREE.Vector3(), rotation: new THREE.Matrix4(), normalMatrix: new THREE.Matrix3(),
-    plane: new THREE.Plane(), clip: new THREE.Vector4(), q: new THREE.Vector4(), hidden: [] as THREE.Object3D[],
+    plane: new THREE.Plane(),
   }), []);
   useFrame((state) => {
     const floor = mesh.current;
-    if (!floor || anim.card) return;
+    if (!floor || anim.card || !isEffectivelyVisible(floor)) return;
     floor.updateWorldMatrix(true, false);
     const camera = state.camera;
     camera.updateWorldMatrix(true, false);
@@ -235,32 +236,12 @@ function MirrorFloor({ size }: { size: number }) {
     buffers.matrix.set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1)
       .multiply(virtual.projectionMatrix).multiply(virtual.matrixWorldInverse).multiply(floor.matrixWorld);
     r.plane.setFromNormalAndCoplanarPoint(r.normal, r.center).applyMatrix4(virtual.matrixWorldInverse);
-    r.clip.set(r.plane.normal.x, r.plane.normal.y, r.plane.normal.z, r.plane.constant);
-    const p = virtual.projectionMatrix.elements;
-    r.q.set((Math.sign(r.clip.x) + p[8]) / p[0], (Math.sign(r.clip.y) + p[9]) / p[5], -1, (1 + p[10]) / p[14]);
-    const denominator = r.clip.dot(r.q);
-    if (Math.abs(denominator) < 1e-6) return;
-    r.clip.multiplyScalar(2 / denominator);
-    p[2] = r.clip.x; p[6] = r.clip.y; p[10] = r.clip.z + 1; p[14] = r.clip.w;
-    virtual.projectionMatrixInverse.copy(virtual.projectionMatrix).invert();
-    const previousTarget = gl.getRenderTarget(), previousXr = gl.xr.enabled, previousShadows = gl.shadowMap.autoUpdate;
-    floor.visible = false;
-    for (const child of camera.children) if (child.visible) { child.visible = false; r.hidden.push(child); }
-    try {
-      gl.xr.enabled = false;
-      gl.shadowMap.autoUpdate = false;
+    if (!clipReflectionCamera(virtual, r.plane)) return;
+    withHiddenObjects([floor, ...camera.children], () => withOffscreenPass(gl, () => {
       gl.setRenderTarget(buffers.raw);
-      gl.clear();
       gl.render(state.scene, virtual);
       buffers.blur.render(gl, buffers.raw, buffers.blurred);
-    } finally {
-      gl.setRenderTarget(previousTarget);
-      gl.xr.enabled = previousXr;
-      gl.shadowMap.autoUpdate = previousShadows;
-      floor.visible = true;
-      for (const child of r.hidden) child.visible = true;
-      r.hidden.length = 0;
-    }
+    }));
   }, 0.6);
   return (
     <mesh ref={mesh} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>

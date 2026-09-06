@@ -12,6 +12,8 @@ import { visibleBounds } from "@/three/bounds";
 import { EFFECT_MERGE_MODE, FocusBlurEffect, GhostEffect, GlassBorderEffect, LiquidGlassEffect, SharpenEffect, createLensDistortion } from "./effects";
 import { getEffectDef } from "@/lib/presets";
 import { CARD_Z } from "@/three/CardLayer";
+import { getDevice } from "@/lib/devices";
+import { effectiveKeyboardCase } from "@/lib/orientation";
 
 export function PostFX() {
   const view = useShotView();
@@ -19,8 +21,9 @@ export function PostFX() {
   const bokeh = view.bokeh;
   const effects = useEditor((s) => s.project.effects);
   const borderRadius = useEditor((s) => s.project.mockup.borderRadius);
-  const caseKeyboard = useEditor((s) => s.project.mockup.caseKeyboard ?? true);
+  const casePreference = useEditor((s) => s.project.mockup.caseKeyboard ?? true);
   const shownDevice = useShownDevice((s) => s.id);
+  const caseKeyboard = effectiveKeyboardCase(getDevice(shownDevice ?? view.device), view.orientation, casePreference);
   const composerRef = useRef<EffectComposerImpl>(null);
 
   const focus = useMemo(() => new FocusBlurEffect(), []);
@@ -97,7 +100,7 @@ export function PostFX() {
       const device = scene.getObjectByName("device");
       device?.updateWorldMatrix(true, true);
       const pose = [...(device?.matrixWorld.elements ?? []), v["mockup.lid"], v["camera.fov"]].map((x) => x.toFixed(3)).join(",");
-      const key = `${view.device}|${shownDevice}|${caseKeyboard}|${view.notch}|${pose}|${v["blur.focusX"].toFixed(2)}|${v["blur.focusY"].toFixed(2)}|${m[12].toFixed(2)},${m[13].toFixed(2)},${m[14].toFixed(2)},${m[8].toFixed(2)},${m[9].toFixed(2)},${m[10].toFixed(2)},${m[0].toFixed(2)},${m[1].toFixed(2)},${m[2].toFixed(2)}`;
+      const key = `${view.device}|${shownDevice}|${view.orientation}|${caseKeyboard}|${view.notch}|${pose}|${v["blur.focusX"].toFixed(2)}|${v["blur.focusY"].toFixed(2)}|${m[12].toFixed(2)},${m[13].toFixed(2)},${m[14].toFixed(2)},${m[8].toFixed(2)},${m[9].toFixed(2)},${m[10].toFixed(2)},${m[0].toFixed(2)},${m[1].toFixed(2)},${m[2].toFixed(2)}`;
       if (anim.exporting) focusRayWait.current = 0;
       else if (focusRayWait.current > 0) focusRayWait.current--;
       if (anim.exporting || key !== lastFocusKey.current) {
@@ -152,7 +155,7 @@ export function PostFX() {
         // measured once in the device's own frame and then carried by its matrix: traversing every
         // mesh each frame is what the autofocus raycast above is throttled to avoid, and the
         // oriented box also hugs a rotated mockup far more closely than a world one
-        const key = `${view.device}|${shownDevice}|${v["mockup.lid"]}|${caseKeyboard}|${view.notch}|${anim.shot?.media?.id}|${anim.shot?.media?.width}|${anim.shot?.media?.height}`;
+        const key = `${view.device}|${shownDevice}|${view.orientation}|${v["mockup.lid"]}|${caseKeyboard}|${view.notch}|${anim.shot?.media?.id}|${anim.shot?.media?.width}|${anim.shot?.media?.height}`;
         if (coverFor.current !== device || coverKey.current !== key) {
           coverFor.current = device;
           coverKey.current = key;

@@ -27,6 +27,8 @@ import { resolveShotView, type ShotView } from "@/lib/shotView";
 import { orientationFitSize, orientationQuarterTurn, orientedBounds, orientedScreenPixels, supportsOrientation } from "@/lib/orientation";
 import { Suspense } from "react";
 import type { Project } from "@/lib/types";
+import { findDisplay } from "@/three/screenPlane";
+import { screenSpill, updateScreenSpill } from "@/three/screenSpill";
 
 const DEG = Math.PI / 180;
 
@@ -146,6 +148,7 @@ export function Device({ layout }: { layout: DeviceLayout }) {
 
   const group = useRef<THREE.Group>(null);
   const orientationGroup = useRef<THREE.Group>(null);
+  useEffect(() => () => { screenSpill.strength.value = 0; screenSpill.map.value = null; }, []);
   const standing = scenePreset !== "custom" && !spec.model && (spec.family === "phone" || spec.family === "tablet");
   const smoothRot = useRef<[number, number, number] | null>(null);
 
@@ -218,6 +221,12 @@ export function Device({ layout }: { layout: DeviceLayout }) {
       lastSample.current = state.clock.elapsedTime;
       anim.screenColor = surface.averageColor();
     }
+    // Exact live geometry/image for every preview and export sample. The texture remains owned by
+    // ScreenSurface; receiving materials only borrow it and keep no additional render targets.
+    group.current.updateWorldMatrix(true, true);
+    const display = !anim.card && layout.spec.family === "laptop" ? findDisplay(group.current) : null;
+    const spill = (anim.project ?? useEditor.getState().project).screen.spill ?? 1;
+    updateScreenSpill(screenSpill, display, surface.texture, spill * screenMat.emissiveIntensity);
   }, -20);
 
   let model: React.ReactNode;

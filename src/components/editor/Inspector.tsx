@@ -619,6 +619,10 @@ function MockupSection() {
       <div className="label-sm px-0.5 pt-2 text-muted">Screen</div>
       {spec.family === "phone" && <ToggleRow label="Status bar" checked={!!screen.statusBar} onChange={(v) => update((p) => { p.screen.statusBar = v; })} hint="9:41" />}
       <AnimRow prop="screen.brightness" label="Brightness" min={0} max={2} step={0.01} />
+      {spec.family === "laptop" && <>
+        <NumberRow label="Screen lighting" value={screen.spill ?? 1} min={0} max={2} step={0.05} onChange={(v) => update((p) => { p.screen.spill = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+        <div className="label-sm px-0.5 leading-snug text-muted">The display lights the keys and reflects softly across the deck. Most visible in dim scenes; set to 0 to turn it off.</div>
+      </>}
       <SelectRow label="Screen BG" value={screen.bg?.type ?? "color"} onChange={(v) => update((p) => { p.screen.bg = { type: v, color: p.screen.bg?.color ?? "#000000", image: p.screen.bg?.image ?? null, preset: p.screen.bg?.preset ?? "whisp" }; })} options={[{ value: "color", label: "Colour" }, { value: "gradient", label: "Gradient" }, { value: "image", label: "Image" }]} />
       {(screen.bg?.type ?? "color") === "color" && (
         <ColorRow label="BG colour" value={screen.bg?.color ?? "#000000"} onChange={(v) => update((p) => { p.screen.bg = { type: "color", color: v, image: p.screen.bg?.image ?? null, preset: p.screen.bg?.preset }; })} />

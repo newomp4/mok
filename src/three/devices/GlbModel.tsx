@@ -15,6 +15,7 @@ import { visibleBounds } from "@/three/bounds";
 import { addMetalSurfaceDetail } from "@/three/surfaceDetail";
 import { addEnvironmentGain } from "@/three/environmentGain";
 import { effectiveKeyboardCase } from "@/lib/orientation";
+import { installScreenSpill, laptopReceivers, updateScreenReceiver } from "@/three/screenSpill";
 
 let ktx2: KTX2Loader | null = null;
 
@@ -214,12 +215,32 @@ export function planarizeScreenUVs(mesh: THREE.Mesh, root: THREE.Object3D, targe
  */
 
 export interface DeviceFeatures {
-  lid: { pivot: THREE.Group; natural: number } | null;
+  lid: { pivot: THREE.Group; natural: number; rest: THREE.Quaternion } | null;
   island: THREE.Mesh[];
   caseParts: THREE.Mesh[];
   /** iPad screen tilt from the camera axis (rad), undone when the case is removed */
   tilt: number;
   band: THREE.Mesh[];
+}
+
+const lidAxis = new THREE.Vector3(1, 0, 0), lidRotation = new THREE.Quaternion();
+
+/** The pivot already carries its authored tilt; animate relative to that basis, never replace it. */
+export function setLidAngle(lid: NonNullable<DeviceFeatures["lid"]>, angle: number): void {
+  const degrees = Number.isFinite(angle) ? Math.max(0, Math.min(135, angle)) : lid.natural;
+  lidRotation.setFromAxisAngle(lidAxis, (lid.natural - degrees) * Math.PI / 180).premultiply(lid.rest);
+  if (lid.pivot.quaternion.angleTo(lidRotation) > 1e-8) lid.pivot.quaternion.copy(lidRotation);
+}
+
+/** Reproject real vertices: a tilted mesh's axis-aligned box cannot locate its closing surface. */
+function vertexBounds(meshes: readonly THREE.Mesh[], inverse: THREE.Matrix4): THREE.Box3 {
+  const box = new THREE.Box3(), transform = new THREE.Matrix4(), point = new THREE.Vector3();
+  for (const mesh of meshes) {
+    transform.multiplyMatrices(inverse, mesh.matrixWorld);
+    const position = mesh.geometry.getAttribute("position");
+    for (let i = 0; i < position.count; i++) box.expandByPoint(point.fromBufferAttribute(position, i).applyMatrix4(transform));
+  }
+  return box;
 }
 
 /**
@@ -308,9 +329,14 @@ export function detectFeatures(root: THREE.Object3D, screen: THREE.Mesh | null, 
   if (spec.family === "laptop") {
     // deck top: the largest near-horizontal mesh
     let deckY = -Infinity, deckArea = 0;
+    const deckCandidates: { mesh: THREE.Mesh; box: THREE.Box3; area: number }[] = [];
     for (const m of meshes) {
-      const { size, center } = meshBox(m, inv);
-      if (size.y < H * 0.05 && size.x * size.z > deckArea) { deckArea = size.x * size.z; deckY = center.y; }
+      const { box, size, center } = meshBox(m, inv);
+      if (size.y < H * 0.05) {
+        const area = size.x * size.z;
+        deckCandidates.push({ mesh: m, box, area });
+        if (area > deckArea) { deckArea = area; deckY = center.y; }
+      }
     }
     const lid: THREE.Mesh[] = [];
     let minUp = Infinity;
@@ -327,19 +353,38 @@ export function detectFeatures(root: THREE.Object3D, screen: THREE.Mesh | null, 
     if (lid.length >= 2 && Number.isFinite(minUp)) {
       const yawGroup = root.getObjectByName("autoYaw") as THREE.Group | undefined;
       if (yawGroup) {
+        const tilt = (Math.acos(Math.max(-1, Math.min(1, up.y))) * 180) / Math.PI;
+        const natural = n.y > 0 ? 90 + tilt : 90 - tilt;
+        const hinge = sc.clone().addScaledVector(up, minUp);
+        // A lid includes its hinge barrel, so the slab's bottom alone sits below the real axis.
+        // Solve the hinge that closes the display just above the key tops and aligns the front rim.
+        const tops = deckCandidates.filter((c) => !lid.includes(c.mesh) && c.area >= deckArea * 0.3);
+        if (tops.length) {
+          const top = Math.max(...tops.map((c) => c.box.max.y));
+          const deck = meshes.filter((m) => !lid.includes(m));
+          const front = vertexBounds(deck, inv).max.z;
+          const rotation = new THREE.Matrix4().makeRotationAxis(right, natural * Math.PI / 180);
+          const close = new THREE.Matrix4().makeTranslation(hinge.x, hinge.y, hinge.z)
+            .multiply(rotation).multiply(new THREE.Matrix4().makeTranslation(-hinge.x, -hinge.y, -hinge.z)).multiply(inv);
+          const display = vertexBounds([screen], close), closedLid = vertexBounds(lid, close);
+          const gap = Math.max(0.001, (spec.lid?.thickness ?? 4) * S * 0.06);
+          const shift = new THREE.Vector3(0, top + gap - (display.min.y + display.max.y) / 2, front - closedLid.max.z);
+          // Invert (I - R) in the plane perpendicular to the hinge axis.
+          const correction = shift.clone().multiplyScalar(0.5)
+            .addScaledVector(new THREE.Vector3().crossVectors(right, shift), 0.5 / Math.tan(natural * Math.PI / 360));
+          if (correction.toArray().every(Number.isFinite)) hinge.add(correction);
+        }
         // the pivot is parked in the scene before it is re-parented, so it is handed world values
         const dev = inv.clone().invert();
-        const hinge = sc.clone().add(up.clone().multiplyScalar(minUp)).applyMatrix4(dev);
         const pivot = new THREE.Group();
         pivot.name = "lidPivot";
-        pivot.position.copy(hinge);
+        pivot.position.copy(hinge).applyMatrix4(dev);
         pivot.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, n).premultiply(dev));
         scene.add(pivot);
         pivot.updateMatrixWorld(true);
         yawGroup.attach(pivot);
         for (const m of lid) pivot.attach(m);
-        const tilt = (Math.acos(Math.max(-1, Math.min(1, up.y))) * 180) / Math.PI;
-        out.lid = { pivot, natural: n.y > 0 ? 90 + tilt : 90 - tilt };
+        out.lid = { pivot, natural, rest: pivot.quaternion.clone() };
       }
     }
   }
@@ -461,9 +506,12 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
     const f = root.userData.features as DeviceFeatures | undefined;
     if (!f?.lid) return;
     const v = anim.values?.["mockup.lid"] ?? f.lid.natural;
-    const rot = ((f.lid.natural - v) * Math.PI) / 180;
-    if (Math.abs(f.lid.pivot.rotation.x - rot) > 1e-5) f.lid.pivot.rotation.x = rot;
+    setLidAngle(f.lid, v);
   }, -25);
+  useFrame(() => {
+    const info = root.userData.screenReceivers as ReturnType<typeof laptopReceivers> | undefined;
+    if (info) updateScreenReceiver(info.receiver);
+  }, -17);
 
   useEffect(() => {
     // "model" keeps the authored colour; any other finish tints the listed materials
@@ -528,11 +576,17 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
       }
       const features = detectFeatures(root, screens[0] ?? null, spec, scene);
       root.userData.features = features;
+      if (spec.family === "laptop" && screens[0]) {
+        let frame: THREE.Object3D = root;
+        while (frame.parent && frame.name !== "device-orientation" && frame.name !== "device") frame = frame.parent;
+        root.userData.screenReceivers = laptopReceivers(root, screens[0], features.lid?.pivot ?? null, frame);
+      }
       const flags: ModelFeatures = { lid: !!features.lid, island: features.island.length > 0, caseParts: features.caseParts.length > 0, band: features.band.length > 0 };
       useModelBounds.getState().set(spec.id, { features: flags });
     }
     const screens = root.userData.screens as THREE.Mesh[];
     const features = root.userData.features as DeviceFeatures;
+    const receivers = root.userData.screenReceivers as ReturnType<typeof laptopReceivers> | undefined;
     // toggles: Dynamic Island, keyboard case (tablet lies flat facing the camera without it), band tint
     for (const m of features.island) m.visible = notch;
     applyKeyboardCase(root, features.caseParts, features.tilt, caseKeyboard);
@@ -608,6 +662,7 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
           if (t.normalMap) t.normalScale = t.normalScale.clone().multiplyScalar(0.65);
           addMetalSurfaceDetail(t);
           addEnvironmentGain(t);
+          if (receivers?.meshes.has(mesh)) installScreenSpill(t, receivers.receiver);
           cache.set(x, t);
         }
         const baseColor = t.userData.baseColor as THREE.Color | null;

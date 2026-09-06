@@ -28,11 +28,12 @@ export interface ExportSession {
   renderAt: (t: number, clockTime?: number) => Promise<void>;
 }
 
-/** A stable key for the look at time t, so an export only pauses when the look actually changes. */
+/** Shot boundaries settle React-owned geometry and effects, even when the device/look stays the same. */
 function shotViewAt(t: number): string {
   const p = useEditor.getState().project;
-  const v = resolveShotView(p, locate(p, t).shot);
-  return `${v.device}|${v.orientation}|${v.finish}|${v.scene}|${v.lighting}`;
+  const shot = locate(p, t).shot;
+  const v = resolveShotView(p, shot);
+  return `${shot?.id ?? ""}|${v.device}|${v.orientation}|${v.finish}|${v.scene}|${v.lighting}|${v.blurMode}|${v.bokeh}|${v.notch}`;
 }
 
 /** Resolves true when the element reports the seek landed, false when it ran out of time or the export was cancelled. */

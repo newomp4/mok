@@ -245,6 +245,8 @@ export interface Project {
   };
   screen: {
     brightness: number;
+    /** Strength of display lighting and rough reflections on a laptop keyboard/deck. */
+    spill: number;
     /** what shows behind media that does not fill the screen (contain fit) */
     bg?: { type: "color" | "image" | "gradient"; color: string; image: MediaRef | null; preset?: string };
     /** paint an iOS-style status bar over the screen (phones) */

@@ -6,6 +6,7 @@ import { anim } from "@/three/anim";
 import type { ScreenMaterial } from "@/three/materials";
 import { readScreenPlane } from "@/three/screenPlane";
 import { useRenderQuality } from "@/three/renderQuality";
+import { clipReflectionCamera, isEffectivelyVisible, withHiddenObjects, withOffscreenPass } from "@/three/renderPass";
 
 /**
  * A true planar mirror for the display.
@@ -61,13 +62,10 @@ export function ScreenReflection({ material, amount }: { material: ScreenMateria
     aim: new THREE.Vector3(),
     rot: new THREE.Matrix4(),
     plane: new THREE.Plane(),
-    clip: new THREE.Vector4(),
-    q: new THREE.Vector4(),
     // clip space runs -1..1 and a texture 0..1, so the projection is halved and shifted
     bias: new THREE.Matrix4().set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1),
   }), []);
   const panels = useRef<THREE.Mesh[]>([]);
-  const hidden = useRef<THREE.Object3D[]>([]);
 
   useFrame((state) => {
     const u = material.reflection;
@@ -75,7 +73,7 @@ export function ScreenReflection({ material, amount }: { material: ScreenMateria
     // a text or logo card hides the device, and with it the only surface this feeds
     if (!target || anim.card) return;
     const device = state.scene.getObjectByName("device");
-    if (!device || !device.visible) return;
+    if (!device || !isEffectivelyVisible(device)) return;
     // the rig moved the device and the camera this frame; matrices are otherwise refreshed at render time
     device.updateWorldMatrix(true, true);
     const camera = state.camera;
@@ -128,43 +126,19 @@ export function ScreenReflection({ material, amount }: { material: ScreenMateria
     // lay the near plane on the mirror, so everything behind the glass is clipped away
     // (http://www.terathon.com/code/oblique.html)
     v.plane.setFromNormalAndCoplanarPoint(v.normal, v.center).applyMatrix4(cam.matrixWorldInverse);
-    v.clip.set(v.plane.normal.x, v.plane.normal.y, v.plane.normal.z, v.plane.constant);
-    const p = cam.projectionMatrix.elements;
-    v.q.set((Math.sign(v.clip.x) + p[8]) / p[0], (Math.sign(v.clip.y) + p[9]) / p[5], -1, (1 + p[10]) / p[14]);
-    v.clip.multiplyScalar(2 / v.clip.dot(v.q));
-    p[2] = v.clip.x;
-    p[6] = v.clip.y;
-    p[10] = v.clip.z + 1;
-    p[14] = v.clip.w;
-    cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
-
-    const hide = hidden.current;
-    hide.length = 0;
-    // the panels sit exactly on the mirror, and the card and fade layers ride the real camera:
-    // neither belongs in the reflection
-    for (const m of list) { m.visible = false; hide.push(m); }
-    for (const c of camera.children) if (c.visible) { c.visible = false; hide.push(c); }
+    if (!clipReflectionCamera(cam, v.plane)) return;
 
     const gl = state.gl;
-    const prev = gl.getRenderTarget();
     // ContactShadows has already refreshed this frame's shadow maps at priority 0. Reuse them
     // here, before the composer at priority 1, without paying for another shadow-map render.
     const bg = state.scene.background;
-    const autoShadow = gl.shadowMap.autoUpdate;
-    try {
-      state.scene.background = null;
-      gl.shadowMap.autoUpdate = false;
-      gl.setRenderTarget(target);
-      gl.clear();
-      gl.render(state.scene, cam);
-    } finally {
-      // whatever happens in there, the display and the card layers have to come back
-      gl.setRenderTarget(prev);
-      gl.shadowMap.autoUpdate = autoShadow;
-      state.scene.background = bg;
-      for (const o of hide) o.visible = true;
-      hide.length = 0;
-    }
+    // The panels lie on the mirror; camera-mounted fades and titles do not belong in this view.
+    withHiddenObjects([...list, ...camera.children], () => {
+      try {
+        state.scene.background = null;
+        withOffscreenPass(gl, () => { gl.setRenderTarget(target); gl.render(state.scene, cam); });
+      } finally { state.scene.background = bg; }
+    });
     u.amount.value = amount;
   }, 0.5);
 
