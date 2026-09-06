@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.8.0";
+export const APP_VERSION = "0.8.1";
 
 export interface ChangelogEntry {
   version: string;
@@ -8,6 +8,18 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.8.1",
+    date: "Sep 6, 2026",
+    title: "A more reliable studio, from editing to export",
+    items: [
+      "Effects work together without crashing the preview. Device bounds follow moving lids, floor glow reaches the surface, and switching models releases unused rendering resources.",
+      "Splitting and reversing shots preserve their motion curves. Recording, copy and paste, duplication, and per-shot camera edits consistently target the shot on screen.",
+      "Project imports validate their contents and keep media separate. Saving, autosaving and opening projects handle overlapping operations without replacing newer work.",
+      "Exports recover from cancellation and setup failures, and report missing source media. Image cropping uses the selected device and precise pixel bounds.",
+      "Numeric inputs commit and cancel reliably. Menus support keyboard navigation, dialogs keep focus, and the editor includes a compact mobile adjustments panel.",
+    ],
+  },
   {
     version: "0.8.0",
     date: "Sep 6, 2026",

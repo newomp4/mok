@@ -9,11 +9,7 @@ import { useRenderFlags } from "@/three/registry";
 import { useEditor } from "@/store/editor";
 import type { ScenePresetId } from "@/lib/types";
 import { findDisplay, readScreenPlane } from "@/three/screenPlane";
-
-/** The screen glow only lights the room, never the device: a point light next to a glossy screen
- *  would otherwise show up as a specular dot on the glass. Floors opt in to this layer. */
-const GLOW_LAYER = 3;
-const litByGlow = (m: THREE.Object3D | null) => { if (m) m.layers.enable(GLOW_LAYER); };
+import { addScreenGlow, screenGlow } from "@/three/screenGlow";
 
 /**
  * A transparent export asks for the device on an empty frame. The lights still belong there, but
@@ -79,7 +75,7 @@ function SoftFloor({ size, center, edge, roughness = 0.96 }: { size: number; cen
   useEffect(() => () => tex.dispose(), [tex]);
   if (noRoom) return null;
   return (
-    <mesh ref={litByGlow} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+    <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
       <planeGeometry args={[size, size]} />
       <meshStandardMaterial map={tex} roughness={roughness} metalness={0} envMapIntensity={0.3} />
     </mesh>
@@ -120,9 +116,9 @@ function ConcreteFloor({ size }: { size: number }) {
   }, [diff, nor, rough, ao, size]);
   if (noRoom) return null;
   return (
-    <mesh ref={litByGlow} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+    <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
       <planeGeometry args={[size, size]} />
-      <meshStandardMaterial map={diff} normalMap={nor} roughnessMap={rough} aoMap={ao} color="#8e8e90" roughness={0.9} metalness={0} normalScale={new THREE.Vector2(0.7, 0.7)} />
+      <meshStandardMaterial ref={(m) => { if (m) addScreenGlow(m); }} map={diff} normalMap={nor} roughnessMap={rough} aoMap={ao} color="#8e8e90" roughness={0.9} metalness={0} normalScale={new THREE.Vector2(0.7, 0.7)} />
     </mesh>
   );
 }
@@ -131,21 +127,22 @@ function ConcreteFloor({ size }: { size: number }) {
  * The light the screen throws into the room. The colour follows whatever is on the screen (so a
  * video lights the scene as it plays) and eases between frames instead of jumping.
  */
-function ScreenGlow({ distance, intensity, height, floorY }: { distance: number; intensity: number; height: number; floorY: number }) {
-  const light = useRef<THREE.PointLight>(null);
+function ScreenGlow({ distance, intensity, height }: { distance: number; intensity: number; height: number }) {
+  const color = useMemo(() => new THREE.Color(), []);
   const target = useMemo(() => new THREE.Color("#ffffff"), []);
   const pos = useMemo(() => new THREE.Vector3(), []);
   const normal = useMemo(() => new THREE.Vector3(), []);
+  const initialized = useRef(false);
+  useEffect(() => () => { screenGlow.intensity.value = 0; }, []);
   useFrame((state, delta) => {
-    const l = light.current;
-    if (!l) return;
-    if (anim.card) { l.intensity = 0; return; }
+    if (anim.card) { screenGlow.intensity.value = 0; return; }
     const c = anim.screenColor;
     if (c) target.setRGB(c[0], c[1], c[2]);
     const k = 1 - Math.exp(-Math.min(delta, 0.05) * 6);
-    const converged = Math.abs(l.color.r - target.r) + Math.abs(l.color.g - target.g) + Math.abs(l.color.b - target.b) < 0.004;
-    if (converged || anim.exporting) l.color.copy(target);
-    else l.color.lerp(target, k);
+    const converged = Math.abs(color.r - target.r) + Math.abs(color.g - target.g) + Math.abs(color.b - target.b) < 0.004;
+    if (!initialized.current || converged || anim.exporting) { color.copy(target); initialized.current = true; }
+    else color.lerp(target, k);
+    screenGlow.color.value.copy(color);
     // Read the rendered screen itself so pitch, roll, a moving lid and device changes all move
     // its light with it. The old cached frame only followed yaw and could belong to another model.
     const device = state.scene.getObjectByName("device");
@@ -155,13 +152,14 @@ function ScreenGlow({ distance, intensity, height, floorY }: { distance: number;
       readScreenPlane(display, pos, normal);
       pos.addScaledVector(normal, distance);
       pos.y -= height;
-      l.position.set(pos.x, pos.y - floorY, pos.z);
+      screenGlow.position.value.copy(pos);
+      screenGlow.direction.value.copy(normal);
     }
-    l.intensity = display ? intensity * (anim.values?.["screen.brightness"] ?? 1) * anim.screenFade : 0;
+    screenGlow.intensity.value = display ? intensity * (anim.values?.["screen.brightness"] ?? 1) * anim.screenFade : 0;
     // only keep rendering while the glow is still easing toward the new screen colour
     if (!converged && !anim.exporting) state.invalidate();
   }, -18);
-  return <pointLight ref={(l) => { if (l) l.layers.set(GLOW_LAYER); light.current = l; }} distance={distance * 14} decay={2} />;
+  return null;
 }
 
 /**
@@ -195,6 +193,7 @@ function MirrorFloor({ size }: { size: number }) {
     material.tDiffuseBlur = blurred.texture;
     material.textureMatrix = matrix;
     material.defines = { ...material.defines, USE_BLUR: "", USE_DEPTH: "" };
+    addScreenGlow(material);
     return { raw, blurred, blur, material, matrix };
   }, [gl]);
   useEffect(() => () => {
@@ -262,7 +261,7 @@ function MirrorFloor({ size }: { size: number }) {
     }
   }, 0.6);
   return (
-    <mesh ref={(m) => { mesh.current = m; litByGlow(m); }} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+    <mesh ref={mesh} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
       <planeGeometry args={[size, size]} />
       <primitive object={buffers.material} attach="material" />
     </mesh>
@@ -272,7 +271,6 @@ function MirrorFloor({ size }: { size: number }) {
 export function EnvScene({ preset, floorY, fitSize, backdrop }: { preset: ScenePresetId; floorY: number; fitSize: number; backdrop?: string }) {
   const noRoom = useNoRoom();
   const keyShadow = useSceneShadow(SHADOW_SPREAD[preset]);
-  const glowFloor = floorY;
   const f = fitSize;
   if (preset === "custom") return null;
   const shadow = { left: -f * 1.6, right: f * 1.6, top: f * 1.6, bottom: -f * 1.6, near: SHADOW_NEAR, far: f * SHADOW_FAR };
@@ -311,7 +309,7 @@ export function EnvScene({ preset, floorY, fitSize, backdrop }: { preset: SceneP
             <orthographicCamera attach="shadow-camera" args={[shadow.left, shadow.right, shadow.top, shadow.bottom, shadow.near, shadow.far]} />
           </directionalLight>
           <directionalLight position={[-f * 2.6, f * 1.6, -f * 3]} intensity={1.2} color="#93b0e8" />
-          <ScreenGlow distance={f * 0.6} intensity={f * f * 3.2} height={f * 0.3} floorY={glowFloor} />
+          <ScreenGlow distance={f * 0.6} intensity={f * f * 3.2} height={f * 0.3} />
           <hemisphereLight intensity={0.26} color="#8fa0bd" groundColor="#332f2a" />
         </>
       )}
@@ -322,7 +320,7 @@ export function EnvScene({ preset, floorY, fitSize, backdrop }: { preset: SceneP
           <SceneFog color={backdrop ?? "#050506"} near={f * 6} far={f * 20} />
           <spotLight position={[-f * 2, f * 3.6, -f * 2.2]} intensity={f * f * 30} angle={0.6} penumbra={0.95} distance={f * 22} color="#eaf0fb" castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004} shadow-normalBias={0.02} {...keyShadow} />
           <spotLight position={[f * 2.8, f * 1.6, f * 2.4]} intensity={f * f * 13} angle={0.8} penumbra={1} distance={f * 22} color="#ffe2c6" />
-          <ScreenGlow distance={f * 0.55} intensity={f * f * 6} height={f * 0.28} floorY={glowFloor} />
+          <ScreenGlow distance={f * 0.55} intensity={f * f * 6} height={f * 0.28} />
           <hemisphereLight intensity={0.08} color="#8fa8d0" groundColor="#000000" />
         </>
       )}

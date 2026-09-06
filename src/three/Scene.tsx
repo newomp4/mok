@@ -17,7 +17,8 @@ import { useRenderFlags, viewport } from "@/three/registry";
 import { Device, useDeviceLayout, useShotView } from "@/three/Device";
 import { EnvScene } from "@/three/scenes/EnvScene";
 import { PostFX } from "@/three/effects/PostFX";
-import { CardLayer, FadeOverlay, setToneMapped } from "@/three/CardLayer";
+import { CARD_Z, CardLayer, FadeOverlay, setToneMapped } from "@/three/CardLayer";
+import { rasterSize } from "@/three/raster";
 
 const DEG = Math.PI / 180;
 
@@ -80,6 +81,11 @@ function Driver() {
 
 const CAM_KEYS = ["camera.x", "camera.y", "camera.z", "camera.fov", "camera.zoom", "camera.panX", "camera.panY"] as const;
 
+/** Keep camera-mounted title/fade planes inside the frustum at every subject distance. */
+export function cameraClipRange(distance: number) {
+  return { near: Math.min(CARD_Z * 0.25, Math.max(0.05, distance * 0.03)), far: Math.max(50, distance * 40) };
+}
+
 function CameraRig({ fitSize }: { fitSize: number }) {
   // Ultramock's rig order: the camera yaws around the device, then the whole orbit tilts about the
   // world X axis (so a yawed + pitched view leans the device on screen), then rolls about the view axis.
@@ -119,7 +125,9 @@ function CameraRig({ fitSize }: { fitSize: number }) {
     c.position.set(-v["camera.panX"] * viewH, -v["camera.panY"] * viewH, dist);
     anim.camDist = dist;
     // keep depth precision high for thin layered surfaces at any distance
-    const near = Math.max(0.05, dist * 0.03), far = Math.max(50, dist * 40);
+    // Card and fade planes travel with the camera, so zooming away from a large device must not
+    // move the near plane through those overlays.
+    const { near, far } = cameraClipRange(dist);
     if (Math.abs(c.near - near) > 1e-3 || Math.abs(c.far - far) > 1) { c.near = near; c.far = far; c.updateProjectionMatrix(); }
   }, -50);
   return (
@@ -191,12 +199,12 @@ function BackgroundLayer() {
 
   // an image background paints at its own aspect; presets stay square
   const [tw, th] = useMemo(() => {
+    const edge = Math.min(gl.capabilities.maxTextureSize, anim.exporting ? 4096 : 2048, Math.max(size.width, size.height));
     if (bg.type === "image" && media) {
-      const ar = media.width / media.height;
-      return ar >= 1 ? [1024, Math.round(1024 / ar)] : [Math.round(1024 * ar), 1024];
+      return rasterSize(media.width, media.height, edge);
     }
-    return [1024, 1024];
-  }, [bg.type, media]);
+    return rasterSize(Math.max(1024, edge), Math.max(1024, edge), Math.max(1024, edge));
+  }, [bg.type, media, gl, size.width, size.height]);
 
   useEffect(() => {
     if (transparent || bg.type === "transparent") {
@@ -220,14 +228,14 @@ function BackgroundLayer() {
     }
     if (bg.type === "image") {
       if (!media) { setToneMapped(bgColor, bg.color); scene.background = bgColor; invalidate(); return; }
-      paintImage(ctx, media.element as CanvasImageSource, media.width, media.height, tw, th, bg.blur);
+      paintImage(ctx, media.element as CanvasImageSource, media.width, media.height, tw, th, bg.blur, bg.color);
     } else {
       paintPreset(ctx, tw, th, getBgPreset(bg.preset), bg.blur);
     }
     texture.needsUpdate = true;
     scene.background = texture;
     invalidate();
-  }, [bg, preset, transparent, media, tw, th, scene, gl, canvas, texture, invalidate]);
+  }, [bg, preset, transparent, media, tw, th, scene, gl, canvas, texture, bgColor, invalidate]);
 
   // cover-fit is its own pass: a canvas resize only re-frames the texture, it never repaints it
   useEffect(() => {

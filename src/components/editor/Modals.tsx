@@ -1,12 +1,12 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useEditor } from "@/store/editor";
 import { useUI } from "@/store/ui";
 import { Button, IconButton, Kbd, Modal, Segmented, ToggleRow } from "@/components/ui";
 import { APP_VERSION, CHANGELOG } from "@/lib/version";
 import { Icon } from "@/components/icons";
 import { deleteProject, deleteTemplate, listProjects, listTemplates, loadProject, listingFailed, projectFromTemplate, saveTemplate, templateListingFailed, type TemplateMeta } from "@/lib/persistence";
-import type { ProjectMeta } from "@/lib/types";
+import type { Project, ProjectMeta } from "@/lib/types";
 import { getDevice } from "@/lib/devices";
 import { blobToDataURL } from "@/lib/media";
 import { captureImage } from "@/export/capture";
@@ -129,8 +129,7 @@ function ChangelogModal() {
  * Template cards are small, so the thumbnail is rendered at card size rather than shrunk from a
  * full export, and kept inline as a data URL so a listing never has to load anything else.
  */
-async function captureTemplateThumb(): Promise<string> {
-  const p = useEditor.getState().project;
+async function captureTemplateThumb(p: Project): Promise<string> {
   const [w, h] = exportSizeFor(p.aspect, 360, useUI.getState().viewport);
   const blob = await captureImage({ width: w, height: h, format: "webp", quality: 0.8, transparent: false });
   return blobToDataURL(blob);
@@ -150,50 +149,78 @@ function ProjectsModal() {
   const [naming, setNaming] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<TemplateMeta | null>(null);
-  const refresh = () => void listProjects().then((list) => { setItems(list); setUnreadable(listingFailed()); });
-  const refreshTemplates = () => void listTemplates().then((list) => { setTemplates(list); setTemplatesUnreadable(templateListingFailed()); });
+  const [opening, setOpening] = useState<string | null>(null);
+  const scope = useRef(0);
+  const openRequest = useRef(0);
+  const projectListRequest = useRef(0);
+  const templateListRequest = useRef(0);
+  const saveBusy = useRef(false);
+  const refresh = () => {
+    const request = ++projectListRequest.current;
+    void listProjects().then((list) => { if (request === projectListRequest.current) { setItems(list); setUnreadable(listingFailed()); } });
+  };
+  const refreshTemplates = () => {
+    const request = ++templateListRequest.current;
+    void listTemplates().then((list) => { if (request === templateListRequest.current) { setTemplates(list); setTemplatesUnreadable(templateListingFailed()); } });
+  };
   useEffect(() => {
     if (modal === "projects") { refresh(); refreshTemplates(); }
     // a half-typed name or an unanswered confirmation should not be waiting here on the way back in
-    else { setNaming(null); setPendingDelete(null); }
+    else { setNaming(null); setPendingDelete(null); setOpening(null); }
+    const counters = [scope, openRequest, projectListRequest, templateListRequest];
+    return () => { for (const counter of counters) counter.current++; };
   }, [modal]);
-  const open = async (id: string) => {
-    const p = await loadProject(id);
-    if (!p) return;
-    useEditor.getState().replaceProject(p);
-    useEditor.temporal.getState().clear();
-    useUI.getState().setTime(0);
-    useUI.getState().setActiveShot(p.shots[0]?.id ?? null);
-    setModal(null);
-    toast(`Opened “${p.name}”`);
+  const load = async (id: string, loader: () => Promise<Project | null>, message: (p: Project) => string) => {
+    const request = ++openRequest.current;
+    const generation = scope.current;
+    const source = useEditor.getState().project;
+    setOpening(id);
+    try {
+      const p = await loader();
+      if (request !== openRequest.current || generation !== scope.current || useUI.getState().modal !== "projects") return;
+      if (useEditor.getState().project !== source) { toast("The current project changed while loading. Open the saved item again to switch."); return; }
+      if (!p) { toast("That saved item is no longer available"); refresh(); refreshTemplates(); return; }
+      useUI.getState().setPlaying(false);
+      useEditor.getState().replaceProject(p);
+      useEditor.temporal.getState().clear();
+      useUI.getState().setTime(0);
+      useUI.getState().setActiveShot(p.shots[0]?.id ?? null);
+      setModal(null);
+      toast(message(p));
+    } catch (e) {
+      if (request === openRequest.current && generation === scope.current) toast(`Could not open the saved item: ${(e as Error).message}`);
+    } finally {
+      if (request === openRequest.current) setOpening(null);
+    }
   };
+  const open = (id: string) => load(id, () => loadProject(id), (p) => `Opened “${p.name}”`);
   const saveAsTemplate = async () => {
     const name = (naming ?? "").trim();
-    if (!name || saving) return;
+    if (!name || saveBusy.current) return;
+    saveBusy.current = true;
+    const generation = scope.current;
+    const source = useEditor.getState().project;
+    const snapshot = structuredClone(source);
     setSaving(true);
-    // a template without its picture is still worth having, so a capture that fails is not fatal
-    const thumb = await captureTemplateThumb().catch(() => "");
     try {
-      await saveTemplate(useEditor.getState().project, name, thumb);
-      setNaming(null);
-      setTab("templates");
-      refreshTemplates();
+      // Capture and save the same project even if the user changes projects while the thumbnail
+      // encoder is working. A failed thumbnail does not prevent saving the template itself.
+      const captured = await captureTemplateThumb(snapshot).catch(() => "");
+      const thumb = useEditor.getState().project === source ? captured : "";
+      await saveTemplate(snapshot, name, thumb);
+      if (generation === scope.current && useUI.getState().modal === "projects") { setNaming(null); setTab("templates"); refreshTemplates(); }
       toast(`Saved “${name}” as a template`);
     } catch {
-      // saveTemplate has already said why storage refused it
+      // saveTemplate reports storage failures itself.
     } finally {
+      saveBusy.current = false;
       setSaving(false);
     }
   };
-  const startFrom = async (t: TemplateMeta) => {
-    const p = await projectFromTemplate(t.id);
-    if (!p) return;
-    useEditor.getState().replaceProject(p);
-    useEditor.temporal.getState().clear();
-    useUI.getState().setTime(0);
-    useUI.getState().setActiveShot(p.shots[0]?.id ?? null);
-    setModal(null);
-    toast(`Started from “${t.name}”`);
+  const startFrom = (t: TemplateMeta) => load(t.id, () => projectFromTemplate(t.id), () => `Started from “${t.name}”`);
+  const removeProject = async (id: string) => {
+    try { await deleteProject(id); } catch { /* Persistence already reports the storage failure. */ }
+    refresh();
   };
   const removeTemplate = async (t: TemplateMeta) => {
     setPendingDelete(null);
@@ -216,7 +243,7 @@ function ProjectsModal() {
           size="sm"
           className="w-[220px]"
           value={tab}
-          onChange={setTab}
+          onChange={(next) => { openRequest.current++; setOpening(null); setTab(next); }}
           options={[{ value: "projects", label: "Projects", icon: "folder" }, { value: "templates", label: "Templates", icon: "sparkles" }]}
         />
       }
@@ -227,7 +254,7 @@ function ProjectsModal() {
           <Button variant="soft" size="sm" icon="save" onClick={() => void saveCurrentProject().then(refresh)}>Save current</Button>
           <Button variant="soft" size="sm" icon="sparkles" onClick={() => setNaming(useEditor.getState().project.name)}>Save as template</Button>
           <div className="flex-1" />
-          <Button variant="ghost" size="sm" icon="upload" onClick={() => void importProjectFromFile().then(() => setModal(null))}>Import</Button>
+          <Button variant="ghost" size="sm" icon="upload" onClick={() => void importProjectFromFile()}>Import</Button>
           <Button variant="ghost" size="sm" icon="download" onClick={() => void exportProjectToFile()}>Export .mok</Button>
         </div>
       )}
@@ -269,8 +296,8 @@ function ProjectsModal() {
                 <span className="label truncate text-fg">{m.name}{m.id === current && <span className="label-sm ml-2 text-accent">current</span>}</span>
                 <span className="label-sm text-muted">{getDevice(m.device).name} · {new Date(m.updatedAt).toLocaleString()}</span>
               </div>
-              <Button variant="soft" size="sm" onClick={() => void open(m.id)}>Open</Button>
-              <IconButton icon="trash" size={12} label="Delete" onClick={() => void deleteProject(m.id).then(refresh)} className="opacity-0 group-hover:opacity-100" />
+              <Button variant="soft" size="sm" disabled={opening === m.id} onClick={() => void open(m.id)}>{opening === m.id ? "Opening…" : "Open"}</Button>
+              <IconButton icon="trash" size={12} label="Delete" onClick={() => void removeProject(m.id)} className="opacity-0 group-hover:opacity-100" />
             </div>
           ))}
         </div>
@@ -284,7 +311,7 @@ function ProjectsModal() {
             <div className="grid grid-cols-2 gap-2">
               {templates.map((t) => (
                 <div key={t.id} className="group relative overflow-hidden rounded-lg border border-line bg-panel-2 transition-colors hover:border-line-2">
-                  <button type="button" onClick={() => void startFrom(t)} className="flex w-full flex-col text-left">
+                  <button type="button" disabled={opening === t.id} onClick={() => void startFrom(t)} className="flex w-full flex-col text-left">
                     <div className="flex aspect-[8/5] w-full items-center justify-center overflow-hidden bg-fill text-muted">
                       {t.thumb
                         // eslint-disable-next-line @next/next/no-img-element

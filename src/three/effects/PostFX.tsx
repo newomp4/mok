@@ -7,8 +7,9 @@ import { BlendFunction, ToneMappingMode, type DepthOfFieldEffect, type EffectCom
 import * as THREE from "three";
 import { useEditor } from "@/store/editor";
 import { anim } from "@/three/anim";
-import { viewport } from "@/three/registry";
-import { FocusBlurEffect, GhostEffect, GlassBorderEffect, LiquidGlassEffect, SharpenEffect, createLensDistortion } from "./effects";
+import { useShownDevice, viewport } from "@/three/registry";
+import { visibleBounds } from "@/three/bounds";
+import { EFFECT_MERGE_MODE, FocusBlurEffect, GhostEffect, GlassBorderEffect, LiquidGlassEffect, SharpenEffect, createLensDistortion } from "./effects";
 import { getEffectDef } from "@/lib/presets";
 import { CARD_Z } from "@/three/CardLayer";
 
@@ -18,6 +19,8 @@ export function PostFX() {
   const bokeh = view.bokeh;
   const effects = useEditor((s) => s.project.effects);
   const borderRadius = useEditor((s) => s.project.mockup.borderRadius);
+  const caseKeyboard = useEditor((s) => s.project.mockup.caseKeyboard ?? true);
+  const shownDevice = useShownDevice((s) => s.id);
   const composerRef = useRef<EffectComposerImpl>(null);
 
   const focus = useMemo(() => new FocusBlurEffect(), []);
@@ -30,6 +33,7 @@ export function PostFX() {
   const scene = useThree((s) => s.scene);
   const raycaster = useMemo(() => new THREE.Raycaster(), []);
   const coverFor = useRef<THREE.Object3D | null>(null);
+  const coverKey = useRef("");
   const coverInv = useMemo(() => new THREE.Matrix4(), []);
   const focusNdc = useMemo(() => new THREE.Vector2(), []);
   const focusHits = useRef<THREE.Intersection[]>([]);
@@ -93,7 +97,7 @@ export function PostFX() {
       const device = scene.getObjectByName("device");
       device?.updateWorldMatrix(true, true);
       const pose = [...(device?.matrixWorld.elements ?? []), v["mockup.lid"], v["camera.fov"]].map((x) => x.toFixed(3)).join(",");
-      const key = `${view.device}|${pose}|${v["blur.focusX"].toFixed(2)}|${v["blur.focusY"].toFixed(2)}|${m[12].toFixed(2)},${m[13].toFixed(2)},${m[14].toFixed(2)},${m[8].toFixed(2)},${m[9].toFixed(2)},${m[10].toFixed(2)},${m[0].toFixed(2)},${m[1].toFixed(2)},${m[2].toFixed(2)}`;
+      const key = `${view.device}|${shownDevice}|${caseKeyboard}|${view.notch}|${pose}|${v["blur.focusX"].toFixed(2)}|${v["blur.focusY"].toFixed(2)}|${m[12].toFixed(2)},${m[13].toFixed(2)},${m[14].toFixed(2)},${m[8].toFixed(2)},${m[9].toFixed(2)},${m[10].toFixed(2)},${m[0].toFixed(2)},${m[1].toFixed(2)},${m[2].toFixed(2)}`;
       if (anim.exporting) focusRayWait.current = 0;
       else if (focusRayWait.current > 0) focusRayWait.current--;
       if (anim.exporting || key !== lastFocusKey.current) {
@@ -137,7 +141,7 @@ export function PostFX() {
     // which has to be measured every frame because both the camera and the device keep moving
     const coverMode = on("liquidGlass") ? Math.round(param("liquidGlass", "cover")) : 0;
     // 2 is the whole frame, which needs no measurement at all
-    if (coverMode === 2) liquid.setRect(0.5, 0.5, 1, 1);
+    if (coverMode === 2) liquid.coverFrame();
     if (coverMode === 1) {
       const device = anim.card ? null : scene.getObjectByName("device");
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, ok = false;
@@ -148,11 +152,11 @@ export function PostFX() {
         // measured once in the device's own frame and then carried by its matrix: traversing every
         // mesh each frame is what the autofocus raycast above is throttled to avoid, and the
         // oriented box also hugs a rotated mockup far more closely than a world one
-        if (coverFor.current !== device) {
+        const key = `${view.device}|${shownDevice}|${v["mockup.lid"]}|${caseKeyboard}|${view.notch}|${anim.shot?.media?.id}|${anim.shot?.media?.width}|${anim.shot?.media?.height}`;
+        if (coverFor.current !== device || coverKey.current !== key) {
           coverFor.current = device;
-          device.updateMatrixWorld(true);
-          coverBox.setFromObject(device);
-          coverBox.applyMatrix4(coverInv.copy(device.matrixWorld).invert());
+          coverKey.current = key;
+          visibleBounds(device, coverInv.copy(device.matrixWorld).invert(), coverBox);
         }
         ok = !coverBox.isEmpty();
         for (let i = 0; i < 8 && ok; i++) {
@@ -185,7 +189,7 @@ export function PostFX() {
   const liquidOn = !!on("liquidGlass");
 
   return (
-    <EffectComposer ref={composerRef} multisampling={blurMode === "depth" ? 0 : 4} frameBufferType={THREE.HalfFloatType}>
+    <EffectComposer ref={composerRef} mergeMode={EFFECT_MERGE_MODE} multisampling={blurMode === "depth" ? 0 : 4} frameBufferType={THREE.HalfFloatType}>
       {blurMode === "depth" ? <SMAA /> : <></>}
       {blurMode === "depth" ? <DepthOfField ref={dofRef} worldFocusDistance={5} worldFocusRange={1} bokehScale={4} resolutionScale={0.75} /> : <></>}
       {blurMode === "radial" || blurMode === "linear" || blurMode === "directional" ? <primitive object={focus} /> : <></>}

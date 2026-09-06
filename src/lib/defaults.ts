@@ -1,12 +1,6 @@
 import { uid } from "./ids";
-import { ANIM_DEFAULT_KEYS } from "./animation";
-import { DEVICES } from "./devices";
-import { LIGHTINGS, SCENES } from "./presets";
-
-const DEVICE_IDS = new Set(DEVICES.map((d) => d.id));
-const SCENE_IDS = new Set(SCENES.map((s) => s.id));
-const LIGHTING_IDS = new Set(LIGHTINGS.map((l) => l.id));
-import type { AnimProp, EnterExit, Project, Shot, TextStyle, LogoStyle } from "./types";
+import { validateProject } from "./validateProject";
+import type { EnterExit, Project, Shot, TextStyle, LogoStyle } from "./types";
 
 export function createShot(name: string, duration = 3): Shot {
   return { id: uid(), name, duration, media: null, fit: "cover", keyframes: {}, focusAreas: [] };
@@ -67,35 +61,7 @@ export function createProject(): Project {
   };
 }
 
-/** Fill fields that older saved projects predate. */
+/** Validate restored projects and fill fields older saved projects predate. */
 export function normalizeProject(p: Project): Project {
-  p.mockup.lid ??= 110;
-  p.mockup.notch ??= true;
-  p.mockup.caseKeyboard ??= true;
-  p.mockup.bandColor ??= null;
-  p.screen.bg ??= { type: "color", color: "#000000", image: null };
-  p.screen.statusBar ??= false;
-  p.blur.focusDistance ??= 0;
-  p.blur.angle ??= 0;
-  p.scene.shadowSoft ??= 0.5;
-  p.scene.shadowOpacity ??= 0.5;
-  p.audio ??= null;
-  p.fade ??= { in: 0, out: 0, color: "#000000" };
-  for (const s of p.shots) {
-    s.kind ??= "media";
-    s.focusAreas ??= [];
-    s.keyframes ??= {};
-    if (s.gap !== undefined && !(s.gap > 0)) delete s.gap;
-    if (s.pose) {
-      for (const k of Object.keys(s.pose) as AnimProp[]) {
-        if (!ANIM_DEFAULT_KEYS[k] || typeof s.pose[k] !== "number") delete s.pose[k];
-      }
-      if (!Object.keys(s.pose).length) delete s.pose;
-    }
-    // a per-shot override pointing at a device or scene that no longer exists falls back to the project
-    if (s.device && !DEVICE_IDS.has(s.device)) delete s.device;
-    if (s.scene && !SCENE_IDS.has(s.scene)) delete s.scene;
-    if (s.lighting && !LIGHTING_IDS.has(s.lighting)) delete s.lighting;
-  }
-  return p;
+  return validateProject(p, createProject());
 }

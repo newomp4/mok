@@ -109,6 +109,7 @@ export function Timeline() {
   const selected = ui.selectedKeys;
   const setSelected = ui.setSelectedKeys;
   const scrollRef = useRef<HTMLDivElement>(null);
+  const labelsRef = useRef<HTMLDivElement>(null);
   const [presetsOpen, setPresetsOpen] = useState(false);
   const presetsRef = useRef<HTMLButtonElement>(null);
   const [addOpen, setAddOpen] = useState(false);
@@ -172,6 +173,7 @@ export function Timeline() {
   };
   const scrubbing = useRef(false);
   const onRulerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     scrubbing.current = true;
     if (ui.playing) ui.setPlaying(false);
@@ -243,6 +245,7 @@ export function Timeline() {
   const groupIds = (id: string) => (selectedShots.length > 1 && selectedShots.includes(id) ? selectedShots : [id]);
 
   const selectShot = (id: string, additive: boolean) => {
+    ui.setPlaying(false);
     ui.setActiveShot(id);
     if (additive) { setSelectedShots((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id])); return; }
     setSelectedShots([id]);
@@ -381,15 +384,16 @@ export function Timeline() {
     : undefined;
 
   return (
-    <div className="relative flex shrink-0 flex-col overflow-hidden rounded-lg border border-line bg-panel" style={{ height: ui.timelineHeight }} data-tour="timeline">
+    <div className="relative flex shrink-0 flex-col overflow-hidden rounded-lg border border-line bg-panel" style={{ height: ui.timelineHeight, maxHeight: "48dvh" }} data-tour="timeline">
       <div
         className="absolute inset-x-0 top-0 z-30 h-1.5 cursor-ns-resize"
         onPointerDown={(e) => { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); heightDrag.current = { y: e.clientY, h: ui.timelineHeight }; }}
         onPointerMove={(e) => { if (heightDrag.current) ui.setTimelineHeight(clamp(heightDrag.current.h - (e.clientY - heightDrag.current.y), 150, 520)); }}
         onPointerUp={() => { heightDrag.current = null; }}
+        onPointerCancel={() => { heightDrag.current = null; }}
       />
       {/* toolbar */}
-      <div className="flex h-10 shrink-0 items-center gap-1.5 border-b border-line px-2">
+      <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-1.5 border-b border-line px-2 py-1.5">
         <Segmented size="sm" value={ui.timelineMode} onChange={ui.setTimelineMode} options={[{ value: "simple", label: "Simple" }, { value: "advanced", label: "Advanced" }]} />
         <Button ref={presetsRef} variant="outline" size="sm" iconRight="chevron-down" onClick={() => setPresetsOpen((o) => !o)}>Presets</Button>
         <Popover open={presetsOpen} onClose={() => setPresetsOpen(false)} anchor={presetsRef} side="top" className="w-[340px] p-2">
@@ -448,7 +452,7 @@ export function Timeline() {
         {/* left column */}
         <div className="scroll flex shrink-0 flex-col overflow-hidden border-r border-line" style={{ width: LEFT_W }}>
           <div className="shrink-0 border-b border-line" style={{ height: RULER_H }} />
-          <div className="scroll min-h-0 flex-1 overflow-y-auto">
+          <div ref={labelsRef} className="scroll min-h-0 flex-1 overflow-y-auto" onScroll={(e) => { if (scrollRef.current && scrollRef.current.scrollTop !== e.currentTarget.scrollTop) scrollRef.current.scrollTop = e.currentTarget.scrollTop; }}>
             {!advanced && (
               <>
                 <div className="flex items-center gap-1.5 border-b border-line px-2" style={{ height: ROW_H }}>
@@ -470,7 +474,7 @@ export function Timeline() {
                     className={cn("group flex items-center gap-1 border-b border-line px-1.5", active && "bg-accent-soft/60")}
                     style={{ height: ROW_H }}
                     onContextMenu={(e) => { e.preventDefault(); setMenu({ at: { x: e.clientX, y: e.clientY }, shotId: shot.id }); }}
-                    onClick={() => ui.setActiveShot(shot.id)}
+                    onClick={(e) => selectShot(shot.id, e.shiftKey)}
                   >
                     <IconButton icon={open ? "chevron-down" : "chevron-right"} size={11} label={open ? "Hide keyframes" : "Show keyframes"} onClick={(e) => { e.stopPropagation(); setExpanded((x) => ({ ...x, [shot.id]: !open })); }} className="h-5 w-5" disabled={!advanced} />
                     <Icon name={KIND_ICON[shotKind(shot)]} size={11} className="text-muted" />
@@ -499,6 +503,7 @@ export function Timeline() {
         <div
           ref={scrollRef}
           className="scroll relative min-w-0 flex-1 overflow-auto"
+          onScroll={(e) => { if (labelsRef.current && labelsRef.current.scrollTop !== e.currentTarget.scrollTop) labelsRef.current.scrollTop = e.currentTarget.scrollTop; }}
           onPointerDown={(e) => {
             // a drag starting on empty track space marquee-selects keyframes and whole shots
             const t = e.target as HTMLElement;
@@ -543,10 +548,11 @@ export function Timeline() {
             setSelectedShots(m.additive ? [...m.baseShots, ...shotHits.filter((id) => !m.baseShots.includes(id))] : shotHits);
           }}
           onPointerUp={(e) => { marqueeRef.current = null; setMarquee(null); try { scrollRef.current?.releasePointerCapture(e.pointerId); } catch {} }}
+          onPointerCancel={() => { marqueeRef.current = null; setMarquee(null); }}
         >
           <div className="relative" style={{ width: innerW, minHeight: "100%" }}>
             {/* ruler */}
-            <div data-ruler="" className="sticky top-0 z-10 cursor-pointer border-b border-line bg-panel" style={{ height: RULER_H }} onPointerDown={onRulerDown} onPointerMove={onRulerMove} onPointerUp={onRulerUp}>
+            <div data-ruler="" className="sticky top-0 z-10 cursor-pointer border-b border-line bg-panel" style={{ height: RULER_H }} onPointerDown={onRulerDown} onPointerMove={onRulerMove} onPointerUp={onRulerUp} onPointerCancel={onRulerUp}>
               {advanced && rows.map(({ shot, start }) => (shot.gap ?? 0) > 0 && (
                 <div key={shot.id} className="pointer-events-none absolute inset-y-0" style={{ left: 8 + (start - (shot.gap ?? 0)) * pps, width: Math.max(2, (shot.gap ?? 0) * pps), background: "color-mix(in srgb, var(--accent) 13%, transparent)" }} />
               ))}
@@ -937,6 +943,7 @@ function ShotBlock({ shot, start, pps, active, selected, dx, onSelect, onExpand,
         if (!m.moved) { onSelect(e.shiftKey); return; }
         onDragEnd(e.clientX - m.x);
       }}
+      onPointerCancel={() => { move.current = null; onDragMove(0); }}
       onDoubleClick={onExpand}
     >
       {media && kind === "media" && (
@@ -969,11 +976,12 @@ function ShotBlock({ shot, start, pps, active, selected, dx, onSelect, onExpand,
             sh.trimStart = Math.max(0, Math.round((t.trim + dt * (sh.speed ?? 1)) * 100) / 100);
             for (const [prop, list] of Object.entries(t.keys) as [AnimProp, { t: number }[]][]) {
               if (!list?.length) continue;
-              sh.keyframes[prop] = list.map((k) => ({ ...k, t: Math.round((k.t - dt) * 100) / 100 })) as never;
+              sh.keyframes[prop] = list.map((k) => ({ ...k, t: Math.round((k.t - dt) * 1000) / 1000 })) as never;
             }
           });
         }}
         onPointerUp={() => { trimLeft.current = null; endInteraction(); }}
+        onPointerCancel={() => { trimLeft.current = null; endInteraction(); }}
         onClick={(e) => e.stopPropagation()}
       />
       <div
@@ -989,6 +997,7 @@ function ShotBlock({ shot, start, pps, active, selected, dx, onSelect, onExpand,
           update((p) => { const s = p.shots.find((x) => x.id === shot.id); if (s) s.duration = d; });
         }}
         onPointerUp={() => { resize.current = null; endInteraction(); }}
+        onPointerCancel={() => { resize.current = null; endInteraction(); }}
         onClick={(e) => e.stopPropagation()}
       />
     </div>
@@ -1069,6 +1078,7 @@ function AudioBlock({ track, pps, total, toDisplay, toReal }: { track: AudioTrac
         // the clip is dragged where it is drawn, so the delta is read off the ruler and mapped back
         onPointerMove={(e) => { if (!drag.current) return; const raw = toReal(toDisplay(drag.current.start) + (e.clientX - drag.current.x) / pps); const s = clamp(snapTime(raw, pps, useUI.getState().time), 0, Math.max(0, total - 0.5)); setAudio({ ...track, start: s }); }}
         onPointerUp={() => { drag.current = null; endInteraction(); }}
+        onPointerCancel={() => { drag.current = null; endInteraction(); }}
       >
         <Waveform loaded={loaded} />
         <Icon name="volume" size={10} className="relative" />
@@ -1112,7 +1122,7 @@ function Waveform({ loaded }: { loaded: ReturnType<typeof useMedia> }) {
   );
 }
 
-function KeyframeDiamond({ id, x, t, start, selected, custom, onSelect, onMove, preview, pps, onContextMenu }: { id: string; x: number; t: number; start: number; selected: boolean; custom?: boolean; onSelect: (additive: boolean) => void; onMove: (dt: number, alt: boolean) => void; preview?: (dt: number, alt: boolean) => number; pps: number; onContextMenu?: (at: { x: number; y: number }) => void }) {
+function KeyframeDiamond({ id, x, start, selected, custom, onSelect, onMove, preview, pps, onContextMenu }: { id: string; x: number; t: number; start: number; selected: boolean; custom?: boolean; onSelect: (additive: boolean) => void; onMove: (dt: number, alt: boolean) => void; preview?: (dt: number, alt: boolean) => number; pps: number; onContextMenu?: (at: { x: number; y: number }) => void }) {
   const drag = useRef<{ x: number; moved: boolean } | null>(null);
   const [ghost, setGhost] = useState<number | null>(null);
   return (
@@ -1137,6 +1147,7 @@ function KeyframeDiamond({ id, x, t, start, selected, custom, onSelect, onMove, 
         setGhost(null);
         if (d.moved) onMove((e.clientX - d.x) / pps, e.altKey);
       }}
+      onPointerCancel={() => { drag.current = null; setGhost(null); }}
       onDoubleClick={(e) => e.stopPropagation()}
     >
       <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke={selected ? "var(--accent)" : "none"} strokeWidth="3"><path d="M12 3l9 9-9 9-9-9z" /></svg>

@@ -23,6 +23,7 @@ interface UIState {
   timelineMode: "simple" | "advanced";
   timelineZoom: number;
   picker: Picker;
+  inspectorOpen: boolean;
   cameraTab: "manual" | "presets";
   autoMotion: boolean;
   toast: { id: number; text: string; action?: { label: string; onClick: () => void } } | null;
@@ -86,6 +87,10 @@ interface UIState {
 let toastId = 0;
 const pref = (key: string, fallback: boolean) => { try { const v = localStorage.getItem(`mok:${key}`); return v === null ? fallback : v === "1"; } catch { return fallback; } };
 const savePref = (key: string, v: boolean) => { try { localStorage.setItem(`mok:${key}`, v ? "1" : "0"); } catch {} };
+const bounded = (v: number, fallback: number, min: number, max: number) => Number.isFinite(v) ? Math.max(min, Math.min(max, v)) : fallback;
+const numberPref = (key: string, fallback: number, min: number, max: number) => {
+  try { const v = localStorage.getItem(`mok:${key}`); return v === null ? fallback : bounded(Number(v), fallback, min, max); } catch { return fallback; }
+};
 
 export const useUI = create<UIState>()(subscribeWithSelector((set, get) => ({
   time: 0,
@@ -100,6 +105,7 @@ export const useUI = create<UIState>()(subscribeWithSelector((set, get) => ({
   })() as "simple" | "advanced",
   timelineZoom: 1,
   picker: null,
+  inspectorOpen: false,
   cameraTab: "manual",
   autoMotion: false,
   toast: null,
@@ -108,14 +114,14 @@ export const useUI = create<UIState>()(subscribeWithSelector((set, get) => ({
   dragging: false,
   viewport: { w: 1200, h: 700 },
   hasInteracted: false,
-  dpr: (() => { try { return Number(localStorage.getItem("mok:dpr")) || 2; } catch { return 2; } })(),
+  dpr: numberPref("dpr", 2, 1, 3),
   spaceHeld: false,
   spaceDragged: false,
   interacting: false,
   guides: false,
   snapCenter: pref("snapCenter", true),
   sounds: pref("sounds", true),
-  timelineHeight: (() => { try { return Number(localStorage.getItem("mok:timelineHeight")) || 216; } catch { return 216; } })(),
+  timelineHeight: numberPref("timelineHeight", 216, 100, 500),
   selectedKeys: [],
   setSelectedKeys: (selectedKeys) => set({ selectedKeys }),
   selectedShots: [],
@@ -127,13 +133,13 @@ export const useUI = create<UIState>()(subscribeWithSelector((set, get) => ({
   setGuides: (guides) => set({ guides }),
   setSnapCenter: (snapCenter) => { set({ snapCenter }); savePref("snapCenter", snapCenter); },
   setSounds: (sounds) => { set({ sounds }); savePref("sounds", sounds); },
-  setTimelineHeight: (timelineHeight) => { set({ timelineHeight }); try { localStorage.setItem("mok:timelineHeight", String(timelineHeight)); } catch {} },
-  setDpr: (dpr) => { set({ dpr }); try { localStorage.setItem("mok:dpr", String(dpr)); } catch {} },
+  setTimelineHeight: (v) => { const timelineHeight = bounded(v, 216, 100, 500); set({ timelineHeight }); try { localStorage.setItem("mok:timelineHeight", String(timelineHeight)); } catch {} },
+  setDpr: (v) => { const dpr = bounded(v, 2, 1, 3); set({ dpr }); try { localStorage.setItem("mok:dpr", String(dpr)); } catch {} },
 
-  setTime: (time) => set({ time }),
-  setPlaying: (playing) => set({ playing }),
+  setTime: (time) => set({ time: bounded(time, 0, 0, Number.MAX_SAFE_INTEGER) }),
+  setPlaying: (playing) => set({ playing: playing && !get().recording }),
   toggleLoop: () => set({ loop: !get().loop }),
-  setRecording: (recording) => set({ recording }),
+  setRecording: (recording) => set({ recording, ...(recording ? { playing: false } : {}) }),
   setActiveShot: (activeShotId) => set({ activeShotId }),
   setTheme: (theme) => {
     set({ theme });
@@ -145,7 +151,7 @@ export const useUI = create<UIState>()(subscribeWithSelector((set, get) => ({
   toggleTheme: () => get().setTheme(get().theme === "dark" ? "light" : "dark"),
   setTimelineOpen: (timelineOpen) => set({ timelineOpen }),
   setTimelineMode: (timelineMode) => { set({ timelineMode }); try { localStorage.setItem("mok:timelineMode", timelineMode); } catch {} },
-  setTimelineZoom: (timelineZoom) => set({ timelineZoom }),
+  setTimelineZoom: (timelineZoom) => set({ timelineZoom: bounded(timelineZoom, 1, 0.25, 8) }),
   setPicker: (picker) => set({ picker }),
   setCameraTab: (cameraTab) => set({ cameraTab }),
   setAutoMotion: (autoMotion) => set({ autoMotion }),

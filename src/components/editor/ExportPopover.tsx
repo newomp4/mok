@@ -14,7 +14,8 @@ import { chime } from "@/lib/sounds";
 type Orientation = "landscape" | "square" | "portrait";
 const imageState = { format: "png" as ImageFormat, transparent: false, size: "1080", orientation: "landscape" as Orientation, customW: 1920, customH: 1080 };
 const videoState = { size: "1080", quality: "high" as VideoQuality, fps: 30, blur: "off" as "off" | "low" | "med" | "high", transparent: false, format: "mp4" as "mp4" | "webm", orientation: "landscape" as Orientation, customW: 1920, customH: 1080 };
-const even = (n: number, max: number) => Math.max(16, Math.min(max, Math.round(n / 2) * 2));
+const pixels = (n: number, max: number) => Math.max(16, Math.min(max, Math.round(Number.isFinite(n) ? n : 1920)));
+const even = (n: number, max: number) => Math.round(pixels(n, max) / 2) * 2;
 const BLUR_SAMPLES = { off: 1, low: 4, med: 8, high: 16 };
 
 export function CaptureButton() {
@@ -50,7 +51,7 @@ export function ExportButton() {
   const fixedOrientation: Orientation = !aspect.ratio ? "landscape" : aspect.ratio > 1.05 ? "landscape" : aspect.ratio < 0.95 ? "portrait" : "square";
 
   const imgDims = useMemo((): [number, number] => {
-    if (imageState.size === "custom") return [even(imageState.customW, 7680), even(imageState.customH, 7680)];
+    if (imageState.size === "custom") return [pixels(imageState.customW, 7680), pixels(imageState.customH, 7680)];
     const size = EXPORT_SIZES.find((s) => s.id === imageState.size);
     if (size?.px) return size.px;
     return exportSizeFor(project.aspect, size?.long ?? 1920, ui.viewport, fixed ? undefined : imageState.orientation);
@@ -65,21 +66,24 @@ export function ExportButton() {
   }, [project.aspect, ui.viewport, videoState.size, videoState.orientation, videoState.customW, videoState.customH, fixed]);
 
   const runImage = async () => {
+    if (useUI.getState().exporting) return;
     setOpen(false);
-    ui.setExporting({ label: "Rendering image…", progress: 0.4 });
+    const ctrl = new AbortController();
+    ui.setExporting({ label: "Rendering image…", progress: 0.4, cancel: () => ctrl.abort() });
     try {
-      const blob = await captureImage({ width: imgDims[0], height: imgDims[1], format: imageState.format, transparent: imageState.transparent, quality: 0.92 });
+      const blob = await captureImage({ width: imgDims[0], height: imgDims[1], format: imageState.format, transparent: imageState.transparent, quality: 0.92, signal: ctrl.signal });
       downloadBlob(blob, `${slug(project.name)}-${imgDims[0]}x${imgDims[1]}.${imageState.format}`);
       ui.showToast(`Exported ${imgDims[0]} × ${imgDims[1]} ${imageState.format.toUpperCase()}`);
       chime();
     } catch (e) {
-      ui.showToast(`Export failed: ${(e as Error).message}`);
+      ui.showToast((e as Error).name === "AbortError" ? "Export cancelled" : `Export failed: ${(e as Error).message}`);
     } finally {
       ui.setExporting(null);
     }
   };
 
   const runVideo = async () => {
+    if (useUI.getState().exporting) return;
     setOpen(false);
     const ctrl = new AbortController();
     ui.setExporting({ label: "Preparing…", progress: 0, cancel: () => ctrl.abort() });
@@ -131,8 +135,8 @@ export function ExportButton() {
             <SelectRow label="Size" value={imageState.size} onChange={(v) => { imageState.size = v; rerender(); }} options={[...EXPORT_SIZES.filter((s) => !s.video).map((s) => ({ value: s.id, label: s.label, sub: s.px ? s.px.join(" × ") : `${exportSizeFor(project.aspect, s.long, ui.viewport, fixed ? undefined : imageState.orientation).join(" × ")}` })), { value: "custom", label: "Custom…", sub: "up to 7680" }]} />
             {imageState.size === "custom" && (
               <div className="grid grid-cols-2 gap-1.5">
-                <NumberRow label="W" value={imageState.customW} min={16} max={7680} step={2} onChange={(v) => { imageState.customW = v; rerender(); }} />
-                <NumberRow label="H" value={imageState.customH} min={16} max={7680} step={2} onChange={(v) => { imageState.customH = v; rerender(); }} />
+                <NumberRow label="W" value={imageState.customW} min={16} max={7680} step={1} onChange={(v) => { imageState.customW = v; rerender(); }} />
+                <NumberRow label="H" value={imageState.customH} min={16} max={7680} step={1} onChange={(v) => { imageState.customH = v; rerender(); }} />
               </div>
             )}
             <Summary title={`${imgDims[0]} × ${imgDims[1]}`} tag={imageState.format.toUpperCase()} sub={imageState.transparent ? "Transparent background." : "Opaque background."} />

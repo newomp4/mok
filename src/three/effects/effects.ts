@@ -1,6 +1,10 @@
 import { Effect, EffectAttribute, KawaseBlurPass, KernelSize, LensDistortionEffect, Resolution } from "postprocessing";
 import * as THREE from "three";
 
+// UV transforms (pixelation/lens distortion) cannot share an EffectPass with convolution effects.
+// Separate passes also make each user-selected effect sample the preceding effect's output.
+export const EFFECT_MERGE_MODE = "none" as const;
+
 const focusFrag = /* glsl */ `
 uniform sampler2D map;
 uniform vec4 params;   // focusX, focusY, size, falloff
@@ -40,6 +44,7 @@ export class FocusBlurEffect extends Effect {
 
   constructor() {
     super("FocusBlurEffect", focusFrag, {
+      attributes: EffectAttribute.CONVOLUTION,
       uniforms: new Map<string, THREE.Uniform>([
         ["map", new THREE.Uniform(null)],
         ["params", new THREE.Uniform(new THREE.Vector4(0.5, 0.5, 0.4, 0.2))],
@@ -72,7 +77,7 @@ export class FocusBlurEffect extends Effect {
     // ease the mask in over the first sliver of strength so the half-resolution copy does not
     // land on the frame the instant the slider leaves zero
     const gain = Math.min(1, strength / 0.25);
-    this.blurring = gain > 0;
+    this.blurring = gain > 0 && mode !== "directional";
     this.uniforms.get("active")!.value = gain;
   }
 
@@ -93,9 +98,8 @@ export class FocusBlurEffect extends Effect {
     this.blurPass.initialize(renderer, alpha, frameBufferType);
     if (frameBufferType !== undefined) {
       this.renderTarget.texture.type = frameBufferType;
-      if (renderer !== null && renderer.outputColorSpace === THREE.SRGBColorSpace) {
-        this.renderTarget.texture.colorSpace = THREE.SRGBColorSpace;
-      }
+      this.renderTarget.texture.colorSpace = frameBufferType === THREE.UnsignedByteType && renderer?.outputColorSpace === THREE.SRGBColorSpace
+        ? THREE.SRGBColorSpace : THREE.NoColorSpace;
     }
   }
 
@@ -119,7 +123,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
 
 export class SharpenEffect extends Effect {
   constructor() {
-    super("SharpenEffect", sharpenFrag, { uniforms: new Map([["amount", new THREE.Uniform(0.3)]]) });
+    super("SharpenEffect", sharpenFrag, { attributes: EffectAttribute.CONVOLUTION, uniforms: new Map([["amount", new THREE.Uniform(0.3)]]) });
   }
   set amount(v: number) { this.uniforms.get("amount")!.value = v; }
 }
@@ -199,7 +203,7 @@ export class GhostEffect extends Effect {
   constructor() {
     super("GhostEffect", ghostFrag, {
       // the composite reads the scene depth to decide what the echo is allowed to sit behind
-      attributes: EffectAttribute.DEPTH,
+      attributes: EffectAttribute.DEPTH | EffectAttribute.CONVOLUTION,
       uniforms: new Map<string, THREE.Uniform>([
         ["map", new THREE.Uniform(null)],
         ["offset", new THREE.Uniform(new THREE.Vector2(0.014, 0.014))],
@@ -248,9 +252,8 @@ export class GhostEffect extends Effect {
     this.blurPass.initialize(renderer, alpha, frameBufferType);
     if (frameBufferType !== undefined) {
       this.renderTarget.texture.type = frameBufferType;
-      if (renderer !== null && renderer.outputColorSpace === THREE.SRGBColorSpace) {
-        this.renderTarget.texture.colorSpace = THREE.SRGBColorSpace;
-      }
+      this.renderTarget.texture.colorSpace = frameBufferType === THREE.UnsignedByteType && renderer?.outputColorSpace === THREE.SRGBColorSpace
+        ? THREE.SRGBColorSpace : THREE.NoColorSpace;
     }
   }
 
@@ -307,6 +310,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
 export class LiquidGlassEffect extends Effect {
   constructor() {
     super("LiquidGlassEffect", liquidFrag, {
+      attributes: EffectAttribute.CONVOLUTION,
       uniforms: new Map<string, THREE.Uniform>([
         ["center", new THREE.Uniform(new THREE.Vector2(0.5, 0.5))],
         ["halfSize", new THREE.Uniform(new THREE.Vector2(0.21, 0.13))],
@@ -333,5 +337,7 @@ export class LiquidGlassEffect extends Effect {
     (this.uniforms.get("center")!.value as THREE.Vector2).set(centerX, centerY);
     (this.uniforms.get("halfSize")!.value as THREE.Vector2).set(halfW, halfH);
   }
+  /** Full UV frame: setRect takes half extents, not width and height. */
+  coverFrame() { this.setRect(0.5, 0.5, 0.5, 0.5); }
   setSize(width: number, height: number) { this.uniforms.get("uAspect")!.value = width / Math.max(1, height); }
 }

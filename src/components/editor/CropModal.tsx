@@ -2,11 +2,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useEditor } from "@/store/editor";
 import { useUI } from "@/store/ui";
-import { importMedia, useMedia } from "@/lib/media";
+import { deleteMedia, importMedia, useMedia } from "@/lib/media";
 import { getDevice } from "@/lib/devices";
 import { setShotMedia } from "@/lib/actions";
 import { Button, Modal, Segmented } from "@/components/ui";
 import { clamp } from "@/lib/cn";
+import { resolveShotView } from "@/lib/shotView";
 
 type Rect = { x: number; y: number; w: number; h: number };
 type Handle = "move" | "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
@@ -22,14 +23,14 @@ export function CropModal() {
   const setCropShot = useUI((s) => s.setCropShot);
   const toast = useUI((s) => s.showToast);
   const shot = useEditor((s) => s.project.shots.find((x) => x.id === cropShot) ?? null);
-  const deviceId = useEditor((s) => s.project.mockup.device);
+  const deviceId = useEditor((s) => resolveShotView(s.project, s.project.shots.find((x) => x.id === cropShot) ?? null).device);
   const media = useMedia(shot?.media);
   const [rect, setRect] = useState<Rect>({ x: 0, y: 0, w: 1, h: 1 });
   const [aspect, setAspect] = useState<string>("free");
   const box = useRef<HTMLDivElement>(null);
   const drag = useRef<{ handle: Handle; start: Rect; px: number; py: number } | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { setRect({ x: 0, y: 0, w: 1, h: 1 }); setAspect("free"); }, [cropShot]);
+  useEffect(() => { setRect({ x: 0, y: 0, w: 1, h: 1 }); setAspect("free"); drag.current = null; }, [cropShot, shot?.media?.id]);
 
   if (!shot || !media || media.kind !== "image") return null;
   const img = media.element as HTMLImageElement;
@@ -37,18 +38,20 @@ export function CropModal() {
   const screenAspect = spec.screenPx[0] / spec.screenPx[1];
   const ratio = aspect === "free" ? null : aspect === "screen" ? screenAspect : Number(aspect);
   const imgAspect = media.width / Math.max(1, media.height);
+  const minW = 1 / Math.max(1, media.width), minH = 1 / Math.max(1, media.height);
 
   /** enforce the aspect (in image-normalised units) by adjusting the axis the handle did not drag */
   const fit = (r: Rect, anchor: Handle): Rect => {
     let { x, y, w, h } = r;
-    w = clamp(w, 0.02, 1); h = clamp(h, 0.02, 1);
+    w = clamp(w, minW, 1); h = clamp(h, minH, 1);
     if (ratio) {
       // width/height in pixels: (w * W) / (h * H) = ratio -> h = w * W / (H * ratio)
       if (anchor === "n" || anchor === "s") {
         // the top and bottom handles only change the height, so the width follows it about the box centre
         const w0 = w, h0 = h;
-        w = clamp((h0 * ratio) / imgAspect, 0.02, 1);
+        w = clamp((h0 * ratio) / imgAspect, minW, 1);
         h = (w * imgAspect) / ratio;
+        if (h > 1) { h = 1; w = ratio / imgAspect; }
         x = x + (w0 - w) / 2;
         if (anchor === "n") y = y + h0 - h;
       } else {
@@ -66,6 +69,7 @@ export function CropModal() {
     return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
   };
   const down = (handle: Handle) => (e: React.PointerEvent) => {
+    if (busy) return;
     e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     const p = norm(e);
@@ -89,17 +93,20 @@ export function CropModal() {
       case "ne": r.w = s.w + dx; r.y = s.y + dy; r.h = s.h - dy; break;
       case "nw": r.x = s.x + dx; r.w = s.w - dx; r.y = s.y + dy; r.h = s.h - dy; break;
     }
-    if (r.w < 0.02) { if (d.handle.includes("w")) r.x = s.x + s.w - 0.02; r.w = 0.02; }
-    if (r.h < 0.02) { if (d.handle.includes("n")) r.y = s.y + s.h - 0.02; r.h = 0.02; }
+    if (r.w < minW) { if (d.handle.includes("w")) r.x = s.x + s.w - minW; r.w = minW; }
+    if (r.h < minH) { if (d.handle.includes("n")) r.y = s.y + s.h - minH; r.h = minH; }
     setRect(d.handle === "move" ? r : fit(r, d.handle));
   };
   const up = () => { drag.current = null; };
 
   const apply = async () => {
+    if (busy) return;
+    const projectId = useEditor.getState().project.id;
+    const mediaId = media.ref.id;
     setBusy(true);
     try {
-      const sx = Math.round(rect.x * media.width), sy = Math.round(rect.y * media.height);
-      const sw = Math.max(1, Math.round(rect.w * media.width)), sh = Math.max(1, Math.round(rect.h * media.height));
+      const sx = Math.min(media.width - 1, Math.max(0, Math.round(rect.x * media.width))), sy = Math.min(media.height - 1, Math.max(0, Math.round(rect.y * media.height)));
+      const sw = Math.max(1, Math.min(media.width - sx, Math.round(rect.w * media.width))), sh = Math.max(1, Math.min(media.height - sy, Math.round(rect.h * media.height)));
       const c = document.createElement("canvas");
       c.width = sw; c.height = sh;
       c.getContext("2d")!.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
@@ -107,9 +114,14 @@ export function CropModal() {
       if (!blob) throw new Error("Could not encode the crop");
       const file = new File([blob], `${media.ref.name.replace(/\.[a-z0-9]+$/i, "")}-crop.png`, { type: "image/png" });
       const ref = await importMedia(file);
+      const current = useEditor.getState().project;
+      if (current.id !== projectId || current.shots.find((s) => s.id === shot.id)?.media?.id !== mediaId || useUI.getState().cropShot !== shot.id) {
+        await deleteMedia(ref.id);
+        return;
+      }
       setShotMedia(shot.id, ref);
       toast(`Cropped to ${sw} × ${sh}`);
-      setCropShot(null);
+      if (useUI.getState().cropShot === shot.id) setCropShot(null);
     } catch (e) {
       toast(`Crop failed: ${(e as Error).message}`);
     } finally {
@@ -141,7 +153,7 @@ export function CropModal() {
         <div className="flex items-center gap-3">
           <Segmented size="sm" value={aspect} onChange={(v) => { setAspect(v); setRect((r) => (v === "free" ? r : fitTo(r, v === "screen" ? screenAspect : Number(v), imgAspect))); }} options={[{ value: "free", label: "Free" }, { value: "screen", label: spec.family === "flat" ? "Card" : "Screen" }, { value: "1.7777", label: "16:9" }, { value: "1.3333", label: "4:3" }, { value: "1", label: "1:1" }, { value: "0.5625", label: "9:16" }]} className="flex-1" />
           <span className="num text-[11px] text-muted">{pw} × {ph}</span>
-          <Button variant="ghost" onClick={() => setRect({ x: 0, y: 0, w: 1, h: 1 })}>Reset</Button>
+          <Button variant="ghost" disabled={busy} onClick={() => { setAspect("free"); setRect({ x: 0, y: 0, w: 1, h: 1 }); }}>Reset</Button>
           <Button variant="solid" onClick={() => void apply()} disabled={busy || (rect.w >= 0.999 && rect.h >= 0.999)}>Crop media</Button>
         </div>
       </div>

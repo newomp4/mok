@@ -18,7 +18,7 @@ export interface ProfilePoint {
 }
 
 export function sampleRoundedRect(w: number, h: number, r: number, cornerSegments = 12): { p: THREE.Vector2[]; n: THREE.Vector2[] } {
-  const rr = Math.max(0.02, Math.min(r, w / 2, h / 2));
+  const rr = Math.min(Math.max(0.000001, r), w / 2, h / 2);
   const hw = w / 2 - rr, hh = h / 2 - rr;
   const corners: [number, number, number, number][] = [
     [hw, -hh, -Math.PI / 2, 0],
@@ -84,9 +84,9 @@ export function sweepRoundedRect(
   geo.computeVertexNormals();
   if (!caps) return geo;
   const first = profile[0], last = profile[profile.length - 1];
-  const front = new THREE.ShapeGeometry(roundedRectShape(w + 2 * first.o, h + 2 * first.o, Math.max(0.02, r + first.o)), cornerSegments);
+  const front = new THREE.ShapeGeometry(roundedRectShape(w + 2 * first.o, h + 2 * first.o, Math.max(0.000001, r + first.o)), cornerSegments);
   front.translate(0, 0, first.z);
-  const back = new THREE.ShapeGeometry(roundedRectShape(w + 2 * last.o, h + 2 * last.o, Math.max(0.02, r + last.o)), cornerSegments);
+  const back = new THREE.ShapeGeometry(roundedRectShape(w + 2 * last.o, h + 2 * last.o, Math.max(0.000001, r + last.o)), cornerSegments);
   back.rotateY(Math.PI);
   back.translate(0, 0, last.z);
   const merged = mergeGeometries([geo, front, back], false);

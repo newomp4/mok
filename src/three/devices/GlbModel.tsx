@@ -10,6 +10,8 @@ import type { DeviceSpec, Finish } from "@/lib/devices";
 import { S } from "@/three/geometry";
 import { useModelBounds, viewport, type ModelFeatures, useShownDevice } from "@/three/registry";
 import { useEditor } from "@/store/editor";
+import { disposeModelResources, ownModelResource, tintBandMaterials } from "@/three/resources";
+import { visibleBounds } from "@/three/bounds";
 import { addMetalSurfaceDetail } from "@/three/surfaceDetail";
 
 let ktx2: KTX2Loader | null = null;
@@ -148,30 +150,6 @@ export function findScreenMesh(root: THREE.Object3D, hint?: string): THREE.Mesh 
   return scored[0] && scored[0].score > 0 ? scored[0].m : null;
 }
 
-/** Area-weighted average of the triangle normals in world space (respects winding). */
-function averageFaceNormal(mesh: THREE.Mesh): THREE.Vector3 {
-  const g = mesh.geometry;
-  const pos = g.attributes.position as THREE.BufferAttribute;
-  const idx = g.index;
-  const n = idx ? idx.count : pos.count;
-  const step = Math.max(3, Math.floor(n / 3000) * 3);
-  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), acc = new THREE.Vector3(), tmp = new THREE.Vector3();
-  const m = mesh.matrixWorld;
-  let areaSum = 0;
-  for (let i = 0; i + 2 < n; i += step) {
-    const ia = idx ? idx.getX(i) : i, ib = idx ? idx.getX(i + 1) : i + 1, ic = idx ? idx.getX(i + 2) : i + 2;
-    a.fromBufferAttribute(pos, ia).applyMatrix4(m);
-    b.fromBufferAttribute(pos, ib).applyMatrix4(m);
-    c.fromBufferAttribute(pos, ic).applyMatrix4(m);
-    tmp.crossVectors(b.sub(a), c.sub(a));
-    areaSum += tmp.length();
-    acc.add(tmp);
-  }
-  // a closed/boxy mesh has normals pointing everywhere: report "unknown" so callers fall back
-  if (areaSum <= 0 || acc.length() / areaSum < 0.5) return new THREE.Vector3();
-  return acc.normalize();
-}
-
 /**
  * Replace the screen mesh's UVs with a planar projection along its principal axes
  * (u → right, v → up, facing outward) so uploaded media fills it edge to edge even
@@ -205,7 +183,7 @@ export function planarizeScreenUVs(mesh: THREE.Mesh, root: THREE.Object3D, targe
     if (du < minU) minU = du; if (du > maxU) maxU = du;
     if (dv < minV) minV = dv; if (dv > maxV) maxV = dv;
   }
-  const geometry = mesh.geometry.clone();
+  const geometry = ownModelResource(root, mesh.geometry.clone());
   const uvs = new Float32Array(pos.count * 2);
   const lenU = Math.max(1e-9, maxU - minU), lenV = Math.max(1e-9, maxV - minV);
   // centre a rectangle with the device's true screen aspect inside the mesh; whatever is left
@@ -447,6 +425,11 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
     return holder;
   }, [gltf.scene, model.scale, model.size, spec.body.h, spec.body.w]);
 
+  useEffect(() => () => {
+    disposeModelResources(root);
+    if (viewport.glbInfo === root.userData.glbInfo) viewport.glbInfo = null;
+  }, [root]);
+
   const notch = useShotView().notch;
   const caseKeyboard = useEditor((s) => s.project.mockup.caseKeyboard ?? true);
   const bandColor = useEditor((s) => s.project.mockup.bandColor ?? null);
@@ -471,7 +454,7 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
         const m = o as THREE.Mesh;
         if (!m.isMesh || m.matrixWorld.determinant() >= 0) return;
         const mats = (Array.isArray(m.material) ? m.material : [m.material]) as THREE.Material[];
-        const fixed = mats.map((x) => { const c = x.clone(); c.side = THREE.DoubleSide; return c; });
+        const fixed = mats.map((x) => { const c = ownModelResource(root, x.clone()); c.side = THREE.DoubleSide; return c; });
         m.material = Array.isArray(m.material) ? fixed : fixed[0];
         m.userData.mirrored = true;
       });
@@ -539,19 +522,17 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
       // keep the visible part centred on the origin
       yawGroup.position.set(0, 0, 0);
       root.updateWorldMatrix(true, true);
-      const vb = new THREE.Box3();
-      root.traverse((o) => { const mm = o as THREE.Mesh; if (mm.isMesh && mm.visible) vb.expandByObject(mm); });
+      const vb = visibleBounds(root, deviceInverse(root), new THREE.Box3(), true);
       if (!vb.isEmpty()) {
         // the centre is taken in the device's frame first: rotating a world box and then taking its
         // centre is not the same point for an asymmetric model, so the offset used to drift with
         // whatever rotation the mockup was holding when the case was toggled
-        vb.applyMatrix4(deviceInverse(root));
         const c = vb.getCenter(new THREE.Vector3());
         const local = c.clone().applyMatrix4(deviceLocal(root));
         yawGroup.position.sub(local);
       }
     }
-    viewport.glbInfo = () => {
+    viewport.glbInfo = root.userData.glbInfo = () => {
       root.updateWorldMatrix(true, true);
       const out: Record<string, unknown>[] = [];
       root.traverse((o) => {
@@ -584,15 +565,7 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
       }
       mesh.material = original;
       if (features.band.includes(mesh) && bandColor) {
-        const cache = (mesh.userData.bandTint ??= new Map<string, THREE.Material | THREE.Material[]>()) as Map<string, THREE.Material | THREE.Material[]>;
-        let tinted = cache.get(bandColor);
-        if (!tinted) {
-          const src = (Array.isArray(original) ? original : [original]) as THREE.MeshStandardMaterial[];
-          const list = src.map((x) => { const c = x.clone(); if ("color" in c) c.color.set(bandColor); c.fog = false; return c; });
-          tinted = list.length === 1 ? list[0] : list;
-          cache.set(bandColor, tinted);
-        }
-        mesh.material = tinted;
+        mesh.material = tintBandMaterials(root, mesh, original, bandColor);
         return;
       }
       // Body gloss and finish colour, both written onto one clone per source material that is
@@ -606,7 +579,7 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
         if (!("envMapIntensity" in std) && !tintable) return x;
         let t = cache.get(x);
         if (!t) {
-          t = std.clone();
+          t = ownModelResource(root, std.clone());
           t.userData.baseRoughness = std.roughness;
           t.userData.baseEnvIntensity = std.envMapIntensity;
           t.userData.baseColor = "color" in std ? std.color.clone() : null;
@@ -655,7 +628,7 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
       mesh.material = tuned.length === 1 ? tuned[0] : tuned;
     });
     invalidate();
-  }, [root, model.screenMesh, model.screenInset, model.finishMaterials, model.hide, finish.color, screen, invalidate, gloss, spec.id, spec.screenPx, spec, scene, notch, caseKeyboard, bandColor, maxAniso]);
+  }, [root, model.screenMesh, model.screenInset, model.finishMaterials, model.hide, model.autoYaw, model.hideOverlays, model.rotation, finish.id, finish.color, screen, invalidate, gloss, spec.id, spec.screenPx, spec, scene, notch, caseKeyboard, bandColor, maxAniso]);
 
   // Publish the real footprint so floors, shadows and framing use it. It is declared after the
   // effect above because that one decides what is visible and how far a tablet leans back, and a
@@ -665,8 +638,7 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
     root.updateWorldMatrix(true, true);
     // in the device's own frame, so the mockup rotation the user set never moves the floor
     const inv = deviceInverse(root);
-    const b = new THREE.Box3();
-    root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m.visible) b.union(meshBox(m, inv).box); });
+    const b = visibleBounds(root, inv, new THREE.Box3(), true);
     const sz = new THREE.Vector3();
     b.getSize(sz);
     useModelBounds.getState().set(spec.id, { minY: b.min.y, maxY: b.max.y, width: sz.x, height: sz.y });

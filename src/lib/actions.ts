@@ -1,12 +1,12 @@
 "use client";
-import { useEditor } from "@/store/editor";
+import { useEditor, beginInteraction, endInteraction } from "@/store/editor";
 import { useUI } from "@/store/ui";
 import { CAMERA_PRESETS, MOTION_PRESETS, TEMPLATES, getScene } from "./presets";
 import type { AnimProp, Keyframe, MediaRef, Project, Shot } from "./types";
-import { importMedia } from "./media";
+import { importMedia, mediaType } from "./media";
 import { getDevice } from "./devices";
 import { getSampleScreen, sampleScreenBlob } from "./screens";
-import { getBase, shotStart } from "./animation";
+import { sampleTrack, shotBase, shotStart } from "./animation";
 import { createLogoShot, createProject, createShot, createTextShot, defaultLogoStyle, shotKind } from "./defaults";
 import { deviceLayout } from "@/three/devices/layout";
 import { S } from "@/three/geometry";
@@ -59,17 +59,21 @@ export function applyMotionPreset(id: string, shotId?: string) {
   if (!m) return;
   const ed = useEditor.getState();
   const targetId = shotId ?? useUI.getState().activeShotId ?? ed.project.shots[0]?.id;
-  ed.update((p) => {
+  const target = ed.project.shots.find((s) => s.id === targetId);
+  if (!target || shotKind(target) !== "media") return;
+  beginInteraction();
+  try { ed.update((p) => {
     const shot = p.shots.find((s) => s.id === targetId);
     if (!shot) return;
     // the preset fills the shot you have; it never shortens a longer one (Ultramock fixed the same thing)
     const span = Math.max(shot.duration, m.duration);
     shot.duration = span;
-    const kfs = m.build(span, p.camera, { x: p.mockup.rotX, y: p.mockup.rotY, z: p.mockup.rotZ });
+    const camera = Object.fromEntries(Object.keys(p.camera).map((key) => [key, shotBase(p, shot, `camera.${key}` as AnimProp)])) as Project["camera"];
+    const kfs = m.build(span, camera, { x: shotBase(p, shot, "mockup.rotX"), y: shotBase(p, shot, "mockup.rotY"), z: shotBase(p, shot, "mockup.rotZ") });
     for (const [prop, list] of Object.entries(kfs) as [AnimProp, Keyframe[]][]) shot.keyframes[prop] = list;
-  });
+  }); } finally { endInteraction(); }
   const p = useEditor.getState().project;
-  if (targetId) useUI.getState().setTime(shotStart(p, targetId));
+  if (targetId) useUI.setState({ time: shotStart(p, targetId), activeShotId: targetId, selectedKeys: [], playing: false });
 }
 
 let templateToken = 0;
@@ -79,6 +83,8 @@ export function applyTemplate(id: string) {
   if (!t) return;
   const token = ++templateToken;
   const ed = useEditor.getState();
+  beginInteraction();
+  try {
   ed.update((p) => {
     const spec = getDevice(t.device);
     p.mockup.device = spec.id;
@@ -145,22 +151,28 @@ export function applyTemplate(id: string) {
   // a fade-in means t=0 is a blank frame, so park the playhead just past it
   const fadeIn = useEditor.getState().project.fade?.in ?? 0;
   useUI.getState().setTime(fadeIn > 0 ? Math.round((fadeIn + 0.4) * 100) / 100 : 0);
+  useUI.setState({ selectedKeys: [], selectedShots: first ? [first] : [], playing: false });
   // a template should look finished straight away: fill empty media shots with its sample screen.
   // rendering one costs a canvas draw and an IndexedDB write, so switching templates quickly only
   // ever renders the screen of the one you settle on.
   if (t.screen) {
     const screen = t.screen;
+    const projectId = useEditor.getState().project.id;
     window.setTimeout(() => {
       if (token !== templateToken) return;
       const p = useEditor.getState().project;
+      if (p.id !== projectId) return;
       if (p.shots.some((sh) => shotKind(sh) === "media" && sh.media)) return;
-      void applySampleScreen(screen).then(() => {
-        if (token !== templateToken) return;
-        const ref = useEditor.getState().project.shots.find((sh) => sh.media)?.media ?? null;
-        if (ref) useEditor.getState().update((pp) => { for (const sh of pp.shots) if (shotKind(sh) === "media") sh.media = ref; });
+      const target = p.shots.find((sh) => shotKind(sh) === "media");
+      if (!target) return;
+      void applySampleScreen(screen, target.id).then(() => {
+        if (token !== templateToken || useEditor.getState().project.id !== projectId) return;
+        const ref = useEditor.getState().project.shots.find((sh) => sh.id === target.id)?.media ?? null;
+        if (ref) useEditor.getState().update((pp) => { for (const sh of pp.shots) if (shotKind(sh) === "media" && !sh.media) sh.media = ref; });
       });
     }, 180);
   }
+  } finally { endInteraction(); }
 }
 
 const POSE_PROPS: AnimProp[] = ["camera.x", "camera.y", "camera.z", "camera.fov", "camera.zoom", "camera.panX", "camera.panY"];
@@ -171,6 +183,8 @@ const POSE_PROPS: AnimProp[] = ["camera.x", "camera.y", "camera.z", "camera.fov"
  * moving the camera sets where the shot lands. The move is written as ordinary, editable keyframes.
  */
 export function addShotFromCamera(): string {
+  beginInteraction();
+  try {
   const ed = useEditor.getState();
   const pose = endPose(ed.project);
   const prev = ed.project.shots[ed.project.shots.length - 1];
@@ -196,6 +210,7 @@ export function addShotFromCamera(): string {
   useUI.getState().setTime(shotStart(p, id) + shot.duration);
   useUI.getState().showToast("Shot added — move the camera to set where it lands");
   return id;
+  } finally { endInteraction(); }
 }
 
 /** The camera pose the sequence is left in after its last shot. */
@@ -204,22 +219,31 @@ function endPose(p: Project): Partial<Record<AnimProp, number>> {
   const out: Partial<Record<AnimProp, number>> = {};
   for (const prop of POSE_PROPS) {
     const track = last?.keyframes[prop];
-    out[prop] = track?.length ? track[track.length - 1].v : getBase(p, prop);
+    out[prop] = track?.length && last ? sampleTrack(track, last.duration) : shotBase(p, last, prop);
   }
   return out;
 }
 
 export function setShotMedia(shotId: string | null, media: MediaRef | null) {
+  if (media?.kind === "audio") return;
+  const ed = useEditor.getState();
+  const targetId = shotId ?? useUI.getState().activeShotId ?? ed.project.shots[0]?.id;
+  if (!ed.project.shots.some((s) => s.id === targetId && shotKind(s) === "media")) return;
   useEditor.getState().update((p) => {
-    const shot = (shotId && p.shots.find((s) => s.id === shotId)) || p.shots[0];
-    if (shot) shot.media = media;
+    const shot = p.shots.find((s) => s.id === targetId);
+    if (shot) {
+      if (shot.media?.id !== media?.id) { delete shot.trimStart; delete shot.speed; }
+      shot.media = media;
+    }
   });
 }
 
 export async function addAudioFile(file: File) {
   const ui = useUI.getState();
+  const projectId = useEditor.getState().project.id;
   try {
     const ref = await importMedia(file);
+    if (useEditor.getState().project.id !== projectId) return;
     if (ref.kind !== "audio") { ui.showToast("That file is not an audio file"); return; }
     useEditor.getState().setAudio({ media: ref, start: 0, trimStart: 0, volume: 1, fadeIn: 0, fadeOut: 0 });
     ui.showToast(`Audio added · ${ref.name}`);
@@ -230,8 +254,10 @@ export async function addAudioFile(file: File) {
 
 export async function importLogo(file: File, shotId: string) {
   const ui = useUI.getState();
+  const projectId = useEditor.getState().project.id;
   try {
     const ref = await importMedia(file);
+    if (useEditor.getState().project.id !== projectId) return;
     if (ref.kind !== "image") { ui.showToast("Logos must be images (PNG or SVG)"); return; }
     useEditor.getState().updateShot(shotId, (s) => { if (!s.logo) s.logo = defaultLogoStyle(); s.logo.media = ref; });
   } catch (e) {
@@ -242,14 +268,22 @@ export async function importLogo(file: File, shotId: string) {
 export async function importFilesToShot(files: File[], shotId?: string | null): Promise<MediaRef | null> {
   if (!files.length) return null;
   const ui = useUI.getState();
-  if (files[0].type.startsWith("audio/")) { await addAudioFile(files[0]); return null; }
+  const projectId = useEditor.getState().project.id;
+  const audioFile = files.find((file) => mediaType(file).startsWith("audio/"));
+  if (audioFile) {
+    await addAudioFile(audioFile);
+    if (useEditor.getState().project.id !== projectId) return null;
+    files = files.filter((file) => !mediaType(file).startsWith("audio/"));
+    if (!files.length) return null;
+  }
   // several files at once become a sequence: the first replaces the target, the rest follow it
   if (files.length > 1) {
     const first = await importFilesToShot([files[0]], shotId);
+    if (useEditor.getState().project.id !== projectId) return null;
     const ed = useEditor.getState();
     let after = shotId ?? ui.activeShotId ?? ed.project.shots[0]?.id ?? null;
     for (const f of files.slice(1)) {
-      if (f.type.startsWith("audio/")) continue;
+      if (useEditor.getState().project.id !== projectId) return first;
       const id = ed.addShot("media", after ?? undefined);
       await importFilesToShot([f], id);
       after = id;
@@ -257,17 +291,24 @@ export async function importFilesToShot(files: File[], shotId?: string | null): 
     ui.showToast(`${files.length} files added as ${files.length} shots`);
     return first;
   }
-  const targetId = shotId ?? ui.activeShotId;
+  const targetId = shotId ?? ui.activeShotId ?? useEditor.getState().project.shots[0]?.id;
   const target = useEditor.getState().project.shots.find((s) => s.id === targetId);
+  if (!target) return null;
   if (target && shotKind(target) === "logo") { await importLogo(files[0], target.id); return null; }
   if (target && shotKind(target) === "text") { ui.showToast("Text shots have no media. Select a media shot or add one with +."); return null; }
   try {
     const ref = await importMedia(files[0]);
+    if (useEditor.getState().project.id !== projectId || !useEditor.getState().project.shots.some((s) => s.id === target.id && s.media?.id === target.media?.id)) return null;
+    if (ref.kind === "audio") {
+      useEditor.getState().setAudio({ media: ref, start: 0, trimStart: 0, volume: 1, fadeIn: 0, fadeOut: 0 });
+      ui.showToast(`Audio added · ${ref.name}`);
+      return null;
+    }
     const previous = target?.media ?? null;
-    setShotMedia(shotId ?? ui.activeShotId, ref);
+    setShotMedia(target.id, ref);
     if (ref.kind === "video") {
       useEditor.getState().update((p) => {
-        const shot = p.shots.find((s) => s.id === (shotId ?? ui.activeShotId)) ?? p.shots[0];
+        const shot = p.shots.find((s) => s.id === target.id);
         if (shot && ref.duration && ref.duration > 0.5) shot.duration = Math.min(30, Math.round(ref.duration * 10) / 10);
       });
       // a video is a timeline job, so show the timeline rather than leaving it collapsed
@@ -280,9 +321,13 @@ export async function importFilesToShot(files: File[], shotId?: string | null): 
         label: "Add as new shot instead",
         onClick: () => {
           const ed = useEditor.getState();
-          ed.updateShot(target.id, (s) => { s.media = previous; });
+          if (ed.project.id !== projectId || ed.project.shots.find((s) => s.id === target.id)?.media?.id !== ref.id) return;
+          beginInteraction();
+          try {
+          ed.updateShot(target.id, (s) => { s.media = previous; s.duration = target.duration; s.trimStart = target.trimStart; s.speed = target.speed; });
           const id = ed.addShot("media", target.id);
           ed.updateShot(id, (s) => { s.media = ref; if (ref.kind === "video" && ref.duration && ref.duration > 0.5) s.duration = Math.min(30, Math.round(ref.duration * 10) / 10); });
+          } finally { endInteraction(); }
         },
       });
     } else ui.showToast(label);
@@ -295,8 +340,11 @@ export async function importFilesToShot(files: File[], shotId?: string | null): 
 
 export async function importBackgroundImage(file: File) {
   const ui = useUI.getState();
+  const projectId = useEditor.getState().project.id;
   try {
     const ref = await importMedia(file);
+    if (useEditor.getState().project.id !== projectId) return;
+    if (ref.kind !== "image") { ui.showToast("Backgrounds must be images"); return; }
     useEditor.getState().update((p) => {
       p.scene.background.type = "image";
       p.scene.background.image = ref;
@@ -310,11 +358,13 @@ export async function importBackgroundImage(file: File) {
 export async function applySampleScreen(id: string, shotId?: string | null) {
   const ui = useUI.getState();
   const ed = useEditor.getState();
-  const spec = getDevice(ed.project.mockup.device);
+  const projectId = ed.project.id;
   const screen = getSampleScreen(id);
   if (!screen) return;
   const targetId = shotId ?? ui.activeShotId ?? ed.project.shots[0]?.id;
   const shot = ed.project.shots.find((x) => x.id === targetId);
+  if (!shot || shotKind(shot) !== "media") return;
+  const spec = getDevice(shot.device ?? ed.project.mockup.device);
   // The samples are laid out for a phone- or laptop-shaped screen. A device close to those
   // proportions gets the sample at its native resolution so it fits the glass exactly; anything
   // squarer — a watch, a portrait tablet — would crop the layout, so it is drawn at the proportions
@@ -334,14 +384,17 @@ export async function applySampleScreen(id: string, shotId?: string | null) {
   if (!blob) return;
   const file = new File([blob], `${screen.name}.png`, { type: "image/png" });
   const ref = await importMedia(file);
-  setShotMedia(shot?.id ?? null, ref);
+  if (useEditor.getState().project.id !== projectId || !useEditor.getState().project.shots.some((s) => s.id === shot.id && s.media?.id === shot.media?.id)) return;
+  setShotMedia(shot.id, ref);
   ui.showToast(`${screen.name} sample screen added`);
 }
 
 export async function importScreenBackground(file: File) {
   const ui = useUI.getState();
+  const projectId = useEditor.getState().project.id;
   try {
     const ref = await importMedia(file);
+    if (useEditor.getState().project.id !== projectId) return;
     if (ref.kind !== "image") { ui.showToast("Screen backgrounds must be images"); return; }
     useEditor.getState().update((p) => { p.screen.bg = { type: "image", color: p.screen.bg?.color ?? "#000000", image: ref }; });
   } catch (e) {
@@ -354,15 +407,17 @@ export function composeAutoMotion(shotId: string, shuffleSeed = 0) {
   const ed = useEditor.getState();
   const p = ed.project;
   const shot = p.shots.find((s) => s.id === shotId);
-  if (!shot || shot.focusAreas.length === 0) return;
-  const spec = getDevice(p.mockup.device);
+  if (!shot || shotKind(shot) !== "media" || shot.focusAreas.length === 0) return;
+  shuffleSeed = Number.isFinite(shuffleSeed) ? Math.max(0, Math.floor(shuffleSeed)) : 0;
+  const spec = getDevice(shot.device ?? p.mockup.device);
   const layout = deviceLayout(spec, shot.media);
   const fov = 24;
   const viewH1 = layout.fitSize * 1.18; // view height at zoom 1
   const ui = useUI.getState();
   const viewAspect = ui.viewport.w / Math.max(1, ui.viewport.h);
   const [sw, sh] = spec.family === "flat" && layout.flat ? [layout.flat.w * S, layout.flat.h * S] : [spec.screenMm[0] * S, spec.screenMm[1] * S];
-  const areas = [...shot.focusAreas];
+  const areas = shot.focusAreas.filter((area) => [area.x, area.y, area.w, area.h].every(Number.isFinite) && area.w > 0 && area.h > 0);
+  if (!areas.length) return;
   if (shuffleSeed) {
     // deterministic shuffle
     let seed = shuffleSeed;
@@ -373,7 +428,7 @@ export function composeAutoMotion(shotId: string, shuffleSeed = 0) {
     }
   }
   const n = areas.length;
-  const D = Math.max(2, shot.duration);
+  const D = Math.max(0.2, shot.duration);
   const seg = D / n;
   const eases: Keyframe["ease"][] = ["easeInOut", "smooth", "expoInOut"];
   const ease = eases[shuffleSeed % eases.length];
@@ -408,6 +463,7 @@ export function composeAutoMotion(shotId: string, shuffleSeed = 0) {
 }
 
 export function newProject() {
+  templateToken++;
   const p = createProject();
   useEditor.getState().replaceProject(p);
   useEditor.temporal.getState().clear();

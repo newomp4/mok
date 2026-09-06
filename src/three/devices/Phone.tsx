@@ -1,10 +1,11 @@
 "use client";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 import type { DeviceSpec } from "@/lib/devices";
 import { S, pillGeometry, roundedPlaneGeometry } from "@/three/geometry";
 import { contourProfile, domeProfile, sweepRoundedRect } from "@/three/sweep";
 import type { FinishMaterials } from "@/three/materials";
+import { useOwnedResources } from "@/three/resources";
 
 const lensGeoCache = new THREE.CylinderGeometry(1, 1, 1, 48);
 const holeGeo = new THREE.CylinderGeometry(1, 1, 1, 12);
@@ -22,6 +23,7 @@ function Holes({ count, spacing, radius, position, rotation, material, depth = 0
     m.instanceMatrix.needsUpdate = true;
     return m;
   }, [count, spacing, radius, material, depth]);
+  useEffect(() => () => inst.dispose(), [inst]);
   return <primitive object={inst} position={position} rotation={rotation ?? [0, 0, 0]} />;
 }
 
@@ -74,6 +76,7 @@ export function CameraBump({ spec, mats }: { spec: DeviceSpec; mats: FinishMater
   }, [bump, spec.family]);
   const lensElement = useMemo(() => new THREE.MeshPhysicalMaterial({ color: "#12101c", metalness: 0.4, roughness: 0.04, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 2.2 }), []);
   const flashMat = useMemo(() => new THREE.MeshPhysicalMaterial({ color: "#f2e6c4", emissive: "#a89463", emissiveIntensity: 0.15, roughness: 0.25, clearcoat: 1 }), []);
+  useOwnedResources(useMemo(() => ({ geo, lensElement, flashMat }), [geo, lensElement, flashMat]));
   if (!bump || !geo) return null;
   const d = spec.body.d * S;
   const x = (spec.body.w / 2 - bump.left - bump.w / 2) * S;
@@ -106,6 +109,7 @@ export function SideButtons({ spec, mats }: { spec: DeviceSpec; mats: FinishMate
   const geo = useMemo(() => sweepRoundedRect(thick * S, 1, 1.2 * S, domeProfile(0.9 * S, 0.5 * S), { cornerSegments: 8 }), [thick]);
   const flushGeo = useMemo(() => sweepRoundedRect(thick * 0.9 * S, 1, 1.0 * S, domeProfile(0.35 * S, 0.3 * S), { cornerSegments: 8 }), [thick]);
   const flushMat = useMemo(() => new THREE.MeshPhysicalMaterial({ color: "#1b1b1e", metalness: 0.3, roughness: 0.15, clearcoat: 1 }), []);
+  useOwnedResources(useMemo(() => ({ geo, flushGeo, flushMat }), [geo, flushGeo, flushMat]));
   if (!spec.buttons) return null;
   const tablet = spec.family === "tablet";
   const items: { side: 1 | -1; y: number; len: number; flush?: boolean }[] = tablet
@@ -134,7 +138,7 @@ export function SideButtons({ spec, mats }: { spec: DeviceSpec; mats: FinishMate
   );
 }
 
-export function PhoneModel({ spec, mats, screen, tablet = false }: { spec: DeviceSpec; mats: FinishMaterials; screen: THREE.Material; tablet?: boolean }) {
+export function PhoneModel({ spec, mats, screen, tablet = false, notch = true }: { spec: DeviceSpec; mats: FinishMaterials; screen: THREE.Material; tablet?: boolean; notch?: boolean }) {
   const { w, h, d, r } = spec.body;
   const [sw, sh] = spec.screenMm;
   const e = spec.edge ?? (tablet ? 1.3 : 1.7);
@@ -149,6 +153,7 @@ export function PhoneModel({ spec, mats, screen, tablet = false }: { spec: Devic
     const antenna = new THREE.BoxGeometry(0.55 * S, (d - 2 * e) * S, 0.12 * S);
     return { body, glass, scr, island, earpiece, port, antenna };
   }, [w, h, d, r, e, sw, sh, spec.screenRadius, spec.island, tablet]);
+  useOwnedResources(geos);
   const islandMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#050506", roughness: 0.3, metalness: 0.1 }), []);
   const portMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#0a0a0b", roughness: 0.6 }), []);
   const antennaMat = useMemo(() => {
@@ -157,6 +162,7 @@ export function PhoneModel({ spec, mats, screen, tablet = false }: { spec: Devic
     c.lerp(new THREE.Color(l > 0.5 ? "#8a8a8c" : "#d0d0d2"), 0.55);
     return new THREE.MeshStandardMaterial({ color: c, metalness: 0.2, roughness: 0.6 });
   }, [mats.frame.color]);
+  useOwnedResources(useMemo(() => ({ islandMat, portMat, antennaMat }), [islandMat, portMat, antennaMat]));
   const frontZ = (d / 2) * S;
   const antennaY = (h / 2 - (tablet ? 30 : 18)) * S;
   return (
@@ -164,7 +170,7 @@ export function PhoneModel({ spec, mats, screen, tablet = false }: { spec: Devic
       <mesh geometry={geos.body} material={mats.frame} castShadow receiveShadow />
       <mesh geometry={geos.glass} material={mats.glass} position={[0, 0, frontZ + 0.05 * S]} />
       <mesh geometry={geos.scr} material={screen} position={[0, 0, frontZ + 0.32 * S]} />
-      {geos.island && spec.island && (
+      {notch && geos.island && spec.island && (
         <mesh geometry={geos.island} material={islandMat} position={[0, (sh / 2 - spec.island.top - spec.island.h / 2) * S, frontZ + 0.55 * S]} />
       )}
       {!tablet && <mesh geometry={geos.earpiece} material={portMat} position={[0, (h / 2 - 2.2) * S, frontZ + 0.45 * S]} />}

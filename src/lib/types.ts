@@ -25,7 +25,7 @@ export interface MediaRef {
 }
 
 export type EaseId =
-  | "linear" | "smooth" | "easeIn" | "easeOut" | "easeInOut" | "expoOut" | "expoInOut" | "backOut" | "hold";
+  | "linear" | "smooth" | "easeIn" | "easeOut" | "easeInOut" | "expoIn" | "expoOut" | "expoInOut" | "backIn" | "backOut" | "hold" | "holdStart";
 
 /** cubic-bezier control points [x1, y1, x2, y2], as in CSS timing functions */
 export type EaseCurve = [number, number, number, number];

@@ -51,6 +51,7 @@ export function Device({ layout }: { layout: DeviceLayout }) {
   const finishId = view.finish;
   const reflection = useEditor((s) => s.project.mockup.reflection);
   const gloss = useEditor((s) => s.project.mockup.gloss ?? 1.3);
+  const bandColor = useEditor((s) => s.project.mockup.bandColor);
   const borderRadius = useEditor((s) => s.project.mockup.borderRadius);
   const scenePreset = view.scene;
   const shot = useRenderShot() ?? null;
@@ -64,13 +65,23 @@ export function Device({ layout }: { layout: DeviceLayout }) {
   const finish = getFinish(spec, finishId);
   const mats = useMemo(() => createFinishMaterials(finish), [finish]);
   useEffect(() => () => disposeMaterials(mats), [mats]);
+  useEffect(() => {
+    mats.band.color.set(bandColor ?? finish.band ?? "#2a2a2c");
+    invalidate();
+  }, [bandColor, finish.band, mats, invalidate]);
+  useEffect(() => {
+    if (!spec.model) useModelBounds.getState().set(spec.id, { features: {
+      lid: spec.family === "laptop", island: !!(spec.island || spec.notch),
+      caseParts: false, band: spec.family === "watch",
+    } });
+  }, [spec]);
 
   const surface = useMemo(() => new ScreenSurface(maxAniso), [maxAniso]);
   useEffect(() => () => surface.dispose(), [surface]);
   const applied = useRef<{ media: LoadedMedia | null; fit: string } | null>(null);
   const lastSample = useRef(-1);
   // re-sample the screen colour whenever the picture or the scene changes
-  useEffect(() => { lastSample.current = -1; invalidate(); }, [media, scenePreset, shot?.fit, invalidate]);
+  useEffect(() => { lastSample.current = -1; invalidate(); }, [media, scenePreset, shot?.fit, screenCfg.bg?.type, screenCfg.bg?.color, screenCfg.bg?.preset, screenBgImage, invalidate]);
   const screenMat = useMemo(() => createScreenMaterial(surface.texture), [surface]);
   useEffect(() => () => screenMat.dispose(), [screenMat]);
 
@@ -194,9 +205,9 @@ export function Device({ layout }: { layout: DeviceLayout }) {
       </Suspense>
     );
   } else switch (spec.family) {
-    case "phone": model = <PhoneModel spec={spec} mats={mats} screen={screenMat} />; break;
-    case "tablet": model = <PhoneModel spec={spec} mats={mats} screen={screenMat} tablet />; break;
-    case "laptop": model = <LaptopModel spec={spec} mats={mats} screen={screenMat} />; break;
+    case "phone": model = <PhoneModel spec={spec} mats={mats} screen={screenMat} notch={view.notch} />; break;
+    case "tablet": model = <PhoneModel spec={spec} mats={mats} screen={screenMat} tablet notch={view.notch} />; break;
+    case "laptop": model = <LaptopModel spec={spec} mats={mats} screen={screenMat} notch={view.notch} />; break;
     case "watch": model = <WatchModel spec={spec} mats={mats} screen={screenMat} />; break;
     case "desktop": model = <DesktopModel spec={spec} mats={mats} screen={screenMat} />; break;
     default: model = <FlatModel spec={spec} mats={mats} screen={screenMat} size={layout.flat ?? { w: 192, h: 120 }} radius={borderRadius} finish={finish.id} />;

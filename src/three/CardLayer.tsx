@@ -4,9 +4,11 @@ import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { anim } from "@/three/anim";
 import { shotKind } from "@/lib/defaults";
-import { getMedia } from "@/lib/media";
-import { cssFamily, ensureFont, fontKey, getFont, isFontReady } from "@/lib/fonts";
+import { getMedia, useMedia } from "@/lib/media";
+import { useRenderShot } from "@/three/Device";
+import { cssFamily, ensureFont, fontKey, getFont, isFontReady, onFontsReady } from "@/lib/fonts";
 import type { EnterExit, LogoStyle, Shot, TextStyle } from "@/lib/types";
+import { rasterSize } from "@/three/raster";
 
 const DEG = Math.PI / 180;
 /** distance of the card plane in front of the camera */
@@ -99,19 +101,22 @@ export function enterExitAt(shot: Shot, t: number): { opacity: number; dx: numbe
   return { opacity, dx, dy, scale };
 }
 
-function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxW: number): string[] {
+const graphemeSegmenter = typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : null;
+
+export function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxW: number): string[] {
   const out: string[] = [];
   // a single token (a url, a hashtag) can be wider than the card, so break it rather than let it
   // run off both edges
   const push = (line: string) => {
-    let rest = line;
-    while (rest.length > 1 && ctx.measureText(rest).width > maxW) {
+    const glyphs = graphemeSegmenter ? Array.from(graphemeSegmenter.segment(line), (part) => part.segment) : Array.from(line);
+    let start = 0;
+    while (glyphs.length - start > 1 && ctx.measureText(glyphs.slice(start).join("")).width > maxW) {
       let n = 1;
-      while (n < rest.length && ctx.measureText(rest.slice(0, n + 1)).width <= maxW) n++;
-      out.push(rest.slice(0, n));
-      rest = rest.slice(n);
+      while (start + n < glyphs.length && ctx.measureText(glyphs.slice(start, start + n + 1).join("")).width <= maxW) n++;
+      out.push(glyphs.slice(start, start + n).join(""));
+      start += n;
     }
-    out.push(rest);
+    out.push(glyphs.slice(start).join(""));
   };
   for (const para of text.split("\n")) {
     const words = para.split(/\s+/).filter(Boolean);
@@ -230,6 +235,10 @@ export function CardLayer() {
   const bgRef = useRef<THREE.Mesh>(null);
   const contentRef = useRef<THREE.Mesh>(null);
   const invalidate = useThree((s) => s.invalidate);
+  const renderShot = useRenderShot();
+  const logo = useMedia(renderShot?.kind === "logo" ? renderShot.logo?.media : null);
+  // Restored logo files arrive asynchronously, while the paused viewport renders on demand.
+  useEffect(() => { invalidate(); }, [logo, invalidate]);
   const canvas = useMemo(() => { const c = document.createElement("canvas"); c.width = 16; c.height = 16; return c; }, []);
   const texture = useMemo(() => {
     const t = new THREE.CanvasTexture(canvas);
@@ -251,7 +260,9 @@ export function CardLayer() {
   }), [texture]);
   useEffect(() => () => { texture.dispose(); mat.dispose(); bgMat.dispose(); }, [texture, mat, bgMat]);
   const geo = useMemo(() => new THREE.PlaneGeometry(1, 1), []);
+  useEffect(() => () => geo.dispose(), [geo]);
   const lastSig = useRef("");
+  useEffect(() => onFontsReady(() => { lastSig.current = ""; invalidate(); }), [invalidate]);
 
   useFrame((state) => {
     const shot = anim.shot;
@@ -270,9 +281,8 @@ export function CardLayer() {
     bg.position.set(0, 0, -CARD_Z - 0.001);
     // canvas resolution follows the render size (export renders at full output size)
     const dpr = anim.exporting ? 1 : Math.min(2, state.viewport.dpr);
-    const cap = anim.exporting ? 3840 : 2048;
-    const W = Math.max(64, Math.min(cap, Math.round(state.size.width * dpr)));
-    const H = Math.max(64, Math.round(W / aspect));
+    const cap = Math.min(state.gl.capabilities.maxTextureSize, anim.exporting ? 4096 : 2048);
+    const [W, H] = rasterSize(state.size.width * dpr, state.size.height * dpr, cap);
     let sig = `${kind}|${W}x${H}|`;
     let effect = 0;
     let fontKey = "";

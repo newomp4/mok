@@ -10,7 +10,7 @@ export function StudioLooks() {
   const anchor = useRef<HTMLButtonElement>(null);
   return (
     <>
-      <Button ref={anchor} icon="sparkles" variant="ghost" onClick={() => setOpen(!open)} aria-expanded={open}>Studio looks</Button>
+      <Button ref={anchor} icon="sparkles" variant="ghost" aria-label="Studio looks" onClick={() => setOpen(!open)} aria-expanded={open}><span className="hidden sm:inline">Studio looks</span></Button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} width={320} align="end" className="p-3">
         <div className="mb-3 flex flex-col gap-1.5">
           <span className="text-[13px] font-semibold">A better starting light</span>

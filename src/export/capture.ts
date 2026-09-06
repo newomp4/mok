@@ -8,7 +8,8 @@ import { useEditor } from "@/store/editor";
 import { useUI } from "@/store/ui";
 import { locate, totalDuration } from "@/lib/animation";
 import { resolveShotView } from "@/lib/shotView";
-import { getMedia } from "@/lib/media";
+import { getMedia, ensureMedia } from "@/lib/media";
+import { collectMedia } from "@/lib/persistence";
 import { ensureFont } from "@/lib/fonts";
 
 export interface ExportSessionOptions {
@@ -50,7 +51,8 @@ function awaitSeek(v: HTMLVideoElement, target: number, timeoutMs: number, signa
     v.addEventListener("seeked", onSeeked);
     signal?.addEventListener("abort", onAbort);
     timer = window.setTimeout(() => finish(false), timeoutMs);
-    v.currentTime = target;
+    if (signal?.aborted) { finish(false); return; }
+    try { v.currentTime = target; } catch { finish(false); }
   });
 }
 
@@ -84,7 +86,7 @@ async function seekVideoForTime(t: number, signal?: AbortSignal) {
     const seen = Math.min(target - v.currentTime, 1 / 24);
     if (seen > (sourceFrameLength.get(v) ?? 0)) sourceFrameLength.set(v, seen);
   };
-  if (landed()) return;
+  if (landed() && !v.seeking && v.readyState >= 2) return;
   // carrying on after a seek that never lands would encode whatever frame the element still holds,
   // so try once more and then stop the export rather than let a stale frame through. The per-attempt
   // budget stays short because this runs for every motion-blur sample: an element that has wedged
@@ -109,80 +111,103 @@ async function waitForAssets(signal?: AbortSignal, timeoutMs = 15000) {
   // one frame of grace so a load kicked off by the change we just made has registered
   await nextFrame();
   while (useProgress.getState().active && performance.now() - started < timeoutMs) {
-    if (signal?.aborted) return;
+    checkCancelled(signal);
     await nextFrame();
   }
+  checkCancelled(signal);
+  if (useProgress.getState().active) throw new Error("Scene assets are still loading. Wait for the preview to finish loading and export again.");
 }
 
 /**
  * Temporarily switches the live viewport to an exact pixel size, renders frames
  * deterministically at requested times and restores everything afterwards.
  */
+let exportActive = false;
+function checkCancelled(signal?: AbortSignal) { if (signal?.aborted) throw new DOMException("Export cancelled", "AbortError"); }
+
+/** Abort a wait promptly even when a font or media decoder cannot itself be cancelled. */
+function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  checkCancelled(signal);
+  return new Promise((resolve, reject) => {
+    const abort = () => { cleanup(); reject(new DOMException("Export cancelled", "AbortError")); };
+    const cleanup = () => signal.removeEventListener("abort", abort);
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then((value) => { cleanup(); resolve(value); }, (error) => { cleanup(); reject(error); });
+  });
+}
+
 export async function withExportSession<T>(opts: ExportSessionOptions, fn: (s: ExportSession) => Promise<T>): Promise<T> {
+  checkCancelled(opts.signal);
+  if (exportActive) throw new Error("Another capture is already running");
+  if (![opts.width, opts.height].every((n) => Number.isInteger(n) && n > 0 && n <= 8192)) throw new Error("Choose whole-pixel export dimensions between 1 and 8192");
   const st = viewport.state;
   if (!st) throw new Error("Viewport is not ready");
+  const maxSize = st.gl.capabilities.maxTextureSize;
+  if (opts.width > maxSize || opts.height > maxSize) throw new Error(`This device supports exports up to ${maxSize} pixels per side`);
+  exportActive = true;
   const ui = useUI.getState();
+  const prevTime = ui.time;
   const wasPlaying = ui.playing;
-  if (wasPlaying) ui.setPlaying(false);
-  const prev = { w: st.size.width, h: st.size.height, dpr: st.viewport.dpr, frameloop: st.frameloop };
-  // a text shot on a web font would otherwise export in the fallback face
-  await Promise.all(
-    useEditor.getState().project.shots
-      .filter((sh) => sh.kind === "text" && sh.text)
-      .map((sh) => ensureFont(sh.text!.font, sh.text!.weight)),
-  );
-  // a model or scene texture still in flight would otherwise export as a placeholder
-  await waitForAssets(opts.signal);
-  anim.exporting = true;
-  st.setFrameloop("never");
-  st.setDpr(1);
-  st.setSize(opts.width, opts.height);
-  useRenderFlags.getState().setTransparent(opts.transparent);
-  await waitForAssets(opts.signal);
-  await nextFrame();
-  await nextFrame();
-  viewport.composer?.setSize(opts.width, opts.height);
-  const canvas = st.gl.domElement;
-  const prevTime = useUI.getState().time;
-  let mounted = shotViewAt(prevTime);
-  const renderAt = async (t: number, clockTime = t) => {
-    anim.exportTime = t;
-    // keep the React tree on the same shot as the frame being rendered, so per-shot devices,
-    // scenes and lighting are the ones that get exported
-    const view = shotViewAt(t);
-    const changed = view !== mounted;
-    if (useUI.getState().time !== t) useUI.setState({ time: t });
-    if (changed) {
-      mounted = view;
-      // give React and any newly mounted model a couple of frames to settle before capturing
-      await nextFrame();
-      await nextFrame();
-      await nextFrame();
-      await waitForAssets(opts.signal);
-      // the loading manager reports done as the last file decodes, which is still ahead of React
-      // re-rendering the suspended subtree and R3F committing the new material to the scene
-      await nextFrame();
-      await nextFrame();
-    }
-    await seekVideoForTime(t, opts.signal);
-    // with frameloop "never" R3F derives the frame delta from this timestamp, in seconds, so the
-    // export's own clock has to drive it: performance.now() is milliseconds and never repeatable
-    st.advance(clockTime);
-  };
+  const prev = { w: st.size.width, h: st.size.height, dpr: st.viewport.dpr, frameloop: st.frameloop, transparent: useRenderFlags.getState().transparent, exportTime: anim.exportTime, exporting: anim.exporting };
+  let resized = false;
   try {
-    return await fn({ canvas, renderAt });
-  } finally {
-    anim.exportTime = null;
-    anim.exporting = false;
-    useUI.setState({ time: prevTime });
-    useRenderFlags.getState().setTransparent(false);
-    st.setDpr(prev.dpr);
-    st.setSize(prev.w, prev.h);
+    if (wasPlaying) ui.setPlaying(false);
+    const project = useEditor.getState().project;
+    await abortable(Promise.all(project.shots.filter((sh) => sh.kind === "text" && sh.text).map((sh) => ensureFont(sh.text!.font, sh.text!.weight))), opts.signal);
+    const media = collectMedia(project);
+    const loaded = await abortable(Promise.all(media.map(ensureMedia)), opts.signal);
+    const missing = media.filter((_, i) => !loaded[i]);
+    if (missing.length) throw new Error(`Missing media: ${missing.slice(0, 3).map((m) => m.name).join(", ")}. Re-add the files before exporting.`);
+    await waitForAssets(opts.signal);
+    anim.exporting = true;
+    resized = true;
+    st.setFrameloop("never");
+    st.setDpr(1);
+    st.setSize(opts.width, opts.height);
+    useRenderFlags.getState().setTransparent(opts.transparent);
+    await waitForAssets(opts.signal);
     await nextFrame();
-    viewport.composer?.setSize(prev.w, prev.h);
-    st.setFrameloop(prev.frameloop === "never" ? "demand" : prev.frameloop);
-    st.invalidate();
-    if (wasPlaying) useUI.getState().setPlaying(true);
+    await nextFrame();
+    checkCancelled(opts.signal);
+    viewport.composer?.setSize(opts.width, opts.height);
+    let mounted = shotViewAt(prevTime);
+    const renderAt = async (t: number, clockTime = t) => {
+      checkCancelled(opts.signal);
+      anim.exportTime = t;
+      const view = shotViewAt(t);
+      const changed = view !== mounted;
+      if (useUI.getState().time !== t) useUI.setState({ time: t });
+      if (changed) {
+        mounted = view;
+        await nextFrame(); await nextFrame(); await nextFrame();
+        await waitForAssets(opts.signal);
+        await nextFrame(); await nextFrame();
+      }
+      await seekVideoForTime(t, opts.signal);
+      checkCancelled(opts.signal);
+      st.advance(clockTime);
+    };
+    return await fn({ canvas: st.gl.domElement, renderAt });
+  } finally {
+    // Setup is covered too: a rejected font, decoder, resize or asset wait must leave the editor
+    // exactly as it was before capture, including playback and an existing transparency preview.
+    anim.exportTime = prev.exportTime;
+    anim.exporting = prev.exporting;
+    useUI.setState({ time: prevTime });
+    useRenderFlags.getState().setTransparent(prev.transparent);
+    try {
+      if (resized) {
+        st.setDpr(prev.dpr);
+        st.setSize(prev.w, prev.h);
+        viewport.composer?.setSize(prev.w, prev.h);
+      }
+    } finally {
+      st.setFrameloop(prev.frameloop);
+      st.invalidate();
+      exportActive = false;
+      if (wasPlaying) useUI.getState().setPlaying(true);
+    }
   }
 }
 
@@ -200,10 +225,10 @@ function flatten(canvas: HTMLCanvasElement, width: number, height: number): HTML
   return flat;
 }
 
-export async function captureImage(opts: { width: number; height: number; format: ImageFormat; quality?: number; transparent: boolean; time?: number }): Promise<Blob> {
+export async function captureImage(opts: { width: number; height: number; format: ImageFormat; quality?: number; transparent: boolean; time?: number; signal?: AbortSignal }): Promise<Blob> {
   const time = opts.time ?? useUI.getState().time;
   const transparent = opts.transparent && opts.format !== "jpg";
-  return withExportSession({ width: opts.width, height: opts.height, transparent }, async ({ canvas, renderAt }) => {
+  return withExportSession({ width: opts.width, height: opts.height, transparent, signal: opts.signal }, async ({ canvas, renderAt }) => {
     await renderAt(time);
     // a second pass lets lazily-created effect targets settle at the new size
     await renderAt(time);
@@ -212,8 +237,10 @@ export async function captureImage(opts: { width: number; height: number; format
     // for, so an image meant to be opaque has to be flattened instead of shipping with holes in it
     const holes = !transparent && useEditor.getState().project.scene.background.type === "transparent";
     const src = holes ? flatten(canvas, opts.width, opts.height) : canvas;
-    const blob = await new Promise<Blob | null>((r) => src.toBlob(r, mime, opts.quality ?? 0.92));
+    const blob = await abortable(new Promise<Blob | null>((r) => src.toBlob(r, mime, opts.quality ?? 0.92)), opts.signal);
+    checkCancelled(opts.signal);
     if (!blob) throw new Error("Could not encode image");
+    if (blob.type !== mime) throw new Error(`This browser cannot encode ${opts.format.toUpperCase()} images. Choose PNG instead.`);
     return blob;
   });
 }
@@ -268,6 +295,7 @@ async function startEncoder(accum: HTMLCanvasElement, opts: VideoExportOptions, 
   for (const codec of codecs) {
     const useWebm = opts.format === "webm" || opts.transparent || codec === "vp9" || codec === "vp8";
     for (const quality of qualities) {
+      checkCancelled(opts.signal);
       const output = new Output({
         format: useWebm ? new WebMOutputFormat() : new Mp4OutputFormat({ fastStart: "in-memory" }),
         target: new BufferTarget(),
@@ -285,20 +313,24 @@ async function startEncoder(accum: HTMLCanvasElement, opts: VideoExportOptions, 
         if (mix) {
           const prefs: AudioCodec[] = useWebm ? ["opus", "vorbis"] : ["aac", "opus"];
           const acodec = await getFirstEncodableAudioCodec(prefs, { numberOfChannels: 2, sampleRate: mix.sampleRate });
+          if (!acodec) throw new Error("This browser cannot encode the soundtrack in this video format. Choose another format.");
           if (acodec) {
             audioSource = new AudioBufferSource({ codec: acodec, bitrate: 160_000 });
             output.addAudioTrack(audioSource);
           }
         }
-        await output.start();
-        if (audioSource && mix) { await audioSource.add(mix); audioSource.close(); }
-        await source.add(timestamp, duration);
+        checkCancelled(opts.signal);
+        await abortable(output.start(), opts.signal);
+        if (audioSource && mix) { await abortable(audioSource.add(mix), opts.signal); audioSource.close(); }
+        await abortable(source.add(timestamp, duration), opts.signal);
+        checkCancelled(opts.signal);
         // a downgrade explains a smaller file than the dialog promised, so it rides along with progress
         const note = codec === codecs[0] && quality === opts.quality ? null : `${CODEC_LABEL[codec] ?? codec.toUpperCase()} · ${QUALITY_LABEL[quality]} quality`;
         return { output, source, useWebm, note };
       } catch (e) {
         lastError = e;
         try { await output.cancel(); } catch {}
+        checkCancelled(opts.signal);
       }
     }
   }
@@ -308,10 +340,13 @@ async function startEncoder(accum: HTMLCanvasElement, opts: VideoExportOptions, 
 export async function exportVideo(opts: VideoExportOptions): Promise<{ blob: Blob; ext: string }> {
   const project = useEditor.getState().project;
   const total = totalDuration(project);
-  const frames = Math.max(1, Math.round(total * opts.fps));
+  checkCancelled(opts.signal);
+  if (!Number.isFinite(opts.fps) || opts.fps < 1 || opts.fps > 120) throw new Error("Choose a frame rate between 1 and 120 fps");
+  if (!Number.isFinite(total) || total <= 0) throw new Error("Add a shot before exporting video");
+  const frames = Math.max(1, Math.ceil(total * opts.fps - 1e-7));
   const wantWebm = opts.format === "webm" || opts.transparent;
   const codecPrefs: VideoCodec[] = wantWebm ? ["vp9", "av1", "vp8"] : ["avc", "hevc", "av1", "vp9"];
-  const codecs = await encodableCodecs(codecPrefs, opts.width, opts.height);
+  const codecs = await abortable(encodableCodecs(codecPrefs, opts.width, opts.height), opts.signal);
   if (!codecs.length) throw new Error("This browser cannot encode video (WebCodecs unavailable)");
 
   return withExportSession({ width: opts.width, height: opts.height, transparent: opts.transparent, signal: opts.signal }, async ({ canvas, renderAt }) => {
@@ -324,15 +359,12 @@ export async function exportVideo(opts: VideoExportOptions): Promise<{ blob: Blo
     let mix: AudioBuffer | null = null;
     if (project.audio) {
       opts.onProgress?.(0, "Mixing audio…");
-      try {
-        mix = await renderAudioMix(total);
-      } catch (e) {
-        console.warn("audio mix failed", e);
-      }
+      mix = await abortable(renderAudioMix(total), opts.signal);
+      if (!mix) throw new Error("The soundtrack could not be loaded. Re-add the audio file before exporting.");
     }
 
     const shutter = 0.5; // 180° shutter
-    const samples = Math.max(1, Math.round(opts.samples));
+    const samples = Number.isFinite(opts.samples) ? Math.max(1, Math.min(32, Math.round(opts.samples))) : 1;
     let enc: Awaited<ReturnType<typeof startEncoder>> | null = null;
     try {
       // warm-up render so effect buffers exist at the export size
@@ -366,14 +398,17 @@ export async function exportVideo(opts: VideoExportOptions): Promise<{ blob: Blo
         }
         ctx.globalAlpha = 1;
         ctx.globalCompositeOperation = "source-over";
-        if (!enc) enc = await startEncoder(accum, opts, mix, codecs, t, 1 / opts.fps);
-        else await enc.source.add(t, 1 / opts.fps);
+        const frameDuration = Math.min(1 / opts.fps, total - t);
+        if (!enc) enc = await startEncoder(accum, opts, mix, codecs, t, frameDuration);
+        else await abortable(enc.source.add(t, frameDuration), opts.signal);
         opts.onProgress?.((i + 1) / frames, `Rendering frame ${i + 1} / ${frames}${enc.note ? ` · ${enc.note}` : ""}`);
       }
+      checkCancelled(opts.signal);
       opts.onProgress?.(1, "Encoding…");
       if (!enc) throw new Error("Encoder produced no data");
       enc.source.close();
-      await enc.output.finalize();
+      await abortable(enc.output.finalize(), opts.signal);
+      checkCancelled(opts.signal);
       const buffer = enc.output.target.buffer;
       if (!buffer) throw new Error("Encoder produced no data");
       return { blob: new Blob([buffer], { type: enc.useWebm ? "video/webm" : "video/mp4" }), ext: enc.useWebm ? "webm" : "mp4" };

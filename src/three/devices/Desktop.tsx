@@ -5,6 +5,7 @@ import type { DeviceSpec } from "@/lib/devices";
 import { S, roundedPlaneGeometry } from "@/three/geometry";
 import { contourProfile, pillProfile, sweepRoundedRect } from "@/three/sweep";
 import type { FinishMaterials } from "@/three/materials";
+import { useOwnedResources } from "@/three/resources";
 
 export function DesktopModel({ spec, mats, screen }: { spec: DeviceSpec; mats: FinishMaterials; screen: THREE.Material }) {
   const { w, h, d, r } = spec.body;
@@ -25,9 +26,11 @@ export function DesktopModel({ spec, mats, screen }: { spec: DeviceSpec; mats: F
     cam.rotateX(Math.PI / 2);
     return { panel, bezel, scr, arm, foot, chin, cam, armH, armT, footD };
   }, [w, h, d, r, sw, sh, spec.screenRadius, spec.chin, imac]);
+  useOwnedResources(geos);
   const chinMat = useMemo(() => new THREE.MeshStandardMaterial({ color: new THREE.Color(mats.frame.color).lerp(new THREE.Color("#ffffff"), 0.42), roughness: 0.55, metalness: 0.5 }), [mats.frame.color]);
   const bezelLight = useMemo(() => new THREE.MeshPhysicalMaterial({ color: "#e4e4e6", roughness: 0.35, clearcoat: 0.6, metalness: 0.1 }), []);
   const camMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#050506", roughness: 0.3 }), []);
+  useOwnedResources(useMemo(() => ({ chinMat, bezelLight, camMat }), [chinMat, bezelLight, camMat]));
   const total = (h + standH) * S;
   const panelY = total - (h / 2) * S;
   const front = (d / 2) * S;

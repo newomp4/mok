@@ -24,22 +24,24 @@ function ProjectName() {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(name);
   const ref = useRef<HTMLInputElement>(null);
+  const cancelled = useRef(false);
   useEffect(() => setText(name), [name]);
   useEffect(() => { if (editing) ref.current?.select(); }, [editing]);
   if (editing) {
     return (
       <input
         ref={ref}
+        aria-label="Project name"
         className="label h-7 w-40 rounded-md bg-fill px-2 text-fg outline-none ring-1 ring-accent"
         value={text}
         onChange={(e) => setText(e.target.value)}
-        onBlur={() => { setEditing(false); const v = text.trim(); if (v && v !== name) update((p) => { p.name = v; }); }}
-        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") { setText(name); setEditing(false); } }}
+        onBlur={() => { setEditing(false); const v = text.trim(); if (!cancelled.current && v && v !== name) update((p) => { p.name = v; }); else setText(name); }}
+        onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") { cancelled.current = true; e.currentTarget.blur(); } }}
       />
     );
   }
   return (
-    <button type="button" onClick={() => setEditing(true)} className="label flex h-7 max-w-48 items-center gap-1.5 truncate rounded-md px-2 text-fg-2 hover:bg-fill hover:text-fg" title="Rename project">
+    <button type="button" onClick={() => { cancelled.current = false; setText(name); setEditing(true); }} className="label flex h-7 max-w-48 items-center gap-1.5 truncate rounded-md px-2 text-fg-2 hover:bg-fill hover:text-fg" title="Rename project">
       <span className="truncate">{name}</span>
       <Icon name="text-cursor" size={11} className="text-muted" />
     </button>
@@ -53,21 +55,22 @@ export function TopBar() {
     <div className="relative flex h-10 shrink-0 items-center gap-0.5 rounded-lg border border-line bg-panel px-1.5">
       <MainMenu />
       <Logo />
-      <BarButton onClick={() => setModal("info")}>Info</BarButton>
+      <BarButton className="hidden lg:flex" onClick={() => setModal("info")}>Info</BarButton>
       <span data-tour="templates"><TemplatesMenu /></span>
-      <HelpMenu />
-      <div className="mx-1.5 h-4 w-px bg-line" />
-      <ProjectName />
+      <div className="hidden lg:block"><HelpMenu /></div>
+      <div className="mx-1.5 hidden h-4 w-px bg-line md:block" />
+      <div className="hidden min-w-0 md:block"><ProjectName /></div>
       {recording && (
         <span className="label ml-1 flex items-center gap-1 rounded-md bg-accent-soft px-2 py-1 text-accent">
           <Icon name="record" size={8} /> Rec
         </span>
       )}
-      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+      <div className="ml-auto min-w-0">
         <AspectMenu />
       </div>
-      <div className="flex-1" />
-      <BarButton onClick={() => void saveCurrentProject()}>Save project</BarButton>
+      <div className="hidden flex-1 lg:block" />
+      <BarButton className="hidden md:flex" onClick={() => void saveCurrentProject()}>Save project</BarButton>
+      <IconButton className="md:hidden" icon="save" label="Save project" onClick={() => void saveCurrentProject()} />
       <IconButton icon="history" label="Projects" onClick={() => setModal("projects")} />
       <CaptureButton />
       <span data-tour="export"><ExportButton /></span>

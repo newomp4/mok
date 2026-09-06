@@ -48,17 +48,35 @@ export function TemplatesMenu() {
   const [hover, setHover] = useState<string | null>(null);
   const [mine, setMine] = useState<TemplateMeta[]>([]);
   const ref = useRef<HTMLButtonElement>(null);
-  // templates you saved yourself sit above the built-ins, refreshed each time the menu opens
-  useEffect(() => { if (open) void listTemplates().then(setMine); }, [open]);
+  const selection = useRef(0);
+  const [loading, setLoading] = useState<string | null>(null);
+  // Ignore an old listing or load once the menu closes, reopens, or a newer template is chosen.
+  useEffect(() => {
+    let active = true;
+    if (open) void listTemplates().then((items) => { if (active) setMine(items); });
+    else { setHover(null); setLoading(null); }
+    const generation = selection;
+    return () => { active = false; generation.current++; };
+  }, [open]);
   const startFrom = async (t: TemplateMeta) => {
-    const p = await projectFromTemplate(t.id);
-    if (!p) return;
-    useEditor.getState().replaceProject(p);
-    useEditor.temporal.getState().clear();
-    useUI.getState().setTime(0);
-    useUI.getState().setActiveShot(p.shots[0]?.id ?? null);
-    setOpen(false);
-    useUI.getState().showToast(`Started from “${t.name}”`);
+    const request = ++selection.current;
+    const source = useEditor.getState().project;
+    setLoading(t.id);
+    try {
+      const p = await projectFromTemplate(t.id);
+      if (request !== selection.current) return;
+      if (useEditor.getState().project !== source) { useUI.getState().showToast("The project changed while loading. Choose the template again to apply it."); return; }
+      if (!p) { useUI.getState().showToast("That template is no longer available"); return; }
+      useUI.getState().setPlaying(false);
+      useEditor.getState().replaceProject(p);
+      useEditor.temporal.getState().clear();
+      useUI.getState().setTime(0);
+      useUI.getState().setActiveShot(p.shots[0]?.id ?? null);
+      setOpen(false);
+      useUI.getState().showToast(`Started from “${t.name}”`);
+    } catch (e) {
+      if (request === selection.current) useUI.getState().showToast(`Could not open the template: ${(e as Error).message}`);
+    } finally { if (request === selection.current) setLoading(null); }
   };
   return (
     <>
@@ -72,6 +90,7 @@ export function TemplatesMenu() {
                 <button
                   key={t.id}
                   type="button"
+                  disabled={loading === t.id}
                   onClick={() => void startFrom(t)}
                   className="group flex flex-col overflow-hidden rounded-lg border border-line bg-panel-2 text-left transition-colors hover:border-line-2"
                 >
@@ -98,7 +117,7 @@ export function TemplatesMenu() {
               <button
                 key={t.id}
                 type="button"
-                onClick={() => { applyTemplate(t.id); setOpen(false); }}
+                onClick={() => { selection.current++; applyTemplate(t.id); setOpen(false); }}
                 onMouseEnter={() => setHover(t.id)}
                 onMouseLeave={() => setHover((h) => (h === t.id ? null : h))}
                 className="group flex flex-col overflow-hidden rounded-lg border border-line bg-panel-2 text-left transition-colors hover:border-line-2"

@@ -5,6 +5,7 @@ import type { DeviceSpec } from "@/lib/devices";
 import { S, roundedPlaneGeometry } from "@/three/geometry";
 import { bulgeProfile, contourProfile, pillProfile, sweepRoundedRect } from "@/three/sweep";
 import type { FinishMaterials } from "@/three/materials";
+import { useOwnedResources } from "@/three/resources";
 
 function knurledCrown(radius: number, length: number, teeth = 36): THREE.LatheGeometry {
   const pts: THREE.Vector2[] = [];
@@ -56,11 +57,12 @@ export function WatchModel({ spec, mats, screen }: { spec: DeviceSpec; mats: Fin
     hole.rotateX(Math.PI / 2);
     return { body, glass, scr, strap, lug, crown, crownCap, btn, sensor, ring, hole, strapLen };
   }, [w, h, d, r, sw, sh, spec.screenRadius, ultra]);
+  useOwnedResources(geos);
   const crownMat = useMemo(() => new THREE.MeshStandardMaterial({ color: ultra ? "#e0632f" : mats.frame.color, metalness: 1, roughness: 0.28 }), [ultra, mats.frame.color]);
   const sensorMat = useMemo(() => new THREE.MeshPhysicalMaterial({ color: "#0b0b0d", roughness: 0.08, clearcoat: 1, metalness: 0.2 }), []);
   const holeMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#111", roughness: 0.9 }), []);
+  useOwnedResources(useMemo(() => ({ crownMat, sensorMat, holeMat }), [crownMat, sensorMat, holeMat]));
   const front = (d / 2) * S;
-  const strapY = (h / 2 + geos.strapLen / 2 - 1) * S;
   return (
     <group>
       <mesh geometry={geos.body} material={mats.frame} castShadow receiveShadow />

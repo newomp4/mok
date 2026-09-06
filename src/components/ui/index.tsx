@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type CSSProperties, useCallback } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useId, type ReactNode, type CSSProperties, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { cn, clamp, fmt } from "@/lib/cn";
 import { Icon, type IconName } from "@/components/icons";
@@ -60,6 +60,7 @@ export function Chip({ children, tone = "muted", className }: { children: ReactN
 // every enabled layer registers here in the order it opened, so Escape can be handled by
 // the innermost one alone instead of collapsing a dropdown and the popover holding it
 const layers: object[] = [];
+export const hasOpenLayer = () => layers.length > 0;
 
 export function useClickOutside(refs: React.RefObject<HTMLElement | null>[], onOutside: () => void, enabled = true) {
   // callers pass a fresh array and a fresh callback on every render; reading them through
@@ -77,7 +78,9 @@ export function useClickOutside(refs: React.RefObject<HTMLElement | null>[], onO
       latest.current.onOutside();
     };
     const key = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || layers[layers.length - 1] !== layer) return;
+      if (e.defaultPrevented || e.key !== "Escape" || layers[layers.length - 1] !== layer) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
       latest.current.onOutside();
     };
     document.addEventListener("pointerdown", handler, true);
@@ -99,7 +102,11 @@ export function Popover({
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<CSSProperties | null>(null);
-  useClickOutside([panel, anchor], onClose, open);
+  useClickOutside([panel, anchor], () => {
+    const restoreFocus = panel.current?.contains(document.activeElement);
+    onClose();
+    if (restoreFocus) anchor.current?.focus();
+  }, open);
   useLayoutEffect(() => {
     if (!open || !anchor.current) return;
     const compute = () => {
@@ -133,7 +140,7 @@ export function Popover({
     <div
       ref={panel}
       data-popover-layer=""
-      style={{ position: "fixed", zIndex: 60, width, visibility: pos ? "visible" : "hidden", ...(pos ?? {}) }}
+      style={{ position: "fixed", zIndex: 75, width, maxWidth: "calc(100vw - 16px)", maxHeight: "calc(100dvh - 16px)", overflowY: "auto", visibility: pos ? "visible" : "hidden", ...(pos ?? {}) }}
       className={cn("fade-in rounded-lg border border-line bg-panel p-1 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.35)]", className)}
     >
       {children}
@@ -196,7 +203,7 @@ export function ContextMenu({ at, items, onClose }: { at: { x: number; y: number
   }, [at]);
   if (!at) return null;
   return createPortal(
-    <div ref={panel} data-popover-layer="" style={{ position: "fixed", zIndex: 70, ...pos }} className="fade-in rounded-lg border border-line bg-panel p-1 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.35)]" onContextMenu={(e) => e.preventDefault()}>
+    <div ref={panel} data-popover-layer="" style={{ position: "fixed", zIndex: 76, maxWidth: "calc(100vw - 16px)", maxHeight: "calc(100dvh - 16px)", overflowY: "auto", ...pos }} className="fade-in rounded-lg border border-line bg-panel p-1 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.35)]" onContextMenu={(e) => e.preventDefault()}>
       <MenuList items={items} onClose={onClose} />
     </div>,
     document.body,
@@ -228,18 +235,70 @@ export function SelectRow<T extends string>({ label, value, options, onChange, c
   label: ReactNode; value: T; options: SelectOption<T>[]; onChange: (v: T) => void; className?: string; disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [focused, setFocused] = useState<T | null>(null);
   const ref = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const fromEnd = useRef(false);
+  const search = useRef({ text: "", time: 0 });
+  const labelId = useId(), listId = useId();
   const current = options.find((o) => o.value === value);
+  useEffect(() => {
+    if (!open) return;
+    search.current = { text: "", time: 0 };
+    // The portal first measures while hidden; focus after it has been positioned.
+    const frame = requestAnimationFrame(() => {
+      const nodes = Array.from(list.current?.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)') ?? []);
+      const selected = nodes.find((node) => node.getAttribute("aria-selected") === "true");
+      (selected ?? nodes[fromEnd.current ? nodes.length - 1 : 0] ?? list.current)?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [open]);
+  const close = () => { setOpen(false); ref.current?.focus(); };
+  const onListKey = (e: React.KeyboardEvent) => {
+    if (e.key === "Tab") {
+      // Resume the document's normal tab order from the trigger, rather than the body portal.
+      close();
+      return;
+    }
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); return; }
+    const nodes = Array.from(list.current?.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)') ?? []);
+    if (!nodes.length) return;
+    const at = nodes.indexOf(document.activeElement as HTMLButtonElement);
+    let next: HTMLButtonElement | undefined;
+    if (e.key === "ArrowDown") next = nodes[(at + 1) % nodes.length];
+    else if (e.key === "ArrowUp") next = nodes[at < 0 ? nodes.length - 1 : (at - 1 + nodes.length) % nodes.length];
+    else if (e.key === "Home") next = nodes[0];
+    else if (e.key === "End") next = nodes[nodes.length - 1];
+    else if (e.key.length === 1 && e.key !== " " && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const now = e.timeStamp;
+      const text = now - search.current.time < 700 ? search.current.text + e.key.toLocaleLowerCase() : e.key.toLocaleLowerCase();
+      search.current = { text, time: now };
+      const repeated = [...text].every((char) => char === text[0]);
+      const prefix = repeated ? text[0] : text;
+      const start = repeated ? at + 1 : Math.max(0, at);
+      next = Array.from({ length: nodes.length }, (_, i) => nodes[(start + i) % nodes.length]).find((node) => node.textContent?.trim().toLocaleLowerCase().startsWith(prefix));
+      e.preventDefault(); e.stopPropagation();
+    }
+    if (next) { e.preventDefault(); e.stopPropagation(); next.focus(); next.scrollIntoView({ block: "nearest" }); }
+  };
   return (
     <>
       <button
         ref={ref}
         type="button"
         disabled={disabled}
-        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-controls={open ? listId : undefined}
+        onClick={() => { fromEnd.current = false; setOpen((o) => !o); }}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault(); e.stopPropagation(); fromEnd.current = e.key === "ArrowUp"; setOpen(true);
+          }
+        }}
         className={cn("flex h-8 w-full items-center justify-between rounded-md bg-fill px-2.5 transition-colors hover:bg-fill-2 disabled:opacity-40", open && "bg-fill-2", className)}
       >
-        <span className="label text-fg-2">{label}</span>
+        <span id={labelId} className="label text-fg-2">{label}</span>
         <span className="label flex items-center gap-1.5 text-fg">
           {current?.swatch && <span className="h-3 w-3 rounded-sm border border-black/10" style={{ background: current.swatch }} />}
           {current?.label ?? value}
@@ -247,14 +306,18 @@ export function SelectRow<T extends string>({ label, value, options, onChange, c
         </span>
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} align="end" width={ref.current?.offsetWidth}>
-        <div className="scroll max-h-72 overflow-auto">
+        <div ref={list} id={listId} role="listbox" aria-labelledby={labelId} tabIndex={-1} onKeyDown={onListKey} className="scroll max-h-72 overflow-auto outline-none">
           {options.map((o) => (
             <button
               key={o.value}
               type="button"
+              role="option"
+              aria-selected={o.value === value}
+              tabIndex={focused === o.value ? 0 : -1}
               disabled={o.disabled}
-              onClick={() => { onChange(o.value); setOpen(false); }}
-              className={cn("label flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-fg-2 transition-colors hover:bg-fill hover:text-fg disabled:opacity-40", o.value === value && "bg-fill text-fg")}
+              onFocus={() => setFocused(o.value)}
+              onClick={() => { onChange(o.value); close(); }}
+              className={cn("label flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-fg-2 transition-colors hover:bg-fill hover:text-fg focus:outline-none focus:ring-2 focus:ring-inset focus:ring-accent/60 disabled:opacity-40", o.value === value && "bg-fill text-fg")}
             >
               {o.swatch && <span className="h-3 w-3 rounded-sm border border-black/10" style={{ background: o.swatch }} />}
               <span className="flex-1">{o.label}</span>
@@ -279,6 +342,7 @@ export function Segmented<T extends string>({ value, options, onChange, classNam
           key={o.value}
           type="button"
           disabled={o.disabled}
+          aria-pressed={o.value === value}
           onClick={() => onChange(o.value)}
           className={cn("label flex flex-1 items-center justify-center gap-1.5 rounded-[5px] transition-colors disabled:opacity-40", size === "sm" ? "h-6 px-2" : "h-7 px-2.5", o.value === value ? "bg-panel text-fg shadow-sm" : "text-muted hover:text-fg")}
         >
@@ -291,26 +355,28 @@ export function Segmented<T extends string>({ value, options, onChange, classNam
 }
 
 /* ---------- Switch ---------- */
-export function Switch({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+export function Switch({ checked, onChange, disabled, labelledBy }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; labelledBy?: string }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
+      aria-labelledby={labelledBy}
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn("relative h-4 w-7 shrink-0 rounded-full transition-colors disabled:opacity-40", checked ? "bg-inverse" : "bg-fill-3")}
     >
-      <span className={cn("absolute top-0.5 h-3 w-3 rounded-full bg-panel shadow transition-transform", checked ? "translate-x-3.5" : "translate-x-0.5")} />
+      <span className={cn("absolute left-0 top-0.5 h-3 w-3 rounded-full bg-panel shadow transition-transform", checked ? "translate-x-3" : "translate-x-0.5")} />
     </button>
   );
 }
 
 export function ToggleRow({ label, checked, onChange, hint, disabled }: { label: ReactNode; checked: boolean; onChange: (v: boolean) => void; hint?: string; disabled?: boolean }) {
+  const labelId = useId();
   return (
     <div className={cn("flex h-8 items-center justify-between rounded-md bg-fill px-2.5", disabled && "opacity-40")}>
-      <span className="label flex items-center gap-1.5 text-fg-2">{label}{hint && <Hint>{hint}</Hint>}</span>
-      <Switch checked={checked} onChange={onChange} disabled={disabled} />
+      <span id={labelId} className="label flex items-center gap-1.5 text-fg-2">{label}{hint && <Hint>{hint}</Hint>}</span>
+      <Switch checked={checked} onChange={onChange} disabled={disabled} labelledBy={labelId} />
     </div>
   );
 }
@@ -350,6 +416,8 @@ export function NumberRow({
 }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState("");
+  const labelId = useId();
+  const editCancelled = useRef(false);
   const ref = useRef<HTMLDivElement>(null);
   const drag = useRef<{ x: number; v: number; moved: boolean } | null>(null);
   const dragEnd = useRef(onDragEnd);
@@ -358,12 +426,13 @@ export function NumberRow({
   const pct = max > min ? clamp((value - min) / (max - min), 0, 1) : 0;
 
   const commit = useCallback((v: number) => {
+    if (!Number.isFinite(v)) return;
     const snapped = Math.round(v / step) * step;
     onChange(clamp(Number(snapped.toFixed(6)), min, max));
   }, [min, max, step, onChange]);
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if (disabled || editing) return;
+    if (disabled || editing || e.button !== 0) return;
     if ((e.target as HTMLElement).closest("button")) return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     drag.current = { x: e.clientX, v: value, moved: false };
@@ -395,6 +464,7 @@ export function NumberRow({
     const moved = drag.current.moved;
     cancelDrag();
     if (!moved) {
+      editCancelled.current = false;
       setText(value.toFixed(d));
       setEditing(true);
     }
@@ -402,20 +472,26 @@ export function NumberRow({
   };
   const finishEdit = () => {
     setEditing(false);
-    const n = parseFloat(text);
-    if (!Number.isNaN(n)) commit(n);
+    const n = text.trim() ? Number(text) : NaN;
+    if (!editCancelled.current && Number.isFinite(n)) commit(n);
   };
   const nudge = (dir: 1 | -1, big: boolean) => commit(value + dir * step * (big ? 10 : 1));
   return (
     <div className={cn("flex items-stretch gap-1", className)}>
       <div
         ref={ref}
-        tabIndex={disabled ? -1 : 0}
+        tabIndex={disabled || editing ? -1 : 0}
+        role={editing ? undefined : "spinbutton"}
+        aria-labelledby={labelId}
+        aria-valuemin={min}
+        aria-valuemax={max}
+        aria-valuenow={value}
+        aria-disabled={disabled}
         onKeyDown={(e) => {
-          if (disabled) return;
+          if (disabled || editing) return;
           if (e.key === "ArrowUp" || e.key === "ArrowRight") { e.preventDefault(); e.stopPropagation(); nudge(1, e.shiftKey); }
           else if (e.key === "ArrowDown" || e.key === "ArrowLeft") { e.preventDefault(); e.stopPropagation(); nudge(-1, e.shiftKey); }
-          else if (e.key === "Enter") { e.preventDefault(); setText(value.toFixed(d)); setEditing(true); }
+          else if (e.key === "Enter") { e.preventDefault(); editCancelled.current = false; setText(value.toFixed(d)); setEditing(true); }
         }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -424,19 +500,31 @@ export function NumberRow({
         onContextMenu={resetTo === undefined || disabled ? undefined : (e) => { e.preventDefault(); e.stopPropagation(); commit(resetTo); }}
         onPointerCancel={cancelDrag}
         onLostPointerCapture={cancelDrag}
-        onDoubleClick={() => { if (!disabled) { setText(value.toFixed(d)); setEditing(true); } }}
+        onDoubleClick={() => { if (!disabled) { editCancelled.current = false; setText(value.toFixed(d)); setEditing(true); } }}
         className={cn("relative flex h-8 flex-1 cursor-ew-resize items-center justify-between overflow-hidden rounded-md bg-fill px-2.5 outline-none focus-visible:ring-2 focus-visible:ring-accent/60", disabled && "pointer-events-none opacity-40")}
       >
         <div className="pointer-events-none absolute inset-y-0 left-0 bg-fill-2" style={{ width: `${pct * 100}%` }} />
-        <span className="label relative flex items-center gap-1.5 text-fg-2">{label}{hint && <Hint>{hint}</Hint>}</span>
+        <span id={labelId} className="label relative flex items-center gap-1.5 text-fg-2">{label}{hint && <Hint>{hint}</Hint>}</span>
         {editing ? (
           <input
             autoFocus
+            aria-labelledby={labelId}
+            inputMode="decimal"
             className="num relative w-16 rounded bg-panel px-1 text-right text-[11px] text-fg outline-none ring-1 ring-accent"
             value={text}
             onChange={(e) => setText(e.target.value)}
             onBlur={finishEdit}
-            onKeyDown={(e) => { if (e.key === "Enter") finishEdit(); if (e.key === "Escape") setEditing(false); }}
+            onFocus={(e) => e.currentTarget.select()}
+            onKeyDown={(e) => {
+              if (["Enter", "Escape", "ArrowUp", "ArrowDown"].includes(e.key)) e.stopPropagation();
+              if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); ref.current?.focus(); }
+              if (e.key === "Escape") { e.preventDefault(); editCancelled.current = true; setEditing(false); ref.current?.focus(); }
+              if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+                e.preventDefault();
+                const n = text.trim() ? Number(text) : value;
+                if (Number.isFinite(n)) setText(String(clamp(Number((n + (e.key === "ArrowUp" ? 1 : -1) * step * (e.shiftKey ? 10 : 1)).toFixed(6)), min, max)));
+              }
+            }}
             onPointerDown={(e) => e.stopPropagation()}
           />
         ) : (
@@ -450,29 +538,36 @@ export function NumberRow({
 
 /* ---------- Color row ---------- */
 export function ColorRow({ label, value, onChange, onDragStart, onDragEnd }: { label: ReactNode; value: string; onChange: (v: string) => void; onDragStart?: () => void; onDragEnd?: () => void }) {
+  const labelId = useId();
   const [text, setText] = useState(value);
   const picking = useRef<number | null>(null);
+  const finish = useRef(onDragEnd);
+  finish.current = onDragEnd;
   useEffect(() => setText(value), [value]);
+  useEffect(() => () => {
+    if (picking.current !== null) { window.clearTimeout(picking.current); picking.current = null; finish.current?.(); }
+  }, []);
   // the native picker fires continuously while dragging; collapse that into one history step
   const live = (v: string) => {
     if (picking.current === null) onDragStart?.();
     else window.clearTimeout(picking.current);
-    picking.current = window.setTimeout(() => { picking.current = null; onDragEnd?.(); }, 400);
+    picking.current = window.setTimeout(() => { picking.current = null; finish.current?.(); }, 400);
     onChange(v);
   };
   return (
     <div className="flex h-8 items-center justify-between rounded-md bg-fill px-2.5">
-      <span className="label text-fg-2">{label}</span>
+      <span id={labelId} className="label text-fg-2">{label}</span>
       <span className="flex items-center gap-2">
         <input
           className="num w-16 bg-transparent text-right text-[11px] uppercase text-fg outline-none"
           value={text}
+          aria-labelledby={labelId}
           onChange={(e) => setText(e.target.value)}
           onBlur={() => { if (/^#[0-9a-f]{6}$/i.test(text)) onChange(text.toLowerCase()); else setText(value); }}
           onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
         />
         <label className="relative h-4 w-4 cursor-pointer overflow-hidden rounded border border-black/10" style={{ background: value }}>
-          <input type="color" value={value} onChange={(e) => live(e.target.value)} className="absolute inset-0 cursor-pointer opacity-0" />
+          <input type="color" aria-labelledby={labelId} value={value} onChange={(e) => live(e.target.value)} className="absolute inset-0 cursor-pointer opacity-0" />
         </label>
       </span>
     </div>
@@ -486,7 +581,7 @@ export function Section({ title, children, right, open = true, onToggle, classNa
   return (
     <div className={cn("border-b border-line", className)} data-tour={tour}>
       <div className="flex h-9 items-center justify-between px-3">
-        <button type="button" onClick={onToggle} className="label flex items-center gap-2 text-fg">
+        <button type="button" onClick={onToggle} aria-expanded={onToggle ? open : undefined} className="label flex items-center gap-2 text-fg">
           {title}
           {sub && <span className="label-sm text-muted">{sub}</span>}
         </button>
@@ -505,14 +600,33 @@ export function Section({ title, children, right, open = true, onToggle, classNa
 /* ---------- Modal ---------- */
 export function Modal({ open, onClose, children, width = 420, title, className }: { open: boolean; onClose: () => void; children: ReactNode; width?: number; title?: ReactNode; className?: string }) {
   const panel = useRef<HTMLDivElement>(null);
+  const titleId = useId();
   useClickOutside([panel], onClose, open);
+  useEffect(() => {
+    if (!open || !panel.current) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const el = panel.current;
+    const focusable = () => Array.from(el.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]')).filter((node) => node.getClientRects().length > 0);
+    if (!el.contains(document.activeElement)) (focusable()[0] ?? el).focus();
+    const key = (event: KeyboardEvent) => {
+      const dialogs = document.querySelectorAll('[role="dialog"]');
+      if (dialogs[dialogs.length - 1] !== el || event.key !== "Tab") return;
+      if ((document.activeElement as HTMLElement)?.closest("[data-popover-layer]")) return;
+      const nodes = focusable(), first = nodes[0], last = nodes[nodes.length - 1];
+      if (!first) { event.preventDefault(); el.focus(); }
+      else if (event.shiftKey && (document.activeElement === first || !el.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && (document.activeElement === last || !el.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("keydown", key); if (previous?.isConnected) previous.focus(); };
+  }, [open]);
   if (!open) return null;
   return createPortal(
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-[2px]">
-      <div ref={panel} style={{ width }} className={cn("fade-in max-h-[85vh] overflow-hidden rounded-xl border border-line bg-panel shadow-2xl", className)}>
+      <div ref={panel} role="dialog" aria-modal="true" aria-labelledby={title !== undefined ? titleId : undefined} aria-label={title === undefined ? "Editor dialog" : undefined} tabIndex={-1} style={{ width, maxWidth: "calc(100vw - 16px)" }} className={cn("fade-in max-h-[85dvh] overflow-auto rounded-xl border border-line bg-panel shadow-2xl outline-none", className)}>
         {title !== undefined && (
           <div className="flex h-12 items-center justify-between border-b border-line px-4">
-            <div className="label text-fg">{title}</div>
+            <div id={titleId} className="label text-fg">{title}</div>
             <IconButton icon="x" onClick={onClose} label="Close" />
           </div>
         )}

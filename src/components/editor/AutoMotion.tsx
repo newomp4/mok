@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useEditor } from "@/store/editor";
 import { useUI } from "@/store/ui";
 import { useMedia } from "@/lib/media";
@@ -18,27 +18,45 @@ export function AutoMotionOverlay() {
   const [draft, setDraft] = useState<FocusArea | null>(null);
   const [seed, setSeed] = useState(0);
   const box = useRef<HTMLDivElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
+  const drawing = useRef<{ shotId: string; area: FocusArea } | null>(null);
+  const [space, setSpace] = useState({ width: 0, height: 0 });
   const areas = shot?.focusAreas ?? [];
+  useEffect(() => {
+    const el = stage.current;
+    if (!el) return;
+    const measure = () => setSpace({ width: el.clientWidth, height: el.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const norm = (e: React.PointerEvent) => {
     const r = box.current!.getBoundingClientRect();
     return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) };
   };
   const onDown = (e: React.PointerEvent) => {
-    if (!shot) return;
+    if (!shot || !media || e.button !== 0) return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     const p = norm(e);
-    setDraft({ id: uid(), x: p.x, y: p.y, w: 0, h: 0 });
+    const area = { id: uid(), x: p.x, y: p.y, w: 0, h: 0 };
+    drawing.current = { shotId: shot.id, area };
+    setDraft(area);
   };
   const onMove = (e: React.PointerEvent) => {
-    if (!draft) return;
+    const live = drawing.current;
+    if (!live) return;
     const p = norm(e);
-    setDraft({ ...draft, w: p.x - draft.x, h: p.y - draft.y });
+    live.area = { ...live.area, w: p.x - live.area.x, h: p.y - live.area.y };
+    setDraft(live.area);
   };
   const onUp = () => {
-    if (!draft || !shot) return;
-    const a = normalize(draft);
+    const live = drawing.current;
+    drawing.current = null;
     setDraft(null);
+    if (!live || !shot || live.shotId !== shot.id) return;
+    const a = normalize(live.area);
     if (a.w < 0.02 || a.h < 0.02) return;
     update((pp) => { const s = pp.shots.find((x) => x.id === shot.id); if (s) s.focusAreas.push(a); });
   };
@@ -55,6 +73,7 @@ export function AutoMotionOverlay() {
   const el = media?.element;
   const src = media?.url;
   const ar = media ? media.width / media.height : 16 / 10;
+  const width = Math.min(space.width, space.height * ar);
 
   return (
     <div className="absolute inset-0 z-40 flex flex-col bg-black/70 p-6 backdrop-blur-sm">
@@ -65,15 +84,16 @@ export function AutoMotionOverlay() {
         </div>
         <IconButton icon="x" label="Close" onClick={() => setAutoMotion(false)} className="text-white hover:bg-white/10 hover:text-white" />
       </div>
-      <div className="flex min-h-0 flex-1 items-center justify-center py-4">
+      <div className="my-4 flex min-h-0 flex-1 items-center justify-center" ref={stage}>
         {src ? (
           <div
             ref={box}
             className="relative max-h-full max-w-full select-none overflow-hidden rounded-md shadow-2xl"
-            style={{ aspectRatio: `${ar}`, height: "100%", cursor: "crosshair" }}
+            style={{ width, height: width / ar, cursor: "crosshair" }}
             onPointerDown={onDown}
             onPointerMove={onMove}
             onPointerUp={onUp}
+            onPointerCancel={() => { drawing.current = null; setDraft(null); }}
           >
             {el instanceof HTMLVideoElement ? (
               <video src={src} muted className="pointer-events-none h-full w-full object-contain" />

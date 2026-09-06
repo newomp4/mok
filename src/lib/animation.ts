@@ -7,9 +7,12 @@ export const EASES: { id: EaseId; label: string }[] = [
   { id: "easeOut", label: "Ease out" },
   { id: "easeInOut", label: "Ease in-out" },
   { id: "expoOut", label: "Expo out" },
+  { id: "expoIn", label: "Expo in" },
   { id: "expoInOut", label: "Expo in-out" },
   { id: "backOut", label: "Back out" },
+  { id: "backIn", label: "Back in" },
   { id: "hold", label: "Hold" },
+  { id: "holdStart", label: "Step at start" },
 ];
 
 /** The preset grid in the easing editor, as cubic-bezier curves. */
@@ -32,9 +35,12 @@ const NAMED_CURVES: Record<EaseId, EaseCurve> = {
   easeOut: [0.22, 0.61, 0.36, 1],
   easeInOut: [0.65, 0, 0.35, 1],
   expoOut: [0.19, 1, 0.22, 1],
+  expoIn: [0.78, 0, 0.81, 0],
   expoInOut: [0.87, 0, 0.13, 1],
   backOut: [0.34, 1.56, 0.64, 1],
+  backIn: [0.36, 0, 0.66, -0.56],
   hold: [1, 0, 1, 0],
+  holdStart: [0, 1, 0, 1],
 };
 
 export function curveOf(k: Pick<Keyframe, "ease" | "cp">): EaseCurve {
@@ -75,7 +81,7 @@ export function easeSegment(a: Keyframe, b: Keyframe | null | undefined, x: numb
   // with nothing arriving on the far end the near keyframe still shapes the whole segment, named ease included
   if (!arrive) return a.cp ? bezierEase(a.cp, x) : ease(a.ease, x);
   // a hold is a step rather than a curve, so nothing on the far end can round it off
-  if (!a.cp && a.ease === "hold") return ease("hold", x);
+  if (!a.cp && (a.ease === "hold" || a.ease === "holdStart")) return ease(a.ease, x);
   return bezierEase(segmentCurve(a, b), x);
 }
 
@@ -113,6 +119,7 @@ export function ease(id: EaseId, t: number): number {
     case "easeOut": return 1 - Math.pow(1 - t, 3);
     case "easeInOut": return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
     case "expoOut": return t === 1 ? 1 : 1 - Math.pow(2, -10 * t);
+    case "expoIn": return t === 0 ? 0 : Math.pow(2, 10 * (t - 1));
     case "expoInOut":
       if (t === 0 || t === 1) return t;
       return t < 0.5 ? Math.pow(2, 20 * t - 10) / 2 : (2 - Math.pow(2, -20 * t + 10)) / 2;
@@ -120,7 +127,12 @@ export function ease(id: EaseId, t: number): number {
       const c1 = 1.70158, c3 = c1 + 1;
       return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
     }
+    case "backIn": {
+      const c1 = 1.70158, c3 = c1 + 1;
+      return c3 * t * t * t - c1 * t * t;
+    }
     case "hold": return t >= 1 ? 1 : 0;
+    case "holdStart": return t > 0 ? 1 : 0;
     case "smooth":
     default: return t * t * (3 - 2 * t);
   }
@@ -258,12 +270,15 @@ export function fadeAt(p: Project, t: number): { alpha: number; color: string } 
   let start = 0;
   for (let i = 0; i < p.shots.length - 1; i++) {
     const s = p.shots[i];
+    start += Math.max(0, s.gap ?? 0);
     const end = start + s.duration;
+    // A gap holds this shot until the next one begins. The transition belongs to that cut.
+    const cut = end + Math.max(0, p.shots[i + 1].gap ?? 0);
     const tr = s.transitionOut;
     if (tr && tr.type === "fade" && tr.duration > 0) {
       const h = tr.duration / 2;
-      if (t >= end - h && t <= end + h) {
-        const a = 1 - Math.abs(t - end) / h;
+      if (t >= cut - h && t <= cut + h) {
+        const a = 1 - Math.abs(t - cut) / h;
         if (a > alpha) { alpha = a; color = tr.color; }
       }
     }
@@ -274,6 +289,7 @@ export function fadeAt(p: Project, t: number): { alpha: number; color: string } 
 
 /** Mirror a track in time so the motion plays backwards. */
 export function reverseTrack(kfs: Keyframe[], duration: number): Keyframe[] {
+  const inverse: Partial<Record<EaseId, EaseId>> = { easeIn: "easeOut", easeOut: "easeIn", expoIn: "expoOut", expoOut: "expoIn", backIn: "backOut", backOut: "backIn", hold: "holdStart", holdStart: "hold" };
   const n = kfs.length;
   return kfs.map((_, i) => {
     const src = kfs[n - 1 - i];
@@ -284,7 +300,7 @@ export function reverseTrack(kfs: Keyframe[], duration: number): Keyframe[] {
     // one it mirrors, flipped end for end and collapsed onto the keyframe the segment now starts at
     const a = kfs[n - 2 - i], b = kfs[n - 1 - i];
     if (!a) { out.ease = src.ease; return out; }
-    if (!a.cp && !inHandleOf(b)) { out.ease = a.ease; return out; }
+    if (!a.cp && (!inHandleOf(b) || a.ease === "hold" || a.ease === "holdStart")) { out.ease = inverse[a.ease] ?? a.ease; return out; }
     const c = segmentCurve(a, b);
     out.cp = [1 - c[2], 1 - c[3], 1 - c[0], 1 - c[1]];
     out.ease = a.ease;
@@ -292,27 +308,22 @@ export function reverseTrack(kfs: Keyframe[], duration: number): Keyframe[] {
   });
 }
 
-/** Split a track at time t: everything before stays (ending on the sampled value), the rest restarts at 0. */
+/** Keep the original segment spanning the cut on both halves so splitting cannot change its easing. */
 export function splitTrack(kfs: Keyframe[], t: number): [Keyframe[], Keyframe[]] {
-  const v = sampleTrack(kfs, t);
-  // the segment being cut is the one whose keyframe is the LAST at or before t
-  const cut = [...kfs].reverse().find((k) => k.t <= t);
-  const a = kfs.filter((k) => k.t < t - 0.0005);
-  const end: Keyframe = { t: Math.round(t * 1000) / 1000, v, ease: cut?.ease ?? "smooth", ...(cut?.cp ? { cp: [...cut.cp] as NonNullable<Keyframe["cp"]> } : {}) };
-  // The closing keyframe keeps the curve the motion arrives on. When the cut lands exactly on an
-  // existing keyframe that is the keyframe's own arrival curve; otherwise it is the one belonging to
-  // the keyframe the cut segment used to run to, so the first half still lands the same way.
-  const onKey = kfs.find((k) => Math.abs(k.t - t) < 0.0005);
-  const arrive = inHandleOf(onKey) ?? inHandleOf(kfs.find((k) => k.t > t + 0.0005));
-  if (arrive) setInHandle(end, arrive);
-  a.push(end);
-  const b: Keyframe[] = [{ t: 0, v, ease: cut?.ease ?? "smooth", ...(cut?.cp ? { cp: [...cut.cp] as NonNullable<Keyframe["cp"]> } : {}) }];
-  for (const k of kfs) if (k.t > t + 0.0005) b.push({ ...k, t: Math.round((k.t - t) * 1000) / 1000 });
-  return [a, b];
+  if (!kfs.length) return [[], []];
+  const firstAfter = kfs.findIndex((k) => k.t >= t);
+  const edge = firstAfter < 0 ? kfs.length - 1 : firstAfter;
+  const exact = Math.abs(kfs[edge].t - t) < 0.0005;
+  const before = kfs.slice(0, edge + 1);
+  const after = kfs.slice(exact ? edge : Math.max(0, edge - (firstAfter < 0 ? 0 : 1)));
+  // Tracks already support handles before/after a shot. Keeping these bracketing keys avoids
+  // restarting a whole ease on each half, including overshooting and step eases.
+  return [structuredClone(before), structuredClone(after).map((k) => ({ ...k, t: Math.round((k.t - t) * 1000) / 1000 }))];
 }
 
 export function formatTime(t: number): string {
-  const m = Math.floor(t / 60);
-  const s = t - m * 60;
+  const ticks = Number.isFinite(t) ? Math.max(0, Math.round(t * 100)) : 0;
+  const m = Math.floor(ticks / 6000);
+  const s = (ticks % 6000) / 100;
   return `${String(m).padStart(2, "0")}:${s.toFixed(2).padStart(5, "0")}`;
 }

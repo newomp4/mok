@@ -351,13 +351,20 @@ function grain(ctx: CanvasRenderingContext2D, w: number, h: number, amount: numb
 }
 
 /** Paint a user image (cover-fit) with optional blur. */
-export function paintImage(ctx: CanvasRenderingContext2D, img: CanvasImageSource, iw: number, ih: number, w: number, h: number, blur: number) {
+export function paintImage(ctx: CanvasRenderingContext2D, img: CanvasImageSource, iw: number, ih: number, w: number, h: number, blur: number, background?: string) {
+  ctx.save();
+  ctx.filter = "none";
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = "source-over";
+  ctx.clearRect(0, 0, w, h);
+  if (background) { ctx.fillStyle = background; ctx.fillRect(0, 0, w, h); }
   const s = Math.max(w / iw, h / ih);
   const dw = iw * s, dh = ih * s;
   const px = Math.round(blur * Math.max(w, h) * 0.05);
   ctx.filter = px > 0 ? `blur(${px}px)` : "none";
   // draw slightly oversized so the blur does not show transparent edges
-  const pad = px * 2;
-  ctx.drawImage(img, (w - dw) / 2 - pad, (h - dh) / 2 - pad, dw + pad * 2, dh + pad * 2);
-  ctx.filter = "none";
+  const expansion = 1 + (px * 4) / Math.max(1, Math.min(dw, dh));
+  const ew = dw * expansion, eh = dh * expansion;
+  try { ctx.drawImage(img, (w - ew) / 2, (h - eh) / 2, ew, eh); }
+  finally { ctx.restore(); }
 }

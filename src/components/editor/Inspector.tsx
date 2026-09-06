@@ -317,7 +317,7 @@ function TextEditor({ shot }: { shot: Shot }) {
       <FontPicker value={st.font} onChange={(v) => set((t) => { t.font = v; t.weight = nearestWeight(v, t.weight); })} />
       <SelectRow label="Weight" value={String(nearestWeight(st.font, st.weight))} onChange={(v) => set((t) => { t.weight = Number(v); })} options={font.weights.map((w) => ({ value: String(w), label: WEIGHT_NAMES[w] ?? String(w) }))} />
       <NumberRow label="Size" value={st.size} min={0.02} max={0.3} step={0.005} onChange={(v) => set((t) => { t.size = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
-      <Segmented size="sm" value={st.align} onChange={(v) => set((t) => { t.align = v; })} options={[{ value: "left", label: "", icon: "align-left" }, { value: "center", label: "", icon: "align-center" }, { value: "right", label: "", icon: "align-right" }]} />
+      <Segmented size="sm" value={st.align} onChange={(v) => set((t) => { t.align = v; })} options={[{ value: "left", label: <span className="sr-only">Align left</span>, icon: "align-left" }, { value: "center", label: <span className="sr-only">Align center</span>, icon: "align-center" }, { value: "right", label: <span className="sr-only">Align right</span>, icon: "align-right" }]} />
       <ColorRow label="Text colour" value={st.color} onChange={(v) => set((t) => { t.color = v; })} />
       <ColorRow label="Background" value={st.background} onChange={(v) => set((t) => { t.background = v; })} />
       <NumberRow label="Line height" value={st.lineHeight} min={0.8} max={2} step={0.05} onChange={(v) => set((t) => { t.lineHeight = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
@@ -530,11 +530,6 @@ function shade(hex: string) {
   const f = (c: number) => Math.max(0, Math.min(255, Math.round(c * 0.8)));
   return `#${[(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => f(c).toString(16).padStart(2, "0")).join("")}`;
 }
-function isDark(hex: string) {
-  const n = parseInt(hex.slice(1), 16);
-  const l = 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
-  return l < 128;
-}
 
 /* ---------- Mockup ---------- */
 function MockupSection() {
@@ -582,7 +577,7 @@ function MockupSection() {
       {features?.lid && <AnimRow prop="mockup.lid" label="Lid angle" min={0} max={135} step={1} unit="°" />}
       {features?.island && (
         <ShotToggleOverride
-          label="Dynamic Island"
+          label={spec.family === "phone" ? (spec.id.startsWith("iphone") ? "Dynamic Island" : "Camera cutout") : "Camera notch"}
           project={mockup.notch ?? true}
           read={(sh) => sh.notch}
           write={(sh, v) => { sh.notch = v; }}
@@ -779,7 +774,6 @@ function ShotToggleOverride({ label, project, read, write, setProject, disabled 
 /** Per-shot environment: which 3D scene this shot uses. */
 function ShotSceneOverride() {
   const shot = useRenderShot();
-  const updateShot = useEditor((s) => s.updateShot);
   const projectScene = useEditor((s) => s.project.scene.preset);
   if (!shot) return null;
   const override = shot.scene;
@@ -831,11 +825,13 @@ function FocusPicker({ depth = false }: { depth?: boolean }) {
   const fx = useAnimRow("blur.focusX");
   const fy = useAnimRow("blur.focusY");
   const setValues = useEditor((s) => s.setValues);
-  const dragging = useState(false);
+  const dragging = useRef(false);
+  const endDrag = () => { if (dragging.current) { dragging.current = false; endInteraction(); } };
+  useEffect(() => () => { if (dragging.current) { dragging.current = false; endInteraction(); } }, []);
   const set = (e: React.PointerEvent) => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
-    const y = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+    const x = Math.min(1, Math.max(0, (e.clientX - r.left) / Math.max(1, r.width)));
+    const y = Math.min(1, Math.max(0, (e.clientY - r.top) / Math.max(1, r.height)));
     setValues({ "blur.focusX": Math.round(x * 1000) / 1000, "blur.focusY": Math.round(y * 1000) / 1000 });
   };
   return (
@@ -844,14 +840,30 @@ function FocusPicker({ depth = false }: { depth?: boolean }) {
         <span>{depth ? "Focal point" : "Focus position"}</span>
         <span className="flex items-center gap-1.5">
           <span className="normal-case">⌥ click the viewport</span>
-          <KeyButton state={fx.keyState === "none" ? fy.keyState : fx.keyState} onClick={() => { fx.onKey(); fy.onKey(); }} />
+          <KeyButton state={fx.keyState === "none" ? fy.keyState : fx.keyState} onClick={() => {
+            beginInteraction();
+            if (fx.keyState === "key" && fy.keyState === "key") { fx.onKey(); fy.onKey(); }
+            else { if (fx.keyState !== "key") fx.onKey(); if (fy.keyState !== "key") fy.onKey(); }
+            endInteraction();
+          }} />
         </span>
       </div>
       <div
         className="relative h-24 cursor-crosshair overflow-hidden rounded-md border border-line bg-panel-2"
-        onPointerDown={(e) => { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); dragging[1](true); beginInteraction(); set(e); }}
-        onPointerMove={(e) => { if (dragging[0]) set(e); }}
-        onPointerUp={() => { dragging[1](false); endInteraction(); }}
+        role="group"
+        tabIndex={0}
+        aria-label="Focus position. Use arrow keys to move the focus point."
+        onKeyDown={(e) => {
+          if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
+          e.preventDefault(); e.stopPropagation();
+          const step = e.shiftKey ? 0.1 : 0.01;
+          setValues({ "blur.focusX": Math.max(0, Math.min(1, fx.value + (e.key === "ArrowRight" ? step : e.key === "ArrowLeft" ? -step : 0))), "blur.focusY": Math.max(0, Math.min(1, fy.value + (e.key === "ArrowDown" ? step : e.key === "ArrowUp" ? -step : 0))) });
+        }}
+        onPointerDown={(e) => { if (e.button !== 0 || dragging.current) return; (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); dragging.current = true; beginInteraction(); set(e); }}
+        onPointerMove={(e) => { if (dragging.current) set(e); }}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onLostPointerCapture={endDrag}
       >
         <div className="absolute inset-y-0 left-1/2 w-px bg-line-2" />
         <div className="absolute inset-x-0 top-1/2 h-px bg-line-2" />
@@ -989,6 +1001,7 @@ function VideoSection() {
 
 /* ---------- Inspector ---------- */
 export function Inspector() {
+  const inspectorOpen = useUI((s) => s.inspectorOpen);
   const theme = useUI((s) => s.theme);
   const toggleTheme = useUI((s) => s.toggleTheme);
   const canUndo = useStore(useEditor.temporal, (s) => s.pastStates.length > 0);
@@ -996,13 +1009,13 @@ export function Inspector() {
   const shot = useActiveShot();
   const card = shotKind(shot) !== "media";
   return (
-    <div className="flex w-[240px] shrink-0 flex-col overflow-hidden rounded-lg border border-line bg-panel">
+    <div className={cn("fixed bottom-2 right-2 top-[104px] z-30 w-[min(300px,calc(100vw-16px))] shrink-0 flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-xl md:static md:z-auto md:flex md:w-[240px] md:shadow-none", inspectorOpen ? "flex" : "hidden")}>
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-line px-1.5">
         <div className="flex">
           <IconButton icon="undo" label="Undo (⌘Z)" onClick={undo} disabled={!canUndo} />
           <IconButton icon="redo" label="Redo (⇧⌘Z)" onClick={redo} disabled={!canRedo} />
         </div>
-        <IconButton icon={theme === "dark" ? "sun" : "moon"} label="Toggle theme (D)" onClick={toggleTheme} />
+        <div className="flex"><IconButton icon={theme === "dark" ? "sun" : "moon"} label="Toggle theme (D)" onClick={toggleTheme} /><IconButton className="md:hidden" icon="x" label="Close adjustments" onClick={() => useUI.setState({ inspectorOpen: false })} /></div>
       </div>
       <div className="scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         <ShotSection />

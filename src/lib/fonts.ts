@@ -57,21 +57,39 @@ export function cssFamily(family: string): string {
     // next/font assigns a hashed family name; read the resolved stack off the document
     if (typeof document !== "undefined") {
       const v = getComputedStyle(document.documentElement).getPropertyValue(def.category === "mono" ? "--font-geist-mono" : "--font-geist-sans").trim();
-      if (v) return v.replace(/^'|'$/g, "");
+      // This is an entire CSS family list. Removing its outer quotes corrupts
+      // stacks such as 'GeistSans', 'GeistSans Fallback', so canvas ignores ctx.font.
+      if (v) return v;
     }
     return def.category === "mono" ? "ui-monospace, monospace" : "ui-sans-serif, system-ui, sans-serif";
   }
   return `"${family}", ui-sans-serif, system-ui, sans-serif`;
 }
 
-/** Make sure a Google font (family + weight) is available to canvas text; resolves when it is ready. */
+/** Redraw paused canvas text when locally bundled or remote fonts finish loading. */
+export function onFontsReady(redraw: () => void): () => void {
+  if (typeof document === "undefined" || !document.fonts) return () => {};
+  const fonts = document.fonts;
+  let active = true;
+  const loaded = () => { if (active) redraw(); };
+  fonts.addEventListener("loadingdone", loaded);
+  void fonts.ready.then(loaded);
+  return () => { active = false; fonts.removeEventListener("loadingdone", loaded); };
+}
+
+/** Make sure a font (family + weight) is available to canvas text; resolves when it is ready. */
 export function ensureFont(family: string, weight: number): Promise<void> {
   const def = getFont(family);
-  if (def.builtin || typeof document === "undefined") return Promise.resolve();
+  if (typeof document === "undefined") return Promise.resolve();
   const w = def.weights.reduce((a, b) => (Math.abs(b - weight) < Math.abs(a - weight) ? b : a), def.weights[0]);
   const key = `${family}:${w}`;
   const existing = loaded.get(key);
   if (existing) return existing;
+  if (def.builtin) {
+    const p = document.fonts.load(`${w} 32px ${cssFamily(family)}`).then(() => { ready.add(key); }, () => {});
+    loaded.set(key, p);
+    return p;
+  }
   if (!injected.has(family)) {
     injected.add(family);
     const link = document.createElement("link");

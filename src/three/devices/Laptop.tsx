@@ -1,10 +1,13 @@
 "use client";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { DeviceSpec } from "@/lib/devices";
 import { S, roundedPlaneGeometry } from "@/three/geometry";
 import { contourProfile, sweepRoundedRect } from "@/three/sweep";
 import type { FinishMaterials } from "@/three/materials";
+import { useOwnedResources } from "@/three/resources";
+import { anim } from "@/three/anim";
 
 const DEG = Math.PI / 180;
 
@@ -47,16 +50,18 @@ function Keyboard({ width, mats }: { width: number; mats: FinishMaterials }) {
     m.castShadow = true;
     return { mesh: m, height: z, u };
   }, [width, mats.keys]);
+  useEffect(() => () => { inst.mesh.dispose(); inst.mesh.geometry.dispose(); }, [inst]);
   return <primitive object={inst.mesh} position={[0, 0, -(inst.height / 2) * S]} />;
 }
 
 function useGrilleMaterial() {
-  return useMemo(() => {
+  const material = useMemo(() => {
     const c = document.createElement("canvas");
     c.width = c.height = 64;
     const ctx = c.getContext("2d")!;
     ctx.clearRect(0, 0, 64, 64);
-    ctx.fillStyle = "#000";
+    // An alpha map reads the green channel, not canvas alpha: white dots mark the holes.
+    ctx.fillStyle = "#fff";
     for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) {
       ctx.beginPath();
       ctx.arc(8 + x * 16 + (y % 2) * 8, 8 + y * 16, 3.2, 0, Math.PI * 2);
@@ -67,9 +72,11 @@ function useGrilleMaterial() {
     tex.repeat.set(4, 20);
     return new THREE.MeshStandardMaterial({ color: "#050505", alphaMap: tex, transparent: true, roughness: 0.8, depthWrite: false });
   }, []);
+  useEffect(() => () => { material.alphaMap?.dispose(); material.dispose(); }, [material]);
+  return material;
 }
 
-export function LaptopModel({ spec, mats, screen }: { spec: DeviceSpec; mats: FinishMaterials; screen: THREE.Material }) {
+export function LaptopModel({ spec, mats, screen, notch = true }: { spec: DeviceSpec; mats: FinishMaterials; screen: THREE.Material; notch?: boolean }) {
   const { w, h: depth, d: baseT, r } = spec.body;
   const lid = spec.lid!;
   const lidH = depth - 3;
@@ -99,11 +106,15 @@ export function LaptopModel({ spec, mats, screen }: { spec: DeviceSpec; mats: Fi
     lip.rotateX(Math.PI / 2);
     return { base, lidGeo, bezel, scr, trackpad, notch, hinge, well, grille, feet, lip, kbW, kbH, trackH };
   }, [w, depth, baseT, r, lidH, lid.thickness, sw, sh, spec.screenRadius, spec.notch]);
+  useOwnedResources(geos);
   const wellMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#0d0d0f", roughness: 0.6, metalness: 0.15 }), []);
   const trackMat = useMemo(() => new THREE.MeshStandardMaterial({ color: new THREE.Color(mats.frame.color).multiplyScalar(0.9), roughness: 0.42, metalness: 0.85 }), [mats.frame.color]);
   const notchMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#050506", roughness: 0.4 }), []);
   const feetMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#1c1c1c", roughness: 0.9 }), []);
   const grilleMat = useGrilleMaterial();
+  useOwnedResources(useMemo(() => ({ wellMat, trackMat, notchMat, feetMat }), [wellMat, trackMat, notchMat, feetMat]));
+  const lidRef = useRef<THREE.Group>(null);
+  useFrame(() => { if (lidRef.current) lidRef.current.rotation.x = -((anim.values?.["mockup.lid"] ?? lid.angle) - 90) * DEG; }, -25);
   const top = baseT * S;
   const kbZ = -depth * 0.5 + 14 + geos.kbH / 2; // keyboard centre from base centre (mm)
   const screenY = (lidH - lid.screenTop - sh / 2) * S;
@@ -125,11 +136,11 @@ export function LaptopModel({ spec, mats, screen }: { spec: DeviceSpec; mats: Fi
         <mesh key={`${sx}${sz}`} geometry={geos.feet} material={feetMat} position={[sx * w * 0.43 * S, 0.4 * S, sz * depth * 0.42 * S]} />
       )))}
       <mesh geometry={geos.hinge} material={mats.dark} position={[0, top - 0.5 * S, -(depth / 2 - baseT * 0.45) * S]} />
-      <group position={[0, top - 0.3 * S, -(depth / 2 - lid.thickness * 0.55) * S]} rotation={[-(lid.angle - 90) * DEG, 0, 0]}>
+      <group ref={lidRef} position={[0, top - 0.3 * S, -(depth / 2 - lid.thickness * 0.55) * S]} rotation={[-(lid.angle - 90) * DEG, 0, 0]}>
         <mesh geometry={geos.lidGeo} material={mats.frame} castShadow receiveShadow />
         <mesh geometry={geos.bezel} material={mats.glass} position={[0, 0, (lid.thickness / 2) * S + 0.05 * S]} />
         <mesh geometry={geos.scr} material={screen} position={[0, screenY, (lid.thickness / 2) * S + 0.32 * S]} />
-        {geos.notch && <mesh geometry={geos.notch} material={notchMat} position={[0, notchTopY, (lid.thickness / 2) * S + 0.55 * S]} />}
+        {notch && geos.notch && <mesh geometry={geos.notch} material={notchMat} position={[0, notchTopY, (lid.thickness / 2) * S + 0.55 * S]} />}
       </group>
     </group>
   );

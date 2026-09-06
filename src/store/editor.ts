@@ -4,7 +4,7 @@ import { subscribeWithSelector } from "zustand/middleware";
 import { temporal } from "zundo";
 import type { AnimProp, AudioTrack, Keyframe, Project, Shot, ShotKind, Transition } from "@/lib/types";
 import { createLogoShot, createProject, createShot, createTextShot, normalizeProject } from "@/lib/defaults";
-import { getBase, hasKeyframeAt, inHandleOf, locate, removeKeyframe, reverseTrack, sampleTrack, setInHandle, shotBase, splitTrack, totalDuration, upsertKeyframe, shotStart } from "@/lib/animation";
+import { hasKeyframeAt, inHandleOf, locate, removeKeyframe, reverseTrack, sampleTrack, setInHandle, shotBase, splitTrack, totalDuration, upsertKeyframe, shotStart } from "@/lib/animation";
 import { uid } from "@/lib/ids";
 import { useUI } from "./ui";
 import { getDevice } from "@/lib/devices";
@@ -55,7 +55,7 @@ interface EditorState {
 /** Where a shot leaves a property when it ends — its last keyframe, or the value it holds. */
 function closingValue(p: Project, shot: Shot, prop: AnimProp): number {
   const track = shot.keyframes[prop];
-  return track?.length ? track[track.length - 1].v : shotBase(p, shot, prop);
+  return track?.length ? sampleTrack(track, shot.duration) : shotBase(p, shot, prop);
 }
 
 /**
@@ -78,6 +78,24 @@ export const lastCopyWasKeyframes = () => keyframesCopiedLast;
 
 function clone<T>(v: T): T {
   return structuredClone(v);
+}
+
+/** Discrete commands each get an undo step, even when clicked within a typing/drag burst. */
+function commitProject(p: Project, set: (state: { project: Project }) => void) {
+  beginInteraction();
+  try { p.updatedAt = Date.now(); set({ project: p }); }
+  finally { endInteraction(); }
+}
+
+function selectAt(p: Project, shot: Shot, localT = 0) {
+  useUI.setState({ activeShotId: shot.id, selectedShots: [shot.id], selectedKeys: [], playing: false, time: shotStart(p, shot.id) + Math.max(0, Math.min(shot.duration, localT)) });
+}
+
+/** Keep the same shot and local playhead position when a reorder changes its absolute time. */
+function preservePlayhead(before: Project, after: Project) {
+  const loc = locate(before, useUI.getState().time);
+  const shot = after.shots.find((s) => s.id === loc.shot?.id);
+  if (shot) useUI.getState().setTime(shotStart(after, shot.id) + Math.min(shot.duration, loc.localT));
 }
 
 /** Keyframes may live outside their shot (motion carries through a cut), within a sane margin. */
@@ -128,6 +146,7 @@ export const useEditor = create<EditorState>()(
         },
         setValue: (prop, v) => get().setValues({ [prop]: v }),
         setValues: (values) => {
+          if (!Object.values(values).some((v) => typeof v === "number" && Number.isFinite(v))) return;
           // structural sharing: only the touched groups / shot are copied, so timeline rows and
           // unrelated inspector rows keep their references during drags
           const ui = useUI.getState();
@@ -142,14 +161,13 @@ export const useEditor = create<EditorState>()(
           const perShot = prev.shots.length > 1;
           const simple = ui.timelineMode === "simple" && prev.shots.length > 1 && !ui.recording;
           for (const [prop, v] of Object.entries(values) as [AnimProp, number][]) {
-            if (v === undefined || Number.isNaN(v)) continue;
+            if (v === undefined || !Number.isFinite(v)) continue;
             const track = nextShot?.keyframes[prop];
             const animated = !!track && track.length > 0;
             if (nextShot && (ui.recording || (animated && hasKeyframeAt(track!, localT)))) {
               // recording stamps as you go, and landing on an existing keyframe edits that keyframe
               nextShot.keyframes[prop] = upsertKeyframe(track, localT, v);
               shotTouched = true;
-              if (!animated) p = withBase(p, prop, v);
             } else if (nextShot && animated) {
               // the property is animated but the playhead is between keys: move the whole move
               // rather than dropping a keyframe nobody asked for, so the motion keeps its shape
@@ -167,7 +185,7 @@ export const useEditor = create<EditorState>()(
                 { t: nextShot.duration, v, ease: "smooth" },
               ];
               shotTouched = true;
-            } else if (nextShot && perShot && SHOT_SCOPED.has(prop)) {
+            } else if (nextShot && SHOT_SCOPED.has(prop) && (perShot || shot?.pose?.[prop] !== undefined)) {
               nextShot.pose![prop] = v;
               shotTouched = true;
             } else {
@@ -190,17 +208,18 @@ export const useEditor = create<EditorState>()(
             if (next.length === 0) delete shot.keyframes[prop];
             else shot.keyframes[prop] = next;
           } else {
-            const v = track && track.length ? sampleTrack(track, localT) : getBase(p, prop);
+            const v = track && track.length ? sampleTrack(track, localT) : shotBase(p, shot, prop);
             shot.keyframes[prop] = upsertKeyframe(track, localT, v);
           }
-          set({ project: p });
+          commitProject(p, set);
+          pruneSelectedKeys(p);
         },
         clearTrack: (prop, shotId) => {
           const p = clone(get().project);
           const shot = shotId ? p.shots.find((s) => s.id === shotId) : currentShot(p).shot;
           if (!shot) return;
           delete shot.keyframes[prop];
-          set({ project: p });
+          commitProject(p, set);
           pruneSelectedKeys(p);
         },
         setDevice: (id) => {
@@ -235,26 +254,37 @@ export const useEditor = create<EditorState>()(
           const p = clone(get().project);
           const n = p.shots.filter((s) => (s.kind ?? "media") === kind).length + 1;
           const shot = kind === "text" ? createTextShot(`Text ${n}`) : kind === "logo" ? createLogoShot(`Logo ${n}`) : createShot(`Shot ${n}`, 3);
-          if (kind === "media") {
-            const last = [...p.shots].reverse().find((s) => s.media && (s.kind ?? "media") === "media");
-            if (last?.media) shot.media = last.media;
-          }
           const idx = afterId ? p.shots.findIndex((s) => s.id === afterId) : -1;
+          if (kind === "media") {
+            const previous = p.shots[idx >= 0 ? idx : p.shots.length - 1];
+            const source = previous && (previous.kind ?? "media") === "media" ? previous : [...p.shots.slice(0, idx >= 0 ? idx + 1 : undefined)].reverse().find((s) => (s.kind ?? "media") === "media");
+            if (source) {
+              shot.media = source.media;
+              shot.fit = source.fit;
+              for (const key of ["device", "finish", "scene", "lighting", "blurMode", "bokeh", "notch"] as const) Object.assign(shot, { [key]: source[key] });
+              shot.pose = Object.fromEntries([...SHOT_SCOPED].map((prop) => [prop, closingValue(p, source, prop)]));
+            }
+          }
           if (idx >= 0) p.shots.splice(idx + 1, 0, shot); else p.shots.push(shot);
-          set({ project: p });
-          const ui = useUI.getState();
-          ui.setActiveShot(shot.id);
-          ui.setTime(shotStart(p, shot.id) + 0.0001);
+          commitProject(p, set);
+          // A new card starts fully transparent during its entrance. Preview the settled content
+          // so adding text or a logo immediately shows what the user is about to edit.
+          const enterDuration = shot.enter?.effect === "none" ? 0 : shot.enter?.duration ?? 0;
+          const previewT = kind === "media" ? 0 : Math.min(shot.duration / 2, enterDuration + 1 / p.fps);
+          selectAt(p, shot, previewT);
           return shot.id;
         },
         reorderShot: (id, toIndex) => {
-          const p = clone(get().project);
+          if (!Number.isFinite(toIndex)) return;
+          const before = get().project;
+          const p = clone(before);
           const idx = p.shots.findIndex((s) => s.id === id);
-          const j = Math.max(0, Math.min(p.shots.length - 1, toIndex));
+          const j = Math.max(0, Math.min(p.shots.length - 1, Math.round(toIndex)));
           if (idx < 0 || j === idx) return;
           const [s] = p.shots.splice(idx, 1);
           p.shots.splice(j, 0, s);
-          set({ project: p });
+          commitProject(p, set);
+          preservePlayhead(before, p);
         },
         updateShot: (id, mut) => {
           const p = clone(get().project);
@@ -265,6 +295,7 @@ export const useEditor = create<EditorState>()(
           set({ project: p });
         },
         splitShot: (id, localT) => {
+          if (!Number.isFinite(localT)) return;
           const p = clone(get().project);
           const idx = p.shots.findIndex((x) => x.id === id);
           if (idx < 0) return;
@@ -292,7 +323,8 @@ export const useEditor = create<EditorState>()(
             b.keyframes[prop] = kb;
           }
           p.shots.splice(idx + 1, 0, b);
-          set({ project: p });
+          commitProject(p, set);
+          selectAt(p, b);
         },
         reverseShot: (id) => {
           const p = clone(get().project);
@@ -302,7 +334,8 @@ export const useEditor = create<EditorState>()(
             const kfs = s.keyframes[prop];
             if (kfs && kfs.length) s.keyframes[prop] = reverseTrack(kfs, s.duration);
           }
-          set({ project: p });
+          commitProject(p, set);
+          pruneSelectedKeys(p);
         },
         copyShot: (id) => {
           const s = get().project.shots.find((x) => x.id === id);
@@ -315,8 +348,8 @@ export const useEditor = create<EditorState>()(
           copy.id = uid();
           const idx = afterId ? p.shots.findIndex((s) => s.id === afterId) : -1;
           if (idx >= 0) p.shots.splice(idx + 1, 0, copy); else p.shots.push(copy);
-          set({ project: p });
-          useUI.getState().setActiveShot(copy.id);
+          commitProject(p, set);
+          selectAt(p, copy);
         },
         setTransition: (id, tr) => {
           const p = clone(get().project);
@@ -336,10 +369,10 @@ export const useEditor = create<EditorState>()(
           if (!shot) return;
           for (const prop of props) {
             const track = shot.keyframes[prop];
-            const v = track && track.length ? sampleTrack(track, localT) : getBase(p, prop);
+            const v = track && track.length ? sampleTrack(track, localT) : shotBase(p, shot, prop);
             shot.keyframes[prop] = upsertKeyframe(track, localT, v);
           }
-          set({ project: p });
+          commitProject(p, set);
         },
         copyKeyframes: (keys) => {
           const p = get().project;
@@ -439,28 +472,31 @@ export const useEditor = create<EditorState>()(
         },
         applyPoseToAllShots: (props) => {
           const p = clone(get().project);
-          const { shot } = currentShot(p);
+          const { shot, localT } = currentShot(p);
           if (!shot) return;
           for (const s of p.shots) {
             if (s.id === shot.id) continue;
             s.pose = { ...s.pose };
             for (const prop of props) {
-              const own = shot.pose?.[prop];
-              if (own === undefined) delete s.pose[prop]; else s.pose[prop] = own;
+              const track = shot.keyframes[prop];
+              s.pose[prop] = track?.length ? sampleTrack(track, localT) : shotBase(p, shot, prop);
               // a shot that animates the property would ignore the pose, so the track goes too
               delete s.keyframes[prop];
             }
           }
-          set({ project: p });
+          commitProject(p, set);
+          pruneSelectedKeys(p);
         },
         clearPose: (shotId, props) => {
           const p = clone(get().project);
           const shot = p.shots.find((s) => s.id === shotId);
           if (!shot?.pose) return;
           for (const prop of props) delete shot.pose[prop];
+          if (!Object.keys(shot.pose).length) delete shot.pose;
           set({ project: p });
         },
         setShotGap: (id, gap) => {
+          if (!Number.isFinite(gap)) return;
           const p = clone(get().project);
           const shot = p.shots.find((s) => s.id === id);
           if (!shot) return;
@@ -507,25 +543,31 @@ export const useEditor = create<EditorState>()(
             // carry the custom curve across too, not just the named ease
             const placed = list.find((x) => Math.abs(x.t - t) < 0.0005);
             if (placed) {
+              placed.ease = k.ease;
               if (k.cp) placed.cp = [...k.cp] as typeof k.cp; else delete placed.cp;
               // the arrival curve belongs to the keyframe just as much as the one it leaves on
               setInHandle(placed, inHandleOf(k) ?? null);
             }
             shot.keyframes[prop] = list;
           }
-          set({ project: p });
+          commitProject(p, set);
         },
         removeShot: (id) => {
-          const p = clone(get().project);
+          const before = get().project;
+          const p = clone(before);
           if (p.shots.length <= 1) return;
+          const index = p.shots.findIndex((s) => s.id === id);
+          if (index < 0) return;
           p.shots = p.shots.filter((s) => s.id !== id);
-          set({ project: p });
+          commitProject(p, set);
           const ui = useUI.getState();
-          if (ui.activeShotId === id) ui.setActiveShot(p.shots[0].id);
+          if (ui.activeShotId === id || locate(before, ui.time).shot?.id === id) selectAt(p, p.shots[Math.min(index, p.shots.length - 1)]);
+          else preservePlayhead(before, p);
           // the project just got shorter; a playhead left past the end sits on a fully faded frame
           const total = totalDuration(p);
-          if (ui.time > total) ui.setTime(total);
+          if (useUI.getState().time > total) ui.setTime(total);
           pruneSelectedKeys(p);
+          ui.setSelectedShots(useUI.getState().selectedShots.filter((shotId) => shotId !== id));
         },
         duplicateShot: (id) => {
           const p = clone(get().project);
@@ -535,16 +577,14 @@ export const useEditor = create<EditorState>()(
           copy.id = createShot("x").id;
           copy.name = `${p.shots[idx].name} copy`;
           p.shots.splice(idx + 1, 0, copy);
-          set({ project: p });
+          commitProject(p, set);
+          selectAt(p, copy);
         },
         moveShot: (id, dir) => {
-          const p = clone(get().project);
-          const idx = p.shots.findIndex((s) => s.id === id);
+          const idx = get().project.shots.findIndex((s) => s.id === id);
           const j = idx + dir;
-          if (idx < 0 || j < 0 || j >= p.shots.length) return;
-          const [s] = p.shots.splice(idx, 1);
-          p.shots.splice(j, 0, s);
-          set({ project: p });
+          if (idx < 0 || j < 0 || j >= get().project.shots.length) return;
+          get().reorderShot(id, j);
         },
       }),
       {
@@ -603,7 +643,22 @@ if (typeof window !== "undefined") {
   window.addEventListener("pointercancel", release);
   window.addEventListener("blur", release);
 }
-export const undo = () => useEditor.temporal.getState().undo();
-export const redo = () => useEditor.temporal.getState().redo();
+function restoreHistory(direction: "undo" | "redo") {
+  const before = useEditor.getState().project;
+  useEditor.temporal.getState()[direction]();
+  const p = useEditor.getState().project;
+  if (p === before) return;
+  preservePlayhead(before, p);
+  const ui = useUI.getState();
+  const time = Math.max(0, Math.min(totalDuration(p), ui.time));
+  useUI.setState({
+    time, playing: false,
+    activeShotId: p.shots.some((s) => s.id === ui.activeShotId) ? ui.activeShotId : locate(p, time).shot?.id ?? null,
+    selectedShots: ui.selectedShots.filter((id) => p.shots.some((s) => s.id === id)),
+  });
+  pruneSelectedKeys(p);
+}
+export const undo = () => restoreHistory("undo");
+export const redo = () => restoreHistory("redo");
 export const pauseHistory = () => useEditor.temporal.getState().pause();
 export const resumeHistory = () => useEditor.temporal.getState().resume();

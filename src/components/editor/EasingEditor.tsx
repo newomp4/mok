@@ -133,6 +133,7 @@ function EaseGraph({ out, incoming, hasNext, nextHasIn, side, onSide, onHandle }
       style={{ width: SIZE, height: SIZE + PAD * 2 }}
       onPointerMove={(e) => { if (drag.current) onHandle(drag.current, at(e)); }}
       onPointerUp={stop}
+      onPointerCancel={stop}
       onPointerLeave={stop}
     >
       <svg width={SIZE} height={SIZE + PAD * 2} className="absolute inset-0 overflow-visible">
@@ -273,7 +274,7 @@ export function EasingEditor({ anchor, open, onClose }: { anchor: React.RefObjec
               });
             }}>Apply to track</Button>
             <Button variant="ghost" size="sm" onClick={() => editKeys((k, list, at) => {
-              if (side === "in") {
+              if (active === "in") {
                 // the incoming segment is this keyframe's arrival curve plus the one before it leaves on
                 setInHandle(k, null);
                 const prev = list[at - 1];
@@ -282,6 +283,7 @@ export function EasingEditor({ anchor, open, onClose }: { anchor: React.RefObjec
               }
               delete k.cp;
               k.ease = "smooth";
+              if (list[at + 1]) setInHandle(list[at + 1], null);
             })}>Reset</Button>
           </div>
         </div>

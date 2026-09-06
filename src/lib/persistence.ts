@@ -1,14 +1,25 @@
 "use client";
-import { get as idbGet, set as idbSet, del as idbDel, keys as idbKeys } from "idb-keyval";
+import { get as idbGet, set as idbSet, del as idbDel, keys as idbKeys, update as idbUpdate, createStore } from "idb-keyval";
 import type { MediaRef, Project, ProjectMeta } from "./types";
-import { ANIMATED_GIF_MESSAGE, blobToDataURL, dataURLToBlob, ensureMedia, registerMedia } from "./media";
+import { ANIMATED_GIF_MESSAGE, blobToDataURL, dataURLToBlob, ensureMedia, registerMedia, useMediaStore } from "./media";
 import { uid } from "./ids";
+import { normalizeProject } from "./defaults";
+import { validateMediaRef } from "./validateProject";
 
 const PROJECT_PREFIX = "project:";
 const INDEX_KEY = "projects:index";
 const TEMPLATE_PREFIX = "template:";
 const TEMPLATE_INDEX_KEY = "templates:index";
 const AUTOSAVE_KEY = "autosave";
+const projectStore = createStore("keyval-store", "keyval");
+
+// Keep a record and its index update in call order, including save/delete races on the same id.
+let writeTail: Promise<unknown> = Promise.resolve();
+function writeInOrder<T>(fn: () => Promise<T>): Promise<T> {
+  const next = writeTail.then(fn, fn);
+  writeTail = next.catch(() => {});
+  return next;
+}
 
 let autosaveWarned = false;
 export let onStorageError: (what: string) => void = () => {};
@@ -51,8 +62,10 @@ async function restoreMedia(p: Project): Promise<void> {
  * saving a list it could not read, and so the write's own message is the only one the user sees.
  */
 async function readIndex(): Promise<ProjectMeta[]> {
+  await writeTail;
   const idx = ((await idbGet(INDEX_KEY)) as ProjectMeta[] | undefined) ?? [];
-  return idx.sort((a, b) => b.updatedAt - a.updatedAt);
+  if (!Array.isArray(idx)) throw new Error("Saved project index is damaged");
+  return idx.filter((m) => m && typeof m.id === "string").sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 /**
@@ -75,51 +88,83 @@ let lastListFailed = false;
 /** True when the last listing came back empty because storage refused to be read, not because it is empty. */
 export function listingFailed(): boolean { return lastListFailed; }
 
-export async function saveProject(p: Project): Promise<void> {
-  try {
-    await idbSet(PROJECT_PREFIX + p.id, p);
-    const idx = await readIndex();
-    const meta: ProjectMeta = { id: p.id, name: p.name, updatedAt: p.updatedAt, device: p.mockup.device };
-    const next = [meta, ...idx.filter((m) => m.id !== p.id)];
-    await idbSet(INDEX_KEY, next);
-    lastFailure = { message: "", at: 0 };
-  } catch (e) {
-    reportStorageFailure(`Could not save “${p.name}”`, e);
-  }
+function writeProjectRecord(p: Project, onlyIfSaved: boolean): Promise<void> {
+  return projectStore("readwrite", (store) => new Promise<void>((resolve, reject) => {
+    const tx = store.transaction;
+    tx.oncomplete = () => resolve();
+    tx.onabort = tx.onerror = () => reject(tx.error ?? new Error("Project storage transaction failed"));
+    const request = store.get(INDEX_KEY);
+    request.onsuccess = () => {
+      try {
+        const idx = (request.result ?? []) as ProjectMeta[];
+        if (!Array.isArray(idx)) throw new Error("Saved project index is damaged");
+        if (onlyIfSaved && !idx.some((m) => m.id === p.id)) return;
+        const meta: ProjectMeta = { id: p.id, name: p.name, updatedAt: p.updatedAt, device: p.mockup.device };
+        store.put(p, PROJECT_PREFIX + p.id);
+        store.put([meta, ...idx.filter((m) => m.id !== p.id)], INDEX_KEY);
+      } catch (error) { tx.abort(); reject(error); }
+    };
+    request.onerror = () => reject(request.error);
+  }));
 }
 
+function queueProjectSave(p: Project, onlyIfSaved: boolean): Promise<void> {
+  p = structuredClone(p);
+  return writeInOrder(async () => {
+    try {
+      await writeProjectRecord(p, onlyIfSaved);
+      lastFailure = { message: "", at: 0 };
+    } catch (e) {
+      reportStorageFailure(`Could not save “${p.name}”`, e);
+    }
+  });
+}
+
+export function saveProject(p: Project): Promise<void> { return queueProjectSave(p, false); }
+
+/** Autosave an existing project without a delayed list read reordering saves or reviving deletions. */
+export function saveProjectIfSaved(p: Project): Promise<void> { return queueProjectSave(p, true); }
+
 export async function loadProject(id: string): Promise<Project | null> {
+  await writeTail;
   const p = (await idbGet(PROJECT_PREFIX + id)) as Project | undefined;
   if (!p) return null;
-  await restoreMedia(p);
-  return p;
+  const safe = normalizeProject(p);
+  await restoreMedia(safe);
+  return safe;
 }
 
 export async function deleteProject(id: string): Promise<void> {
-  try {
-    await idbDel(PROJECT_PREFIX + id);
-    const idx = await readIndex();
-    await idbSet(INDEX_KEY, idx.filter((m) => m.id !== id));
-  } catch (e) {
-    reportStorageFailure("Could not delete the project", e);
-  }
+  return writeInOrder(async () => {
+    try {
+      await idbDel(PROJECT_PREFIX + id);
+      await idbUpdate<ProjectMeta[]>(INDEX_KEY, (idx = []) => idx.filter((m) => m.id !== id));
+    } catch (e) {
+      reportStorageFailure("Could not delete the project", e);
+    }
+  });
 }
 
 export async function saveAutosave(p: Project): Promise<void> {
-  try { await idbSet(AUTOSAVE_KEY, p); autosaveWarned = false; }
-  catch (e) {
-    // silently losing the session is the worst outcome; warn once per failure streak
-    console.warn("autosave failed", e);
-    if (!autosaveWarned) { autosaveWarned = true; onStorageError("Autosave failed — this browser is blocking storage"); }
-  }
+  p = structuredClone(p);
+  return writeInOrder(async () => {
+    try { await idbSet(AUTOSAVE_KEY, p); autosaveWarned = false; }
+    catch (e) {
+      // silently losing the session is the worst outcome; warn once per failure streak
+      console.warn("autosave failed", e);
+      if (!autosaveWarned) { autosaveWarned = true; onStorageError("Autosave failed — this browser is blocking storage"); }
+    }
+  });
 }
 
 export async function loadAutosave(): Promise<Project | null> {
   try {
+    await writeTail;
     const p = (await idbGet(AUTOSAVE_KEY)) as Project | undefined;
     if (!p) return null;
-    await restoreMedia(p);
-    return p;
+    const safe = normalizeProject(p);
+    await restoreMedia(safe);
+    return safe;
   } catch {
     return null;
   }
@@ -142,7 +187,12 @@ export function collectMedia(p: Project): MediaRef[] {
  */
 export async function pruneMedia(live?: Project): Promise<number> {
   try {
+    await writeTail;
     const keep = new Set<string>();
+    // Session media can still belong to an in-flight import or an undo state. Only reclaim unused
+    // records from previous sessions; deleting a freshly decoded blob here loses it on reload.
+    for (const id of Object.keys(useMediaStore.getState().items)) keep.add(id);
+    for (const id of Object.keys(useMediaStore.getState().loading)) keep.add(id);
     const add = (p: Project | null | undefined) => { if (p) for (const m of collectMedia(p)) keep.add(m.id); };
     add(live);
     add((await idbGet(AUTOSAVE_KEY)) as Project | undefined);
@@ -197,8 +247,10 @@ interface StoredTemplate extends TemplateMeta {
 
 /** The bare template index read; it throws for the same reason `readIndex` does. */
 async function readTemplateIndex(): Promise<TemplateMeta[]> {
+  await writeTail;
   const idx = ((await idbGet(TEMPLATE_INDEX_KEY)) as TemplateMeta[] | undefined) ?? [];
-  return idx.sort((a, b) => b.createdAt - a.createdAt);
+  if (!Array.isArray(idx)) throw new Error("Saved template index is damaged");
+  return idx.filter((m) => m && typeof m.id === "string").sort((a, b) => b.createdAt - a.createdAt);
 }
 
 let lastTemplateListFailed = false;
@@ -222,38 +274,43 @@ export async function listTemplates(): Promise<TemplateMeta[]> {
  * it, and copying them would double the storage every template costs.
  */
 export async function saveTemplate(p: Project, name: string, thumb: string): Promise<TemplateMeta> {
-  const meta: TemplateMeta = { id: uid(), name, device: p.mockup.device, createdAt: Date.now(), thumb };
-  try {
-    const record: StoredTemplate = { ...meta, project: withoutMedia(p, new Set(collectMedia(p).map((m) => m.id))) };
-    await idbSet(TEMPLATE_PREFIX + meta.id, record);
-    const idx = await readTemplateIndex();
-    await idbSet(TEMPLATE_INDEX_KEY, [meta, ...idx]);
-    lastFailure = { message: "", at: 0 };
-    return meta;
-  } catch (e) {
-    reportStorageFailure(`Could not save “${name}” as a template`, e);
-  }
+  p = structuredClone(p);
+  return writeInOrder(async () => {
+    const meta: TemplateMeta = { id: uid(), name, device: p.mockup.device, createdAt: Date.now(), thumb };
+    try {
+      const record: StoredTemplate = { ...meta, project: withoutMedia(p, new Set(collectMedia(p).map((m) => m.id))) };
+      await idbSet(TEMPLATE_PREFIX + meta.id, record);
+      await idbUpdate<TemplateMeta[]>(TEMPLATE_INDEX_KEY, (idx = []) => [meta, ...idx]);
+      lastFailure = { message: "", at: 0 };
+      return meta;
+    } catch (e) {
+      reportStorageFailure(`Could not save “${name}” as a template`, e);
+    }
+  });
 }
 
 /** Read a template back as a fresh project, ready to replace whatever is open. */
 export async function projectFromTemplate(id: string): Promise<Project | null> {
+  await writeTail;
   const t = (await idbGet(TEMPLATE_PREFIX + id)) as StoredTemplate | undefined;
   if (!t) return null;
-  return { ...t.project, id: uid(), name: t.name, createdAt: Date.now(), updatedAt: Date.now() };
+  return normalizeProject({ ...t.project, id: uid(), name: t.name, createdAt: Date.now(), updatedAt: Date.now() });
 }
 
 export async function deleteTemplate(id: string): Promise<void> {
-  try {
-    await idbDel(TEMPLATE_PREFIX + id);
-    const idx = await readTemplateIndex();
-    await idbSet(TEMPLATE_INDEX_KEY, idx.filter((m) => m.id !== id));
-  } catch (e) {
-    reportStorageFailure("Could not delete the template", e);
-  }
+  return writeInOrder(async () => {
+    try {
+      await idbDel(TEMPLATE_PREFIX + id);
+      await idbUpdate<TemplateMeta[]>(TEMPLATE_INDEX_KEY, (idx = []) => idx.filter((m) => m.id !== id));
+    } catch (e) {
+      reportStorageFailure("Could not delete the template", e);
+    }
+  });
 }
 
 /** Serialise a project + its media to a portable JSON file. */
 export async function exportProjectFile(p: Project): Promise<Blob> {
+  p = structuredClone(p);
   try {
     const media: Record<string, { ref: MediaRef; data: string }> = {};
     const missing: MediaRef[] = [];
@@ -273,23 +330,37 @@ export async function exportProjectFile(p: Project): Promise<Blob> {
 }
 
 export async function importProjectFile(file: Blob): Promise<Project> {
-  const text = await file.text();
-  const data = JSON.parse(text) as { format: string; project: Project; media: Record<string, { ref: MediaRef; data: string }> };
-  if (data.format !== "mok" || !data.project) throw new Error("Not a mok project file");
+  let data: { format?: unknown; version?: unknown; project?: Project; media?: Record<string, { ref?: unknown; data?: unknown }> };
+  try { data = JSON.parse(await file.text()); } catch { throw new Error("Not a readable mok project file"); }
+  if (!data || data.format !== "mok" || !data.project) throw new Error("Not a mok project file");
+  if (data.version !== undefined && data.version !== 1) throw new Error("This mok file uses an unsupported version");
+  const p = normalizeProject(data.project);
   const dropped: MediaRef[] = [];
   const animated: MediaRef[] = [];
-  for (const m of Object.values(data.media ?? {})) {
-    const blob = await dataURLToBlob(m.data);
+  const replacements = new Map<string, MediaRef>();
+  for (const ref of collectMedia(p)) {
+    const m = data.media && Object.hasOwn(data.media, ref.id) ? data.media[ref.id] : undefined;
     try {
-      await registerMedia(m.ref, blob);
+      const embeddedRef = validateMediaRef(m?.ref);
+      if (!embeddedRef || embeddedRef.id !== ref.id || embeddedRef.kind !== ref.kind || typeof m?.data !== "string") throw new Error("The embedded media is missing or invalid");
+      const blob = await dataURLToBlob(m.data);
+      // Portable files keep their source ids. Give every imported blob a new one so opening an
+      // older export cannot replace media that a different saved project still references.
+      const loaded = await registerMedia({ ...ref, id: uid() }, blob);
+      replacements.set(ref.id, loaded.ref);
     } catch (e) {
-      // one unshowable file should not cost the whole project; clear its refs so nothing points at a blank
       console.warn("media restore failed", e);
-      if ((e as Error)?.message === ANIMATED_GIF_MESSAGE) animated.push(m.ref);
-      dropped.push(m.ref);
+      if ((e as Error)?.message === ANIMATED_GIF_MESSAGE) animated.push(ref);
+      dropped.push(ref);
     }
   }
-  const p = dropped.length ? withoutMedia(data.project, new Set(dropped.map((m) => m.id))) : data.project;
+  const replace = (ref: MediaRef | null | undefined) => ref ? replacements.get(ref.id) ?? null : null;
+  for (const shot of p.shots) { shot.media = replace(shot.media); if (shot.logo) shot.logo.media = replace(shot.logo.media); }
+  p.scene.background.image = replace(p.scene.background.image);
+  if (p.screen.bg) p.screen.bg.image = replace(p.screen.bg.image);
+  if (p.audio) { const media = replace(p.audio.media); p.audio = media ? { ...p.audio, media } : null; }
+  if (p.scene.background.type === "image" && !p.scene.background.image) p.scene.background.type = "color";
+  if (p.screen.bg?.type === "image" && !p.screen.bg.image) p.screen.bg.type = "color";
   if (dropped.length) {
     // the two reasons are tracked separately, so a file that simply would not decode is not
     // reported as an animated GIF just because another file in the same import was one

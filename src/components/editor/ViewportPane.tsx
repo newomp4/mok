@@ -163,6 +163,7 @@ export function ViewportPane() {
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
+    if (useUI.getState().exporting) return;
     if (e.button !== 0 && e.button !== 1 && e.button !== 2) return;
     if (e.altKey && e.button === 0) {
       // place the blur focal point
@@ -183,6 +184,7 @@ export function ViewportPane() {
   const onPointerMove = (e: React.PointerEvent) => {
     const d = drag.current;
     if (!d) return;
+    if (useUI.getState().exporting) { drag.current = null; endInteraction(); return; }
     markInteracting();
     const dx = e.clientX - d.x, dy = e.clientY - d.y;
     const ed = useEditor.getState();
@@ -203,6 +205,7 @@ export function ViewportPane() {
     endInteraction();
     markInteracting();
   };
+  useEffect(() => () => { if (drag.current) { drag.current = null; endInteraction(); } }, []);
 
   // wheel / pinch zoom: non-passive so the browser never page-zooms, accumulated per gesture
   useEffect(() => {
@@ -213,6 +216,7 @@ export function ViewportPane() {
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const ed = useEditor.getState();
+      if (useUI.getState().exporting) return;
       if (timer === null) { beginInteraction(); zoom = current().zoom; }
       else window.clearTimeout(timer);
       markInteracting();
@@ -258,6 +262,7 @@ export function ViewportPane() {
     e.preventDefault();
     setDragging(false);
     setDropZone(null);
+    if (useUI.getState().exporting) return;
     const files = extractFiles(e.dataTransfer);
     if (!files.length) return;
     const audio = files[0].type.startsWith("audio/");
@@ -288,14 +293,15 @@ export function ViewportPane() {
           <div className="mx-1 h-4 w-px bg-line" />
           <IconButton icon="align-center" label="Center framing" onClick={() => useEditor.getState().setValues({ "camera.panX": 0, "camera.panY": 0 })} />
           <IconButton icon="grid" label="Composition guides" active={guides} aria-pressed={guides} onClick={() => useUI.getState().setGuides(!guides)} />
-          {!timelineOpen && <Button variant="ghost" icon="timeline" onClick={() => useUI.getState().setTimelineOpen(true)}>Timeline</Button>}
+          <IconButton icon="settings" label="Show adjustments" className="md:hidden" onClick={() => useUI.setState({ inspectorOpen: true })} />
+          {!timelineOpen && <Button variant="ghost" icon="film" aria-label="Show timeline" onClick={() => useUI.getState().setTimelineOpen(true)}><span className="hidden sm:inline">Timeline</span></Button>}
         </div>
       </div>
     <div
       ref={containerRef}
       className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-panel-2"
       data-tour="viewport"
-      onDragOver={(e) => { e.preventDefault(); if (!dragging) setDragging(true); }}
+      onDragOver={(e) => { if (!e.dataTransfer.types.includes("Files") || useUI.getState().exporting) return; e.preventDefault(); if (!dragging) setDragging(true); }}
       onDragLeave={(e) => { if (e.currentTarget === e.target) { setDragging(false); setDropZone(null); } }}
       onDrop={(e) => onDrop(e, dropZone)}
     >
@@ -307,6 +313,7 @@ export function ViewportPane() {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
+        onLostPointerCapture={onPointerUp}
         onContextMenu={(e) => e.preventDefault()}
       >
         {frame.w > 0 && !no3d && <Viewport dpr={dpr} />}

@@ -23,6 +23,12 @@ interface MediaState {
 export const useMediaStore = create<MediaState>()(() => ({ items: {}, loading: {} }));
 
 const pending = new Map<string, Promise<LoadedMedia | null>>();
+const revisions = new Map<string, number>();
+function revision(id: string) { const v = (revisions.get(id) ?? 0) + 1; revisions.set(id, v); return v; }
+function release(item: LoadedMedia) {
+  if (item.kind !== "image") { const el = item.element as HTMLMediaElement; el.pause(); el.removeAttribute("src"); el.load(); }
+  URL.revokeObjectURL(item.url);
+}
 
 /** Set by the app so a storage failure can surface as a toast instead of vanishing. */
 export let mediaPersistFailed: (name: string, reason: "storage" | "animated-gif") => void = () => {};
@@ -32,8 +38,11 @@ export const ACCEPTED_TYPES = "image/png,image/jpeg,image/webp,image/gif,image/a
 export const ACCEPTED_IMAGES = "image/png,image/jpeg,image/webp,image/gif,image/avif,image/svg+xml";
 export const ACCEPTED_AUDIO = "audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/aac,audio/mp4,audio/x-m4a,audio/ogg,audio/webm,audio/flac";
 
+const EXT_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif", avif: "image/avif", svg: "image/svg+xml", mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime", mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4", aac: "audio/aac", ogg: "audio/ogg", flac: "audio/flac" };
+export function mediaType(file: Blob & { name?: string }) { return /^(image|video|audio)\//.test(file.type) ? file.type : EXT_TYPES[file.name?.split(".").pop()?.toLowerCase() ?? ""] ?? ""; }
+
 export function isMediaFile(f: File): boolean {
-  return f.type.startsWith("image/") || f.type.startsWith("video/") || f.type.startsWith("audio/");
+  return !!mediaType(f);
 }
 
 function loadAudio(url: string): Promise<HTMLAudioElement> {
@@ -41,8 +50,10 @@ function loadAudio(url: string): Promise<HTMLAudioElement> {
     const a = document.createElement("audio");
     a.preload = "auto";
     a.crossOrigin = "anonymous";
-    a.onloadedmetadata = () => resolve(a);
-    a.onerror = () => reject(new Error("Could not load audio"));
+    const timer = setTimeout(() => { cleanup(); a.removeAttribute("src"); a.load(); reject(new Error("Audio loading timed out")); }, 30000);
+    const cleanup = () => { clearTimeout(timer); a.onloadedmetadata = null; a.onerror = null; };
+    a.onloadedmetadata = () => { cleanup(); resolve(a); };
+    a.onerror = () => { cleanup(); reject(new Error("Could not load audio")); };
     a.src = url;
   });
 }
@@ -50,8 +61,10 @@ function loadAudio(url: string): Promise<HTMLAudioElement> {
 function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("Could not load image"));
+    const timer = setTimeout(() => { cleanup(); img.src = ""; reject(new Error("Image loading timed out")); }, 30000);
+    const cleanup = () => { clearTimeout(timer); img.onload = null; img.onerror = null; };
+    img.onload = () => { cleanup(); resolve(img); };
+    img.onerror = () => { cleanup(); reject(new Error("Could not load image")); };
     img.src = url;
   });
 }
@@ -64,20 +77,30 @@ function loadVideo(url: string): Promise<HTMLVideoElement> {
     v.playsInline = true;
     v.preload = "auto";
     v.crossOrigin = "anonymous";
-    v.onloadeddata = () => resolve(v);
-    v.onerror = () => reject(new Error("Could not load video"));
+    const timer = setTimeout(() => { cleanup(); v.removeAttribute("src"); v.load(); reject(new Error("Video loading timed out")); }, 30000);
+    const cleanup = () => { clearTimeout(timer); v.onloadeddata = null; v.onerror = null; };
+    v.onloadeddata = () => { cleanup(); resolve(v); };
+    v.onerror = () => { cleanup(); reject(new Error("Could not load video")); };
     v.src = url;
   });
 }
 
 async function decode(ref: MediaRef, blob: Blob): Promise<LoadedMedia> {
   const url = URL.createObjectURL(blob);
+  let element: LoadedMedia["element"] | undefined;
   try {
-    const element = ref.kind === "video" ? await loadVideo(url) : ref.kind === "audio" ? await loadAudio(url) : await loadImage(url);
-    return { ref, blob, url, element, kind: ref.kind, width: ref.width, height: ref.height };
+    element = ref.kind === "video" ? await loadVideo(url) : ref.kind === "audio" ? await loadAudio(url) : await loadImage(url);
+    const width = ref.kind === "video" ? (element as HTMLVideoElement).videoWidth : ref.kind === "image" ? (element as HTMLImageElement).naturalWidth : 0;
+    const height = ref.kind === "video" ? (element as HTMLVideoElement).videoHeight : ref.kind === "image" ? (element as HTMLImageElement).naturalHeight : 0;
+    const duration = ref.kind === "image" ? undefined : (element as HTMLMediaElement).duration;
+    if (ref.kind !== "image" && (!Number.isFinite(duration) || !duration || duration <= 0)) throw new Error("This media has no readable duration. Re-export it as a standard MP4, WebM or audio file.");
+    if (ref.kind !== "audio" && (!width || !height)) throw new Error("This image or video has no readable dimensions");
+    const actualRef = { ...ref, width, height, ...(duration ? { duration } : {}) };
+    return { ref: actualRef, blob, url, element, kind: ref.kind, width, height };
   } catch (e) {
     // nothing keeps the url once the decode fails, and an unrevoked one pins the blob for the tab's life
     URL.revokeObjectURL(url);
+    if (element && ref.kind !== "image") { const el = element as HTMLMediaElement; el.pause(); el.removeAttribute("src"); el.load(); }
     throw e;
   }
 }
@@ -148,7 +171,10 @@ async function gifIsAnimated(file: Blob): Promise<boolean> {
 
 /** Import a File/Blob: decodes it, stores the blob in IndexedDB and registers it in memory. */
 export async function importMedia(file: Blob & { name?: string }): Promise<MediaRef> {
-  const kind: MediaRef["kind"] = file.type.startsWith("video/") ? "video" : file.type.startsWith("audio/") ? "audio" : "image";
+  const type = mediaType(file);
+  if (!type || file.size === 0) throw new Error("Choose a readable image, video or audio file");
+  if (file.type !== type) file = Object.assign(new Blob([file], { type }), { name: file.name });
+  const kind: MediaRef["kind"] = type.startsWith("video/") ? "video" : type.startsWith("audio/") ? "audio" : "image";
   // a still GIF makes a fine screen, an animated one would silently lose every frame but one
   if (file.type === "image/gif" && (await gifIsAnimated(file))) throw new Error(ANIMATED_GIF_MESSAGE);
   const id = uid();
@@ -172,6 +198,11 @@ export async function importMedia(file: Blob & { name?: string }): Promise<Media
   } catch (e) {
     URL.revokeObjectURL(url);
     throw e;
+  }
+  if ((kind !== "audio" && (!width || !height)) || (kind !== "image" && (!Number.isFinite(duration) || !duration || duration <= 0))) {
+    if (kind !== "image") { const el = element as HTMLMediaElement; el.pause(); el.removeAttribute("src"); el.load(); }
+    URL.revokeObjectURL(url);
+    throw new Error("This media has no readable dimensions or duration. Re-export the source file and try again.");
   }
   const ref: MediaRef = { id, kind, width, height, name: file.name ?? "media", duration };
   try {
@@ -197,11 +228,13 @@ export function ensureMedia(ref: MediaRef | null | undefined): Promise<LoadedMed
   if (existing) return Promise.resolve(existing);
   const p = pending.get(ref.id);
   if (p) return p;
+  const version = revisions.get(ref.id) ?? 0;
   const promise = (async () => {
     useMediaStore.setState((s) => ({ loading: { ...s.loading, [ref.id]: true } }));
     try {
       const rec = (await idbGet(`media:${ref.id}`)) as { ref: MediaRef; blob: Blob } | undefined;
       if (!rec) return null;
+      if (rec.ref?.id !== ref.id || rec.ref.kind !== ref.kind || !(rec.blob instanceof Blob)) return null;
       // storage predates the import guard, so a project saved by an older build can still be
       // holding an animated GIF; it would come back as a single frozen frame with no explanation
       if (rec.blob.type === "image/gif" && (await gifIsAnimated(rec.blob))) {
@@ -209,18 +242,21 @@ export function ensureMedia(ref: MediaRef | null | undefined): Promise<LoadedMed
         return null;
       }
       const loaded = await decode(rec.ref, rec.blob);
+      if (version !== (revisions.get(ref.id) ?? 0)) { release(loaded); return getMedia(ref.id); }
       useMediaStore.setState((s) => ({ items: { ...s.items, [ref.id]: loaded } }));
       return loaded;
     } catch (e) {
       console.warn("media load failed", e);
       return null;
     } finally {
-      pending.delete(ref.id);
-      useMediaStore.setState((s) => {
-        const loading = { ...s.loading };
-        delete loading[ref.id];
-        return { loading };
-      });
+      if (version === (revisions.get(ref.id) ?? 0)) {
+        pending.delete(ref.id);
+        useMediaStore.setState((s) => {
+          const loading = { ...s.loading };
+          delete loading[ref.id];
+          return { loading };
+        });
+      }
     }
   })();
   pending.set(ref.id, promise);
@@ -236,12 +272,15 @@ export function useMedia(ref: MediaRef | null | undefined): LoadedMedia | null {
 }
 
 export async function deleteMedia(id: string) {
+  revision(id);
+  pending.delete(id);
   const item = useMediaStore.getState().items[id];
-  if (item) URL.revokeObjectURL(item.url);
+  if (item) release(item);
   useMediaStore.setState((s) => {
     const items = { ...s.items };
     delete items[id];
-    return { items };
+    const loading = { ...s.loading }; delete loading[id];
+    return { items, loading };
   });
   try { await idbDel(`media:${id}`); } catch {}
 }
@@ -256,7 +295,9 @@ export async function blobToDataURL(blob: Blob): Promise<string> {
 }
 
 export async function dataURLToBlob(dataUrl: string): Promise<Blob> {
+  if (!/^data:(?:image|video|audio)\/[^;,]+;base64,[a-z0-9+/=\s]*$/i.test(dataUrl)) throw new Error("Embedded media must be a local image, video or audio data URL");
   const res = await fetch(dataUrl);
+  if (!res.ok) throw new Error("The embedded media could not be read");
   return res.blob();
 }
 
@@ -264,11 +305,16 @@ export async function dataURLToBlob(dataUrl: string): Promise<Blob> {
 export async function registerMedia(ref: MediaRef, blob: Blob): Promise<LoadedMedia> {
   // a file written before the import guard existed can still carry one, and it would restore frozen
   if (blob.type === "image/gif" && (await gifIsAnimated(blob))) throw new Error(ANIMATED_GIF_MESSAGE);
+  const version = revision(ref.id);
+  pending.delete(ref.id);
+  useMediaStore.setState((s) => { const loading = { ...s.loading }; delete loading[ref.id]; return { loading }; });
   const loaded = await decode(ref, blob);
-  try { await idbSet(`media:${ref.id}`, { ref, blob }); } catch {}
+  if (version !== revisions.get(ref.id)) { release(loaded); throw new Error("This media was replaced while it was loading"); }
+  try { await idbSet(`media:${ref.id}`, { ref: loaded.ref, blob }); } catch { mediaPersistFailed(ref.name, "storage"); }
+  if (version !== revisions.get(ref.id)) { release(loaded); throw new Error("This media was replaced while it was saving"); }
   // media ids survive an export, so re-importing the same file replaces an entry that owns a url
   const previous = useMediaStore.getState().items[ref.id];
-  if (previous) URL.revokeObjectURL(previous.url);
+  if (previous) release(previous);
   useMediaStore.setState((s) => ({ items: { ...s.items, [ref.id]: loaded } }));
   return loaded;
 }
@@ -276,7 +322,7 @@ export async function registerMedia(ref: MediaRef, blob: Blob): Promise<LoadedMe
 export function extractFiles(dt: DataTransfer | null): File[] {
   if (!dt) return [];
   const files: File[] = [];
-  if (dt.items) {
+  if (dt.items?.length) {
     for (const item of Array.from(dt.items)) {
       if (item.kind === "file") {
         const f = item.getAsFile();

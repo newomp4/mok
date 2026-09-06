@@ -8,7 +8,8 @@ import type { AudioTrack } from "./types";
 
 /** Clip length on the timeline (seconds). */
 export function audioLength(track: AudioTrack): number {
-  return Math.max(0, (track.media.duration ?? 0) - track.trimStart);
+  const duration = track.media.duration ?? 0;
+  return Number.isFinite(duration) && Number.isFinite(track.trimStart) ? Math.max(0, duration - Math.max(0, track.trimStart)) : 0;
 }
 
 /**
@@ -31,7 +32,7 @@ function audioEnvelope(track: AudioTrack, total: number) {
 /** Gain (0..1) of the track at timeline second t, including fades and range. */
 export function audioGainAt(track: AudioTrack, t: number, total: number): number {
   const { end, fadeIn, fadeOut } = audioEnvelope(track, total);
-  if (t < track.start || t > end) return 0;
+  if (!Number.isFinite(t) || t < track.start || t >= end) return 0;
   let g = track.volume;
   if (fadeIn > 0) g *= Math.min(1, (t - track.start) / fadeIn);
   if (fadeOut > 0) g *= Math.min(1, (end - t) / fadeOut);
@@ -53,7 +54,7 @@ export function useAudioPlayback() {
       const t = ui.time;
       const project = useEditor.getState().project;
       const tr = project.audio;
-      if (!tr) return;
+      if (!tr || tr.media.id !== loaded.ref.id) { el.pause(); return; }
       const total = totalDuration(project);
       const inRange = t >= tr.start && t < audioEnvelope(tr, total).end;
       el.volume = audioGainAt(tr, t, total);
@@ -68,6 +69,7 @@ export function useAudioPlayback() {
     const unsubs = [
       useUI.subscribe((s) => s.playing, sync),
       useUI.subscribe((s) => s.time, sync),
+      useUI.subscribe((s) => s.exporting, sync),
       useEditor.subscribe((s) => s.project.audio, sync),
     ];
     sync();
@@ -81,17 +83,18 @@ export function useAudioPlayback() {
  */
 export async function renderAudioMix(total: number, sampleRate = 48000): Promise<AudioBuffer | null> {
   const track = useEditor.getState().project.audio;
-  if (!track || total <= 0) return null;
+  if (!track || !Number.isFinite(total) || total <= 0) return null;
   const loaded = getMedia(track.media.id) ?? (await ensureMedia(track.media));
-  if (!loaded) return null;
+  if (!loaded) throw new Error("The soundtrack is missing. Re-add the audio file before exporting.");
   const frames = Math.max(1, Math.ceil(total * sampleRate));
   const off = new OfflineAudioContext(2, frames, sampleRate);
+  const { len, end, fadeIn, fadeOut } = audioEnvelope({ ...track, media: loaded.ref }, total);
+  if (len <= 0) return off.startRendering();
   const data = await loaded.blob.arrayBuffer();
   const decoded = await off.decodeAudioData(data.slice(0));
   const src = off.createBufferSource();
   src.buffer = decoded;
   const gain = off.createGain();
-  const { len, end, fadeIn, fadeOut } = audioEnvelope(track, total);
   const g = gain.gain;
   g.setValueAtTime(fadeIn > 0 ? 0 : track.volume, Math.max(0, track.start));
   const peak = track.start + fadeIn;

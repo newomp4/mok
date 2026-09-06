@@ -47,7 +47,7 @@ export const useModelBounds = create<{ bounds: Record<string, ModelBounds>; set:
     const next: ModelBounds = { ...base, ...b };
     const f = prev?.features, g = next.features;
     const sameF = (!f && !g) || (!!f && !!g && f.lid === g.lid && f.island === g.island && f.caseParts === g.caseParts && f.band === g.band);
-    if (prev && prev.minY === next.minY && prev.width === next.width && prev.height === next.height && prev.screenAspect === next.screenAspect && sameF) return s;
+    if (prev && prev.minY === next.minY && prev.maxY === next.maxY && prev.width === next.width && prev.height === next.height && prev.screenAspect === next.screenAspect && sameF) return s;
     return { bounds: { ...s.bounds, [id]: next } };
   }),
 }));
