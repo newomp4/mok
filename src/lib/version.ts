@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.11.0";
+export const APP_VERSION = "0.11.1";
 
 export interface ChangelogEntry {
   version: string;
@@ -8,6 +8,14 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.11.1",
+    date: "Sep 7, 2026",
+    title: "A usable toolbar in narrow previews",
+    items: [
+      "Header controls stay separate in phone-sized windows and narrow preview panels. Save, Open project and Quick capture are available in Menu; Templates, aspect and Export stay directly accessible. Long aspect labels stay within the toolbar, and recording keeps a compact indicator.",
+    ],
+  },
   {
     version: "0.11.0",
     date: "Sep 6, 2026",

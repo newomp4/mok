@@ -9,7 +9,7 @@ import { getDevice } from "@/lib/devices";
 import { applyTemplate, newProject } from "@/lib/actions";
 import { listTemplates, projectFromTemplate, type TemplateMeta } from "@/lib/persistence";
 import { MOD } from "@/lib/cn";
-import { exportProjectToFile, importProjectFromFile, saveCurrentProject } from "./hooks";
+import { exportProjectToFile, importProjectFromFile, quickCapture, saveCurrentProject } from "./hooks";
 
 export const REPO_URL = "https://github.com/newomp4/mok";
 
@@ -31,8 +31,8 @@ export function AspectMenu() {
   ];
   return (
     <>
-      <BarButton ref={ref} icon={icon} iconRight="chevron-down" active={open} onClick={() => setOpen((o) => !o)} className="border border-line">
-        {a.label}
+      <BarButton ref={ref} icon={icon} iconRight="chevron-down" active={open} onClick={() => setOpen((o) => !o)} title={a.label} className="max-w-[88px] border border-line sm:max-w-none">
+        <span className="truncate">{a.label}</span>
       </BarButton>
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} align="center" className="w-56">
         <div className="scroll max-h-[70vh] overflow-auto">
@@ -80,7 +80,7 @@ export function TemplatesMenu() {
   };
   return (
     <>
-      <BarButton ref={ref} iconRight="chevron-down" active={open} onClick={() => setOpen((o) => !o)}>Templates</BarButton>
+      <BarButton ref={ref} iconRight="chevron-down" active={open} onClick={() => setOpen((o) => !o)} className="max-sm:px-1.5 [&>svg]:hidden sm:[&>svg]:block">Templates</BarButton>
       <Popover open={open} onClose={() => setOpen(false)} anchor={ref} className="w-[460px] p-2">
         {mine.length > 0 && (
           <>
@@ -154,11 +154,13 @@ export function MainMenu() {
   const snapCenter = useUI((s) => s.snapCenter);
   const setSnapCenter = useUI((s) => s.setSnapCenter);
   const guides = useUI((s) => s.guides);
+  const captureShortcut = useUI((s) => s.captureShortcut);
   const setGuides = useUI((s) => s.setGuides);
   const items: MenuItem[] = [
     { label: "New project", icon: "plus", onSelect: () => { newProject(); showToast("New project"); } },
     { label: "Open project…", icon: "folder", onSelect: () => setModal("projects") },
     { label: "Save project", icon: "save", shortcut: `${MOD}S`, onSelect: () => void saveCurrentProject() },
+    { label: "Quick capture", icon: "camera", shortcut: captureShortcut ? `${MOD}E` : undefined, onSelect: () => void quickCapture() },
     { divider: true, label: "" },
     { label: "Import .mok file…", icon: "upload", onSelect: () => void importProjectFromFile() },
     { label: "Export .mok file", icon: "download", onSelect: () => void exportProjectToFile() },
