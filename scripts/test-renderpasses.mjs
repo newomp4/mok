@@ -71,6 +71,8 @@ test("nested offscreen passes return to their calling target and preserve origin
 function contactFixture() {
   const gl = renderer(), scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera();
   const shadow = new THREE.Group(), contactCamera = new THREE.OrthographicCamera();
+  const catcher = new THREE.Mesh(new THREE.PlaneGeometry(), new THREE.ShadowMaterial());
+  catcher.name = "ground-shadow-catcher"; scene.add(catcher);
   const overlay = new THREE.Mesh(new THREE.PlaneGeometry(), new THREE.MeshBasicMaterial());
   const hiddenOverlay = overlay.clone(); hiddenOverlay.visible = false;
   camera.add(overlay, hiddenOverlay); scene.add(camera, shadow);
@@ -80,8 +82,9 @@ function contactFixture() {
   const clean = () => {
     disposeResources(resources); gl.getRenderTarget()?.dispose();
     scene.overrideMaterial.dispose(); overlay.geometry.dispose(); overlay.material.dispose();
+    catcher.geometry.dispose(); catcher.material.dispose();
   };
-  return { gl, scene, camera, shadow, contactCamera, overlay, hiddenOverlay, resources, clean };
+  return { gl, scene, camera, shadow, contactCamera, overlay, hiddenOverlay, catcher, resources, clean };
 }
 
 test("moving a contact-shadow caster replaces the old silhouette and excludes camera overlays", () => {
@@ -96,6 +99,7 @@ test("moving a contact-shadow caster replaces the old silhouette and excludes ca
     if (object === f.scene) {
       assert.equal(f.scene.background, null); assert.equal(f.scene.overrideMaterial, f.resources.depth);
       assert.equal(f.shadow.visible, false); assert.equal(f.overlay.visible, false); assert.equal(f.hiddenOverlay.visible, false);
+      assert.equal(f.catcher.visible, false, "the transparent ground cannot cast its own contact silhouette");
       pixels.get(target).add(caster);
     } else {
       const input = object.material.uniforms.tDiffuse.value;
@@ -110,6 +114,7 @@ test("moving a contact-shadow caster replaces the old silhouette and excludes ca
     renderContactShadow(f.gl, f.scene, f.camera, f.shadow, f.contactCamera, f.resources, 2.4);
     assert.deepEqual([...pixels.get(f.resources.target)], ["right"], "previous positions do not accumulate into a trail");
     assert.equal(calls, 10); assert.equal(f.overlay.visible, true); assert.equal(f.hiddenOverlay.visible, false);
+    assert.equal(f.catcher.visible, true);
     f.shadow.visible = false;
     renderContactShadow(f.gl, f.scene, f.camera, f.shadow, f.contactCamera, f.resources, 2.4);
     assert.equal(calls, 10, "a hidden/transparent catcher never spends a GPU pass");
@@ -126,6 +131,7 @@ test("depth and blur failures restore scene overrides, renderer state and all te
       assert.deepEqual(snapshot(f.gl), before);
       assert.equal(f.scene.background, background); assert.equal(f.scene.overrideMaterial, override);
       assert.equal(f.shadow.visible, true); assert.equal(f.overlay.visible, true); assert.equal(f.hiddenOverlay.visible, false);
+      assert.equal(f.catcher.visible, true, "failed passes restore the transparent shadow receiver too");
     } finally { f.clean(); }
   }
 });

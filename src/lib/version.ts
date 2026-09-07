@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.10.0";
+export const APP_VERSION = "0.11.0";
 
 export interface ChangelogEntry {
   version: string;
@@ -8,6 +8,18 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.11.0",
+    date: "Sep 6, 2026",
+    title: "Richer surfaces, safer editing and local automation",
+    items: [
+      "Concrete uses 2K GPU-compressed surface maps with complete mipmaps and smaller fallbacks. MacBook 14 enclosure grain is more restrained, and keys and hinges now block screen light using their actual geometry.",
+      "Transparent image and video exports can keep their ground shadow or produce a clean cutout. Unsupported image formats are disabled before export, including WebP in Safari.",
+      "Each local project has one editing tab, with an explicit takeover or copy action. Project drafts stay separate, stale saves are rejected, and immediate reloads recover pending edits when this tab still owns the project.",
+      "Canceling either logo picker leaves the timeline untouched. Delete every property keyed at one time from the keyframe menu and restore the entire edit with one Undo.",
+      "Lossless compressed model downloads preserve the source geometry and textures. A standalone local MCP server can create and edit portable projects, import media and run cancellable image or video render jobs.",
+    ],
+  },
   {
     version: "0.10.0",
     date: "Sep 6, 2026",

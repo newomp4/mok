@@ -13,10 +13,11 @@ import { totalDuration } from "@/lib/animation";
 import { exportSizeFor, quickCapture, slug } from "./hooks";
 import { chime } from "@/lib/sounds";
 import { MOD } from "@/lib/cn";
+import { imageExportSupport, type ImageExportSupport } from "@/export/imageSupport";
 
 type Orientation = "landscape" | "square" | "portrait";
-const imageState = { format: "png" as ImageFormat, transparent: false, size: "1080", orientation: "landscape" as Orientation, customW: 1920, customH: 1080 };
-const videoState = { size: "1080", quality: "high" as VideoQuality, fps: 30, blur: "off" as "off" | "low" | "med" | "high", transparent: false, format: "mp4" as "mp4" | "webm", orientation: "landscape" as Orientation, customW: 1920, customH: 1080 };
+const imageState = { format: "png" as ImageFormat, transparent: false, transparentShadows: true, size: "1080", orientation: "landscape" as Orientation, customW: 1920, customH: 1080 };
+const videoState = { size: "1080", quality: "high" as VideoQuality, fps: 30, blur: "off" as "off" | "low" | "med" | "high", transparent: false, transparentShadows: true, format: "mp4" as "mp4" | "webm", orientation: "landscape" as Orientation, customW: 1920, customH: 1080 };
 const pixels = (n: number, max: number) => Math.max(16, Math.min(max, Math.round(Number.isFinite(n) ? n : 1920)));
 const even = (n: number, max: number) => Math.round(pixels(n, max) / 2) * 2;
 const BLUR_SAMPLES = { off: 1, low: 4, med: 8, high: 16 };
@@ -29,19 +30,21 @@ export function CaptureButton() {
 }
 
 /** The viewport previews the transparent frame while the menu is open, and goes back when it closes. */
-function useAlphaPreview(open: boolean, transparent: boolean) {
+function useAlphaPreview(open: boolean, transparent: boolean, transparentShadows: boolean) {
   const exporting = useUI((s) => s.exporting !== null);
   useEffect(() => {
     // Once capture starts it owns these flags until its frame has been rendered.
-    if (!exporting) useRenderFlags.getState().setTransparent(open && transparent);
-  }, [open, transparent, exporting]);
+    if (!exporting) useRenderFlags.setState({ transparent: open && transparent, transparentShadows });
+  }, [open, transparent, transparentShadows, exporting]);
   useEffect(() => () => useRenderFlags.getState().setTransparent(false), []);
 }
 
 export function ExportButton() {
   const [open, setOpen] = useState(false);
+  const [imageSupport, setImageSupport] = useState<ImageExportSupport | null>(null);
+  useEffect(() => { let mounted = true; void imageExportSupport().then((support) => { if (mounted) setImageSupport(support); }); return () => { mounted = false; }; }, []);
   const [tab, setTab] = useState<"image" | "video">("image");
-  useAlphaPreview(open, tab === "image" ? imageState.transparent && imageState.format !== "jpg" : videoState.transparent);
+  useAlphaPreview(open, tab === "image" ? imageState.transparent && imageState.format !== "jpg" : videoState.transparent, tab === "image" ? imageState.transparentShadows : videoState.transparentShadows);
   const ref = useRef<HTMLButtonElement>(null);
   const [, force] = useState(0);
   const rerender = () => force((n) => n + 1);
@@ -71,12 +74,13 @@ export function ExportButton() {
 
   const runImage = async () => {
     if (useUI.getState().exporting) return;
+    if (imageSupport?.[imageState.format] === false) { ui.showToast(`This browser cannot encode ${imageState.format.toUpperCase()}. Choose PNG instead.`); return; }
     if (!imageQuality.supported) { ui.showToast(imageQuality.reason!); return; }
     setOpen(false);
     const ctrl = new AbortController();
     ui.setExporting({ label: "Rendering image…", progress: 0.4, cancel: () => ctrl.abort() });
     try {
-      const blob = await captureImage({ width: imgDims[0], height: imgDims[1], format: imageState.format, transparent: imageState.transparent, quality: 0.92, signal: ctrl.signal });
+      const blob = await captureImage({ width: imgDims[0], height: imgDims[1], format: imageState.format, transparent: imageState.transparent, transparentShadows: imageState.transparentShadows, quality: 0.92, signal: ctrl.signal });
       downloadBlob(blob, `${slug(project.name)}-${imgDims[0]}x${imgDims[1]}.${imageState.format}`);
       ui.showToast(`Exported ${imgDims[0]} × ${imgDims[1]} ${imageState.format.toUpperCase()}`);
       chime();
@@ -96,7 +100,7 @@ export function ExportButton() {
     try {
       const result = await exportVideo({
         width: vidDims[0], height: vidDims[1], fps: videoState.fps, quality: videoState.quality,
-        samples: BLUR_SAMPLES[videoState.blur], transparent: videoState.transparent, format: videoState.transparent ? "webm" : videoState.format,
+        samples: BLUR_SAMPLES[videoState.blur], transparent: videoState.transparent, transparentShadows: videoState.transparentShadows, format: videoState.transparent ? "webm" : videoState.format,
         signal: ctrl.signal,
         onProgress: (p, label) => ui.setExporting({ label, progress: p, cancel: () => ctrl.abort() }),
       });
@@ -147,10 +151,11 @@ export function ExportButton() {
               label="Format"
               value={imageState.format}
               onChange={(v) => { imageState.format = v; if (v === "jpg") imageState.transparent = false; rerender(); }}
-              options={[{ value: "png", label: "PNG — best quality" }, { value: "webp", label: "WebP — small + sharp" }, { value: "jpg", label: "JPG — smallest file" }]}
+              options={[{ value: "png", label: "PNG — best quality", disabled: imageSupport?.png === false }, { value: "webp", label: "WebP — small + sharp", disabled: imageSupport?.webp === false, sub: imageSupport?.webp === false ? "This browser cannot export WebP" : undefined }, { value: "jpg", label: "JPG — smallest file", disabled: imageSupport?.jpg === false }]}
             />
             {/* JPEG has no alpha channel, so asking for transparency picks the format that does */}
             <ToggleRow label="Transparent background" checked={imageState.transparent} onChange={(v) => { imageState.transparent = v; if (v && imageState.format === "jpg") imageState.format = "png"; rerender(); }} />
+            {imageState.transparent && <ToggleRow label="Include ground shadow" checked={imageState.transparentShadows} onChange={(v) => { imageState.transparentShadows = v; rerender(); }} />}
             <Label>Orientation</Label>
             <Segmented size="sm" value={fixed ? fixedOrientation : imageState.orientation} onChange={(v) => { imageState.orientation = v; rerender(); }} options={orientationOptions.map((o) => ({ ...o, disabled: fixed && o.value !== fixedOrientation }))} />
             <Label>Size</Label>
@@ -163,7 +168,7 @@ export function ExportButton() {
             )}
             <Summary title={`${imgDims[0]} × ${imgDims[1]}`} tag={imageState.format.toUpperCase()} sub={imageState.transparent ? "Transparent background." : "Opaque background."} />
             {(imageQuality.reason || imageQuality.note) && <p role="status" className="px-0.5 text-[11px] leading-relaxed text-muted">{imageQuality.reason ?? imageQuality.note}</p>}
-            <Button variant="solid" size="lg" disabled={!imageQuality.supported} onClick={() => void runImage()} className="mt-1 w-full">Export image</Button>
+            <Button variant="solid" size="lg" disabled={!imageQuality.supported || imageSupport?.[imageState.format] === false} onClick={() => void runImage()} className="mt-1 w-full">Export image</Button>
           </div>
         ) : (
           <div className="flex flex-col gap-1.5">
@@ -186,6 +191,7 @@ export function ExportButton() {
             <Label>Container</Label>
             <Segmented size="sm" value={videoState.transparent ? "webm" : videoState.format} onChange={(v) => { videoState.format = v; rerender(); }} options={[{ value: "mp4", label: "MP4 · H.264", disabled: videoState.transparent }, { value: "webm", label: "WebM · VP9" }]} />
             <ToggleRow label="Transparent background" checked={videoState.transparent} onChange={(v) => { videoState.transparent = v; rerender(); }} hint="WebM" />
+            {videoState.transparent && <ToggleRow label="Include ground shadow" checked={videoState.transparentShadows} onChange={(v) => { videoState.transparentShadows = v; rerender(); }} />}
             <Summary title={`${vidDims[0]} × ${vidDims[1]}`} tag={`${videoState.fps} fps · ~${mbps.toFixed(0)} Mbps`} sub={`${duration.toFixed(1)}s · ${exportPlan.shots.length} shot${exportPlan.shots.length === 1 ? "" : "s"} in range${exportPlan.audio ? " · audio" : ""}${videoState.blur !== "off" ? ` · ${BLUR_SAMPLES[videoState.blur]}× motion blur` : ""}`} />
             {(videoQuality.reason || videoQuality.note) && <p role="status" className="px-0.5 text-[11px] leading-relaxed text-muted">{videoQuality.reason ?? videoQuality.note}</p>}
             <Button variant="solid" size="lg" disabled={!videoQuality.supported} onClick={() => void runVideo()} className="mt-1 w-full">Export video</Button>

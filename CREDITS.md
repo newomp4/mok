@@ -24,6 +24,12 @@ Original HDR environments from [Poly Haven](https://polyhaven.com/license), lice
 - [Photo Studio 01](https://polyhaven.com/a/photo_studio_01) — Sergej Majboroda.
 - [Studio Small 03](https://polyhaven.com/a/studio_small_03) — Greg Zaal.
 
+## Concrete surface
+
+[Concrete Layers 02](https://polyhaven.com/a/concrete_layers_02) by **Rob Tuytel**, [CC0-1.0](https://polyhaven.com/license). Original 2K diffuse, OpenGL normal and packed ARM PNGs were acquired directly from Poly Haven on 2026-09-06, verified against its published checksums, then converted to KTX2/UASTC with complete mip chains. The source represents a 2-metre tile. Both 2K and derived 1K tiers are included; the earlier JPEG fallback files are retained. Exact source URLs, SHA-256 checksums and conversion settings are in `docs/research/assets/concrete-layers-02.json`.
+
+Model transport sidecars are losslessly compressed copies of the credited GLB files. Their decoded bytes, geometry, texture payloads and license obligations are unchanged.
+
 ## Asset tooling
 
 Texture conversion uses [Khronos KTX-Software 4.4.2](https://github.com/KhronosGroup/KTX-Software/releases/tag/v4.4.2) and Sharp 0.34.5. Source data is preserved by `scripts/ktx-models.mjs`; reports in `docs/research/assets/` record dimensions, formats, mip counts, sizes, and checksums. Tool binaries and intermediate source backups are not shipped with the application.

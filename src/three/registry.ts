@@ -33,6 +33,8 @@ interface RenderFlags {
   setExporting: (value: boolean) => void;
   /** render with a transparent background (export) */
   transparent: boolean;
+  /** Keep a compositable ground shadow in transparent previews and exports. */
+  transparentShadows: boolean;
   /** hdr/model loading state for the overlay */
   loading: number;
   setTransparent: (t: boolean) => void;
@@ -44,6 +46,7 @@ export const useRenderFlags = create<RenderFlags>()((set) => ({
   exporting: false,
   setExporting: (exporting) => set({ exporting }),
   transparent: false,
+  transparentShadows: true,
   loading: 0,
   setTransparent: (transparent) => set({ transparent }),
 }));

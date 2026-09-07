@@ -1,8 +1,9 @@
 import * as THREE from "three";
 import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { AssetCache } from "@/three/assetCache";
+import { modelTransportURL } from "@/lib/modelTransport";
+import { rendererKtxLoader } from "@/three/ktxLoader";
 
 interface ModelAsset { promise: Promise<void>; gltf?: GLTF; error?: unknown }
 const owners = new WeakMap<THREE.WebGLRenderer, { cache: AssetCache<ModelAsset>; loader: GLTFLoader }>();
@@ -26,11 +27,11 @@ function disposeSource(asset: ModelAsset): void {
 function owner(gl: THREE.WebGLRenderer) {
   let entry = owners.get(gl);
   if (!entry) {
-    const ktx = new KTX2Loader().setTranscoderPath("/basis/").setWorkerLimit(2).detectSupport(gl);
+    const ktx = rendererKtxLoader(gl);
     const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).setKTX2Loader(ktx);
     entry = { loader, cache: new AssetCache<ModelAsset>(3, (asset) => { void asset.promise.then(() => disposeSource(asset), () => {}); }) };
     owners.set(gl, entry);
-    const release = () => { ktx.dispose(); gl.domElement.removeEventListener("webglcontextlost", release); owners.delete(gl); };
+    const release = () => { gl.domElement.removeEventListener("webglcontextlost", release); owners.delete(gl); };
     gl.domElement.addEventListener("webglcontextlost", release, { once: true });
   }
   return entry;
@@ -43,7 +44,12 @@ export function acquireModel(gl: THREE.WebGLRenderer, url: string) {
   if (!asset) {
     asset = { promise: Promise.resolve() };
     const current = asset;
-    asset.promise = loader.loadAsync(url).then((gltf) => { current.gltf = gltf; }, (error: unknown) => { current.error = error; });
+    const preferred = modelTransportURL(url);
+    const load = loader.loadAsync(preferred).catch((error: unknown) => {
+      if (preferred === url) throw error;
+      return loader.loadAsync(url); // Static deployments and unavailable transport routes still work.
+    });
+    asset.promise = load.then((gltf) => { current.gltf = gltf; }, (error: unknown) => { current.error = error; });
     cache.put(url, asset);
     // Give Suspense's initial commit a chance to retain the asset. Abandoned loads are still bounded.
     void asset.promise.then(() => { setTimeout(() => cache.trim(), 1000); });

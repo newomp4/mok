@@ -1,0 +1,100 @@
+// Same-context tabs exercise actual IndexedDB/BroadcastChannel and editor UI. No user profile.
+// MOK_QA_NODE_MODULES=/path/to/node_modules MOK_QA_URL=http://127.0.0.1:35361 node scripts/test-workflow-browser.mjs ../workflow-qa
+import { createRequire } from 'node:module';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
+import assert from 'node:assert/strict';
+const require = createRequire(process.env.MOK_QA_NODE_MODULES ? join(process.env.MOK_QA_NODE_MODULES, 'package.json') : import.meta.url);
+const { chromium } = require('playwright');
+const output = resolve(process.argv[2] ?? '../workflow-qa'); await mkdir(output, { recursive: true });
+const url = process.env.MOK_QA_URL ?? 'http://127.0.0.1:35361';
+const browser = await chromium.launch({ headless: true, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+await context.addInitScript(() => { localStorage.setItem('mok:toured', '1'); localStorage.removeItem('mok:seen-version'); });
+const report = { url, checks: [], errors: [] };
+const page = async () => { const p = await context.newPage(); p.on('pageerror', (e) => report.errors.push(String(e))); await p.goto(url); await p.waitForFunction(() => window.__mok?.ownership.state.getState().mode !== 'checking' && window.__mok?.ownership.state.getState().enabled); await p.evaluate(() => window.__mok.useUI.setState({ modal: null, tourStep: null })); return p; };
+const mode = (p, expected) => p.waitForFunction((x) => window.__mok?.ownership.state.getState().mode === x, expected);
+const name = (p) => p.evaluate(() => window.__mok.useEditor.getState().project.name);
+const changeName = (p, value) => p.evaluate((value) => window.__mok.useEditor.getState().update((p) => { p.name = value; }), value);
+const check = (name) => { report.checks.push(name); console.log('PASS', name); };
+try {
+  const a = await page();
+  await a.evaluate(async () => {
+    const m = window.__mok, p = structuredClone(m.useEditor.getState().project);
+    p.id = 'workflow-shared'; p.name = 'Shared project'; p.mockup.device = 'flat'; p.mockup.finish = 'black';
+    p.shots = [p.shots[0]]; p.shots[0].id = 'shared-shot'; p.shots[0].keyframes = {};
+    m.useEditor.getState().replaceProject(p); if (!await m.ownership.ready(p.id)) throw new Error('Could not own fixture');
+    await m.persistence.saveProject(m.useEditor.getState().project); await m.persistence.saveAutosave(m.useEditor.getState().project);
+  });
+  const oldTicket = await a.evaluate(() => ({ projectId: 'workflow-shared', token: window.__mok.ownership.state.getState().token }));
+  const [duplicate] = await Promise.all([a.waitForEvent('popup'), a.evaluate((url) => { window.open(url, '_blank'); }, url)]);
+  await mode(duplicate, 'readonly'); assert.equal(await name(duplicate), 'Shared project'); await duplicate.close();
+  check('An opener-created tab cannot reuse the editing token copied in sessionStorage');
+  const b = await page(); await mode(b, 'readonly');
+  assert.equal(await name(b), 'Shared project');
+  await b.locator('[title="Rename project"]').click(); await b.getByRole('textbox', { name: 'Project name' }).fill('Forbidden UI rename'); await b.getByRole('textbox', { name: 'Project name' }).press('Enter');
+  assert.equal(await name(b), 'Shared project');
+  assert.equal(await b.evaluate(async () => { const m = window.__mok; m.useEditor.getState().setValue('camera.zoom', 9); try { await m.persistence.saveProject(m.useEditor.getState().project); return false; } catch (e) { return e.name === 'ProjectOwnershipError'; } }), true);
+  await b.screenshot({ path: join(output, 'readonly.png') }); check('Second tab is read-only; real UI rename and persistent save are blocked');
+  await changeName(a, 'Flushed during takeover');
+  await b.getByRole('button', { name: 'Edit here', exact: true }).click(); await mode(b, 'editing'); await mode(a, 'readonly');
+  assert.equal(await name(b), 'Flushed during takeover');
+  await changeName(b, 'New owner draft'); await b.evaluate(() => window.__mok.persistence.saveAutosave(window.__mok.useEditor.getState().project));
+  await a.evaluate(async (ticket) => { const m = window.__mok, p = structuredClone(m.useEditor.getState().project); p.name = 'Stale writer'; p.updatedAt = Date.now() + 100; await m.persistence.saveAutosave(p, ticket); }, oldTicket);
+  assert.equal(await a.evaluate(async () => (await window.__mok.persistence.loadProject('workflow-shared')).name), 'New owner draft');
+  check('Takeover flushes pending edits; an old captured token cannot overwrite the new owner');
+  await a.evaluate((ticket) => { const p = structuredClone(window.__mok.useEditor.getState().project); p.name = 'Stale reload recovery'; sessionStorage.setItem('mok:reload-recovery', JSON.stringify({ token: ticket.token, project: p })); }, oldTicket);
+  await a.reload(); await mode(a, 'readonly'); assert.equal(await name(a), 'New owner draft');
+  check('Reload rejects a tab-local recovery snapshot after another owner has claimed the project');
+  await b.getByRole('button', { name: 'Release editing', exact: true }).click(); await mode(b, 'readonly');
+  await a.getByRole('button', { name: 'Edit here', exact: true }).click(); await mode(a, 'editing');
+  assert.equal(await name(a), 'New owner draft'); check('Release and reacquisition open the newest per-project draft');
+  await a.evaluate(() => window.__mok.ownership.state.setState({ expires: Date.now() - 1 }));
+  await changeName(a, 'Forbidden asleep edit'); assert.equal(await name(a), 'New owner draft');
+  await a.evaluate(() => window.dispatchEvent(new Event('focus'))); await mode(a, 'editing');
+  check('Expired local access blocks changes until waking revalidates the lease');
+  await a.reload(); await mode(a, 'editing'); assert.equal(await name(a), 'New owner draft');
+  check('Reload resumes this tab without a 30-second ownership lockout');
+  await changeName(a, 'Pending edit survives reload'); await a.reload(); await mode(a, 'editing');
+  assert.equal(await name(a), 'Pending edit survives reload');
+  check('Immediate reload recovers an edit before the autosave debounce finishes');
+  await b.evaluate(async () => { const m = window.__mok, p = structuredClone(m.useEditor.getState().project); p.id = 'workflow-independent'; p.name = 'Independent project'; m.useEditor.getState().replaceProject(p); if (!await m.ownership.ready(p.id)) throw new Error('Independent project lease failed'); m.useEditor.getState().update((p) => { p.name = 'Independent saved draft'; }); await m.persistence.saveAutosave(m.useEditor.getState().project); });
+  await changeName(a, 'Shared saved draft'); await a.evaluate(() => window.__mok.persistence.saveAutosave(window.__mok.useEditor.getState().project));
+  await b.reload(); await mode(b, 'editing'); assert.equal(await name(b), 'Independent saved draft');
+  await a.reload(); await mode(a, 'editing'); assert.equal(await name(a), 'Shared saved draft');
+  check('Different projects autosave independently and each tab reloads its own draft');
+  // Real menu clicks and native file chooser cancellation for both insertion paths.
+  const before = await a.evaluate(() => ({ project: window.__mok.useEditor.getState().project, history: window.__mok.useEditor.temporal.getState().pastStates.length }));
+  await a.getByRole('button', { name: 'Add', exact: true }).click();
+  let [chooser] = await Promise.all([a.waitForEvent('filechooser'), a.getByRole('button', { name: /^Logo/ }).click()]); await chooser.setFiles([]);
+  await a.locator('[data-shot="shared-shot"]').click({ button: 'right' });
+  [chooser] = await Promise.all([a.waitForEvent('filechooser'), a.getByRole('button', { name: 'Add logo shot', exact: true }).click()]); await chooser.setFiles([]);
+  assert.deepEqual(await a.evaluate(() => ({ project: window.__mok.useEditor.getState().project, history: window.__mok.useEditor.temporal.getState().pastStates.length })), before);
+  check('Both logo menu paths cancel without adding a shot or undo entry');
+  await a.getByRole('button', { name: 'Add', exact: true }).click(); [chooser] = await Promise.all([a.waitForEvent('filechooser'), a.getByRole('button', { name: /^Logo/ }).click()]);
+  await chooser.setFiles({ name: 'logo.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect x="10" y="10" width="80" height="80" fill="#b75137"/></svg>') });
+  await a.waitForFunction(() => window.__mok.useEditor.getState().project.shots.length === 2);
+  assert.equal(await a.evaluate(() => window.__mok.useEditor.temporal.getState().pastStates.length), before.history + 1);
+  assert.ok(await a.evaluate(() => window.__mok.useEditor.getState().project.shots[1].logo?.media?.id));
+  await a.keyboard.press('Meta+z'); await a.waitForFunction(() => window.__mok.useEditor.getState().project.shots.length === 1);
+  check('Successful logo import creates one complete shot and one undo action');
+  await a.evaluate(() => { const m = window.__mok; m.useUI.setState({ timelineMode: 'advanced', timelineOpen: true, activeShotId: 'shared-shot', time: 1 }); m.useEditor.getState().update((p) => { p.shots[0].keyframes = { 'camera.x': [{t:1,v:3,ease:'linear'},{t:2,v:4,ease:'linear'}], 'camera.y': [{t:1,v:5,ease:'linear'}] }; }); m.useEditor.temporal.getState().clear(); });
+  await a.locator('[data-kf="shared-shot|camera.x|1"]').click({ button: 'right' }); await a.getByRole('button', { name: 'Delete all properties at this time', exact: true }).click();
+  assert.deepEqual(await a.evaluate(() => window.__mok.useEditor.getState().project.shots[0].keyframes), { 'camera.x': [{t:2,v:4,ease:'linear'}] });
+  await a.keyboard.press('Meta+z');
+  assert.equal(await a.evaluate(() => Object.values(window.__mok.useEditor.getState().project.shots[0].keyframes).flat().length), 3);
+  await a.screenshot({ path: join(output, 'keyframe-column-undo.png') });
+  check('Keyframe context menu deletes every property at its time and one undo restores them');
+  // A tab released by a closing owner can safely take over; it reloads shared rather than unrelated autosave.
+  await b.evaluate(async () => { const m = window.__mok; const p = await m.persistence.loadProject('workflow-shared'); m.useEditor.getState().replaceProject(p); await m.ownership.ready(p.id); }); await mode(b, 'readonly');
+  await a.waitForTimeout(400); // end the editor's typing-history coalescing interval
+  await changeName(a, 'Forward revision'); await a.evaluate(() => window.__mok.persistence.saveProject(window.__mok.useEditor.getState().project));
+  await a.keyboard.press('Meta+z'); assert.equal(await name(a), 'Shared saved draft');
+  await b.getByRole('button', { name: 'Edit here', exact: true }).click(); await mode(b, 'editing'); await mode(a, 'readonly');
+  assert.equal(await name(b), 'Shared saved draft'); check('Takeover preserves an undo even when its document timestamp predates the named saved record');
+  await b.getByRole('button', { name: 'Release editing', exact: true }).click(); await a.getByRole('button', { name: 'Edit here', exact: true }).click(); await mode(a, 'editing');
+  await a.close(); await b.getByRole('button', { name: 'Edit here', exact: true }).click(); await mode(b, 'editing'); assert.equal(await name(b), 'Shared saved draft');
+  check('Closing the owner permits another tab to edit the shared project');
+  assert.deepEqual(report.errors, []); report.passed = true;
+} catch (error) { report.failure = String(error.stack ?? error); report.tabs = await Promise.all(context.pages().map(async (p, i) => { await p.screenshot({ path: join(output, `failure-${i}.png`) }).catch(() => {}); return p.evaluate(() => ({ ownership: window.__mok?.ownership.state.getState(), project: window.__mok?.useEditor.getState().project.id, activeShotId: window.__mok?.useUI.getState().activeShotId, marker: localStorage.getItem('mok:ownership-change'), inputs: [...document.querySelectorAll('input[type=file]')].length, text: document.body.innerText.slice(-4000) })).catch(() => ({})); })); throw error; }
+finally { await writeFile(join(output, 'report.json'), JSON.stringify(report, null, 2)); await browser.close(); }

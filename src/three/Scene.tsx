@@ -19,6 +19,7 @@ import { PostFX } from "@/three/effects/PostFX";
 import { CARD_Z, CardLayer, FadeOverlay, setToneMapped } from "@/three/CardLayer";
 import { rasterSize } from "@/three/raster";
 import { ContactShadow } from "@/three/ContactShadow";
+import { ShadowCatcher } from "@/three/ShadowCatcher";
 import { resizeShadowMap, useRenderQuality } from "@/three/renderQuality";
 import { acquireEnvironment } from "@/three/environmentAssets";
 import { resolveShotEffects } from "@/lib/shotView";
@@ -340,22 +341,13 @@ function ShadowCalibration({ floorY, fitSize }: { floorY: number; fitSize: numbe
  * The studio backdrop ships with no room at all, so the Light controls had nothing analytic to
  * turn: the HDRI swung but nothing cast anything. This is its key — authored at the pose the
  * preset ships with, so SceneLightRig swings it from there — plus a shadow-only catcher that is
- * invisible everywhere the shadow does not land, which keeps the backdrop flat. The catcher drops
- * out of a transparent render the way the other scenes' floors do; the light stays.
+ * invisible everywhere the shadow does not land, including transparent captures that retain it.
  */
 function BackdropKey({ floorY, fitSize, soft, opacity }: { floorY: number; fitSize: number; soft: number; opacity: number }) {
-  const transparent = useRenderFlags((s) => s.transparent);
-  const mat = useRef<THREE.ShadowMaterial>(null);
+  const showShadow = useRenderFlags((s) => !s.transparent || s.transparentShadows);
   const quality = useRenderQuality();
   const shadowRef = useCallback((light: THREE.DirectionalLight | null) => { if (light) resizeShadowMap(light.shadow, quality.shadow); }, [quality.shadow]);
   const base = Math.min(0.8, 0.1 + opacity * 0.55);
-  // dimming the key has to lighten what it casts too, or the shadow floats on at full strength
-  // under a light that is no longer there
-  useFrame(() => {
-    const m = mat.current, v = anim.values;
-    if (!m || !v) return;
-    m.opacity = base * Math.min(1, Math.max(0.15, v["scene.lightIntensity"]));
-  }, -19);
   const f = fitSize;
   return (
     <group position={[0, floorY, 0]}>
@@ -372,17 +364,7 @@ function BackdropKey({ floorY, fitSize, soft, opacity }: { floorY: number; fitSi
       >
         <orthographicCamera attach="shadow-camera" args={[-f * 1.6, f * 1.6, f * 1.6, -f * 1.6, 0.1, f * 22]} />
       </directionalLight>
-      {!transparent && (
-        // Sits just under the contact blob and writes no depth, so the two shadows blend instead of
-        // clipping each other, and is double-sided so it still reads from the low camera angles most
-        // presets use. It is sized to the shadow camera above: past that boundary the shadow lookup
-        // clamps to the edge of the map and paints a flat tint with a hard straight edge, which on a
-        // smooth backdrop shows up as a line ruled across the frame.
-        <mesh position={[0, -0.006, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-          <planeGeometry args={[f * 3.2, f * 3.2]} />
-          <shadowMaterial ref={mat} transparent depthWrite={false} opacity={base} side={THREE.DoubleSide} />
-        </mesh>
-      )}
+      {showShadow && <ShadowCatcher floorY={-0.006} size={f * 10} opacity={base} followLight />}
     </group>
   );
 }
@@ -396,6 +378,7 @@ export function SceneRoot() {
   const contactShadow = useEditor((s) => s.project.scene.contactShadow);
   const shadowSoft = useEditor((s) => s.project.scene.shadowSoft ?? 0.5);
   const shadowOpacity = useEditor((s) => s.project.scene.shadowOpacity ?? 0.5);
+  const transparentShadows = useRenderFlags((s) => s.transparent && s.transparentShadows);
   // a lit scene shows a flat colour behind it, and the floor terminates on that colour so the two
   // meet without a horizon line
   const backdrop = useEditor((s) => s.project.scene.background.color);
@@ -416,6 +399,7 @@ export function SceneRoot() {
       </Suspense>
       <Device layout={layout} />
       <ShadowCalibration floorY={layout.floorY} fitSize={sceneSize} />
+      {shadowsOn && transparentShadows && <DeviceOnly><ShadowCatcher floorY={layout.floorY - 0.006} size={sceneSize * 10} opacity={Math.min(0.85, 0.15 + shadowOpacity * 0.7)} /></DeviceOnly>}
       {shadowsOn && (
         // A key light alone leaves the device looking like it hovers. This is the tight occlusion
         // right under it, which is what actually sits it on the ground.

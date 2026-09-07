@@ -1,0 +1,11 @@
+{
+  "name": "mok-local-mcp",
+  "version": "0.11.0",
+  "private": true,
+  "type": "module",
+  "description": "Local stdio MCP automation for mok's browser renderer",
+  "engines": { "node": ">=22" },
+  "scripts": { "start": "node src/server.mjs", "test": "node --test test/*.test.mjs", "test:render": "node test/render.mjs", "browser:install": "playwright install chromium" },
+  "dependencies": { "@modelcontextprotocol/server": "2.0.0", "playwright": "1.63.0", "zod": "4.5.4" },
+  "devDependencies": { "@modelcontextprotocol/client": "2.0.0" }
+}

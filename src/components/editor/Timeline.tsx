@@ -17,6 +17,7 @@ import { audioLength } from "@/lib/audio";
 import { shotKind } from "@/lib/defaults";
 import { blip } from "@/lib/sounds";
 import { EasingButton, SelectionCount } from "./EasingEditor";
+import { insertLogoFromPicker } from "@/lib/logoInsertion";
 
 const LEFT_W = 184;
 const RULER_H = 22;
@@ -329,9 +330,7 @@ export function Timeline() {
       return;
     }
     if (kind === "logo") {
-      const id = addShot("logo", ui.activeShotId ?? undefined);
-      const [f] = await pickFiles(ACCEPTED_IMAGES);
-      if (f) await importLogo(f, id);
+      await insertLogoFromPicker(async () => (await pickFiles(ACCEPTED_IMAGES))[0], ui.activeShotId ?? undefined);
       return;
     }
     addShot(kind, ui.activeShotId ?? undefined);
@@ -372,7 +371,7 @@ export function Timeline() {
       { label: "Paste after", icon: "clipboard", shortcut: "⌘V", disabled: !hasShotClipboard(), onSelect: () => pasteShot(shotId) },
       { divider: true, label: "" },
       { label: "Add text shot", icon: "type", onSelect: () => addShot("text", shotId) },
-      { label: "Add logo shot", icon: "logo", onSelect: () => void (async () => { const id = addShot("logo", shotId); const [f] = await pickFiles(ACCEPTED_IMAGES); if (f) await importLogo(f, id); })() },
+      { label: "Add logo shot", icon: "logo", onSelect: () => void insertLogoFromPicker(async () => (await pickFiles(ACCEPTED_IMAGES))[0], shotId) },
       { label: "Set transition-out…", icon: "transition", disabled: project.shots[project.shots.length - 1]?.id === shotId, onSelect: () => setTransitionFor(shotId) },
       { divider: true, label: "" },
       { label: "Delete", icon: "trash", danger: true, disabled: project.shots.length <= 1, onSelect: () => removeShot(shotId) },
@@ -788,6 +787,7 @@ export function Timeline() {
           { label: "Apply easing to whole track", icon: "diamond", onSelect: () => update((p) => { const s = p.shots.find((x) => x.id === keyMenu.shotId); const list = s?.keyframes[keyMenu.prop]; const src = list?.find((kk) => Math.abs(kk.t - keyMenu.t) < 0.0005); if (list && src) for (const kk of list) { kk.ease = src.ease; if (src.cp) kk.cp = [...src.cp] as typeof src.cp; else delete kk.cp; setInHandle(kk, inHandleOf(src) ?? null); } }) },
           { label: "Copy keyframe", icon: "clipboard", shortcut: "⌘C", onSelect: () => useEditor.getState().copyKeyframes([{ shotId: keyMenu.shotId, prop: keyMenu.prop, t: keyMenu.t }]) },
           { label: "Delete keyframe", icon: "trash", danger: true, onSelect: () => update((p) => { const s = p.shots.find((x) => x.id === keyMenu.shotId); if (!s) return; const list = (s.keyframes[keyMenu.prop] ?? []).filter((kk) => Math.abs(kk.t - keyMenu.t) > 0.0005); if (list.length) s.keyframes[keyMenu.prop] = list; else delete s.keyframes[keyMenu.prop]; }) },
+          { label: "Delete all properties at this time", icon: "trash", danger: true, onSelect: () => useEditor.getState().deleteKeyframeColumn(keyMenu.shotId, keyMenu.t) },
         ] : []}
       />
     </div>

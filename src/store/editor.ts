@@ -9,10 +9,11 @@ import { uid } from "@/lib/ids";
 import { useUI } from "./ui";
 import { getDevice } from "@/lib/devices";
 import { getLighting, getScene } from "@/lib/presets";
+import { canEditProject } from "@/lib/projectOwnership";
 
 interface EditorState {
   project: Project;
-  replaceProject: (p: Project) => void;
+  replaceProject: (p: Project, restoreStored?: boolean) => void;
   /** Mutate a cloned copy of the project. */
   update: (mut: (p: Project) => void) => void;
   /** Set an animatable value, writing a keyframe when recording or when the track already exists. */
@@ -20,6 +21,7 @@ interface EditorState {
   setValues: (values: Partial<Record<AnimProp, number>>) => void;
   toggleKeyframe: (prop: AnimProp) => void;
   clearTrack: (prop: AnimProp, shotId?: string) => void;
+  deleteKeyframeColumn: (shotId: string, time: number) => void;
   setDevice: (id: string) => void;
   setScenePreset: (id: Project["scene"]["preset"]) => void;
   /** append (or insert after `afterId`) a media, text or logo shot */
@@ -131,12 +133,32 @@ export function currentShot(p: Project): { shot: Shot | null; localT: number } {
 export const useEditor = create<EditorState>()(
   subscribeWithSelector(
     temporal(
-      (set, get) => ({
+      (rawSet, get) => {
+        const set: typeof rawSet = (partial, replace) => {
+          if (!canEditProject(get().project.id)) return;
+          rawSet(partial as Parameters<typeof rawSet>[0], replace as false);
+        };
+        const state: EditorState = ({
         project: createProject(),
-        replaceProject: (project) => {
+        replaceProject: (project, restoreStored = false) => {
+          if (!restoreStored && project.id === get().project.id && !canEditProject(project.id)) return;
+          if (restoreStored || project.id !== get().project.id) cancelInteraction();
           const p = normalizeProject(project);
-          set({ project: p });
+          rawSet({ project: p });
           pruneSelectedKeys(p);
+        },
+        deleteKeyframeColumn: (shotId, time) => {
+          if (!canEditProject(get().project.id) || !Number.isFinite(time)) return;
+          const p = clone(get().project), shot = p.shots.find((s) => s.id === shotId);
+          if (!shot) return;
+          let changed = false;
+          for (const prop of Object.keys(shot.keyframes) as AnimProp[]) {
+            const before = shot.keyframes[prop] ?? [], after = before.filter((key) => Math.abs(key.t - time) > .0005);
+            if (after.length === before.length) continue;
+            changed = true;
+            if (after.length) shot.keyframes[prop] = after; else delete shot.keyframes[prop];
+          }
+          if (changed) { commitProject(p, set); pruneSelectedKeys(p); }
         },
         update: (mut) => {
           const p = clone(get().project);
@@ -593,7 +615,17 @@ export const useEditor = create<EditorState>()(
           if (idx < 0 || j < 0 || j >= get().project.shots.length) return;
           get().reorderShot(id, j);
         },
-      }),
+      });
+      for (const name of Object.keys(state) as (keyof EditorState)[]) {
+        const action = state[name];
+        if (typeof action !== "function" || name === "replaceProject" || name === "copyShot" || name === "copyKeyframes") continue;
+        Object.assign(state, { [name]: (...args: unknown[]) => {
+          if (!canEditProject(get().project.id)) return name === "addShot" ? "" : undefined;
+          return (action as (...args: unknown[]) => unknown)(...args);
+        } });
+      }
+      return state;
+      },
       {
         partialize: (s) => ({ project: s.project }),
         limit: 200,
@@ -616,6 +648,15 @@ export const useEditor = create<EditorState>()(
   ),
 );
 
+// Direct state replacement is used by migration/diagnostics; it must respect the same boundary.
+const directSetState = useEditor.setState;
+useEditor.setState = ((partial: Parameters<typeof directSetState>[0], replace?: boolean) => {
+  const current = useEditor.getState();
+  const next = typeof partial === "function" ? partial(current) : partial;
+  if (next.project && next.project.id === current.project.id && !canEditProject(current.project.id)) return;
+  directSetState(next as EditorState, replace as true);
+}) as typeof directSetState;
+
 /**
  * Suspends history for the duration of a drag and records ONE undo step for it, only if something
  * actually changed. Reference-counted, because overlapping interactions (a wheel-zoom timer running
@@ -630,6 +671,13 @@ export const beginInteraction = () => {
   useEditor.temporal.getState().pause();
 };
 
+/** A project switch or lost lease ends an in-flight gesture without attaching it to another draft. */
+export const cancelInteraction = () => {
+  interactionDepth = 0;
+  interactionSnapshot = null;
+  useEditor.temporal.getState().resume();
+};
+
 export const endInteraction = () => {
   if (interactionDepth === 0) return;
   if (--interactionDepth > 0) return;
@@ -638,7 +686,7 @@ export const endInteraction = () => {
   const before = interactionSnapshot;
   interactionSnapshot = null;
   // a click that changed nothing must not push a step, and must not wipe redo
-  if (!before || before === useEditor.getState().project) return;
+  if (!before || before === useEditor.getState().project || before.id !== useEditor.getState().project.id) return;
   const past = [...t.pastStates, { project: before }];
   useEditor.temporal.setState({ pastStates: past.slice(-200), futureStates: [] });
 };
@@ -652,6 +700,7 @@ if (typeof window !== "undefined") {
 }
 function restoreHistory(direction: "undo" | "redo") {
   const before = useEditor.getState().project;
+  if (!canEditProject(before.id)) return;
   useEditor.temporal.getState()[direction]();
   const p = useEditor.getState().project;
   if (p === before) return;

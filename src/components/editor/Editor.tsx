@@ -5,10 +5,11 @@ import { ViewportPane } from "./ViewportPane";
 import { Inspector } from "./Inspector";
 import { Timeline } from "./Timeline";
 import { Modals } from "./Modals";
-import { useAutosave, useBootstrap, usePasteImport, useShortcuts, useMediaPrune } from "./hooks";
+import { useAutosave, useBootstrap, usePasteImport, useShortcuts, useMediaPrune, useOwnership } from "./hooks";
 import { Modal, ProgressBar, Button } from "@/components/ui";
 import { useAudioPlayback } from "@/lib/audio";
 import { Tour } from "./Tour";
+import { OwnershipBanner } from "./OwnershipBanner";
 
 function ExportProgress() {
   const exporting = useUI((s) => s.exporting);
@@ -34,6 +35,7 @@ function ExportProgress() {
 
 export default function Editor() {
   useBootstrap();
+  useOwnership();
   useAutosave();
   useMediaPrune();
   usePasteImport();
@@ -43,6 +45,7 @@ export default function Editor() {
   return (
     <div className="flex h-dvh w-screen flex-col gap-2 bg-app p-2 text-fg">
       <TopBar />
+      <OwnershipBanner />
       <div className="flex min-h-0 flex-1 gap-2">
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <ViewportPane />

@@ -1,0 +1,86 @@
+{
+  "source": "https://polyhaven.com/a/concrete_layers_02",
+  "author": "Rob Tuytel",
+  "license": "CC0-1.0",
+  "sourceWidthMeters": 2,
+  "maps": [
+    {
+      "name": "diff",
+      "tier": "1k",
+      "width": 1024,
+      "levels": 11,
+      "bytes": 1063409,
+      "sha256": "1ba8132f3cb5e19333bbb21ad6569f920838267d9e8ccbb212ba029fd764b891",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/concrete_layers_02/concrete_layers_02_diff_2k.png",
+      "sourceSha256": "9be2c0951d94c0d7cbc8a72b909d3abddd5affbf408414d56407b5f7cbb769ad",
+      "sourceBytes": 21810189,
+      "encoding": "KTX2 UASTC quality3, Zstd22; XYZ normals; GL lower-left origin; full mips",
+      "output": "public/textures/concrete/1k/diff.ktx2"
+    },
+    {
+      "name": "diff",
+      "tier": "2k",
+      "width": 2048,
+      "levels": 12,
+      "bytes": 4139703,
+      "sha256": "f3add3f00a367948f1f30f95f2e6e71f75b5f36e1d10a3c26cc09b0468ff4032",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/concrete_layers_02/concrete_layers_02_diff_2k.png",
+      "sourceSha256": "9be2c0951d94c0d7cbc8a72b909d3abddd5affbf408414d56407b5f7cbb769ad",
+      "sourceBytes": 21810189,
+      "encoding": "KTX2 UASTC quality3, Zstd22; XYZ normals; GL lower-left origin; full mips",
+      "output": "public/textures/concrete/2k/diff.ktx2"
+    },
+    {
+      "name": "nor_gl",
+      "tier": "1k",
+      "width": 1024,
+      "levels": 11,
+      "bytes": 1060739,
+      "sha256": "668f8f2bf4f4b0629d003d148cedbb476fcf4f4dcd3a91db6d9a8b612b5d3095",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/concrete_layers_02/concrete_layers_02_nor_gl_2k.png",
+      "sourceSha256": "7652237cbe4cfc00201dbf8509620906600737fdd36f267628d4c5b2df9c58a2",
+      "sourceBytes": 24800490,
+      "encoding": "KTX2 UASTC quality3, Zstd22; XYZ normals; GL lower-left origin; full mips",
+      "output": "public/textures/concrete/1k/nor_gl.ktx2"
+    },
+    {
+      "name": "nor_gl",
+      "tier": "2k",
+      "width": 2048,
+      "levels": 12,
+      "bytes": 4359233,
+      "sha256": "2032eda5094d415a54be91f9928423f485a9673000c750aa34449876316895ce",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/concrete_layers_02/concrete_layers_02_nor_gl_2k.png",
+      "sourceSha256": "7652237cbe4cfc00201dbf8509620906600737fdd36f267628d4c5b2df9c58a2",
+      "sourceBytes": 24800490,
+      "encoding": "KTX2 UASTC quality3, Zstd22; XYZ normals; GL lower-left origin; full mips",
+      "output": "public/textures/concrete/2k/nor_gl.ktx2"
+    },
+    {
+      "name": "arm",
+      "tier": "1k",
+      "width": 1024,
+      "levels": 11,
+      "bytes": 991886,
+      "sha256": "26c16c47a4267a2ed7fa5189a8d6fbd10f2a4e6ecaf8bc8bc3cd689ce5796f03",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/concrete_layers_02/concrete_layers_02_arm_2k.png",
+      "sourceSha256": "587eb3486faa1a34c8ad94e43b8388d58024d0165987a026f39546395b3c687c",
+      "sourceBytes": 16404650,
+      "encoding": "KTX2 UASTC quality3, Zstd22; XYZ normals; GL lower-left origin; full mips",
+      "output": "public/textures/concrete/1k/arm.ktx2"
+    },
+    {
+      "name": "arm",
+      "tier": "2k",
+      "width": 2048,
+      "levels": 12,
+      "bytes": 3880894,
+      "sha256": "6bcbfe10902ae62d81348980b5b775ec2b35d3fe42879a23d3311e1df9453aac",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/concrete_layers_02/concrete_layers_02_arm_2k.png",
+      "sourceSha256": "587eb3486faa1a34c8ad94e43b8388d58024d0165987a026f39546395b3c687c",
+      "sourceBytes": 16404650,
+      "encoding": "KTX2 UASTC quality3, Zstd22; XYZ normals; GL lower-left origin; full mips",
+      "output": "public/textures/concrete/2k/arm.ktx2"
+    }
+  ]
+}

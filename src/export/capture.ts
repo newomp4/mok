@@ -23,6 +23,7 @@ export interface ExportSessionOptions {
   width: number;
   height: number;
   transparent: boolean;
+  transparentShadows?: boolean;
   motionSamples?: number;
   /** Which timeline pixels/sound this capture needs; omitted sessions cover the video endpoint. */
   scope?: ExportScope;
@@ -150,7 +151,7 @@ export async function withExportSession<T>(opts: ExportSessionOptions, fn: (s: E
   const ui = useUI.getState();
   const prevTime = ui.time;
   const wasPlaying = ui.playing;
-  const prev = { w: st.size.width, h: st.size.height, dpr: st.viewport.dpr, frameloop: st.frameloop, transparent: useRenderFlags.getState().transparent, exportQuality: useRenderFlags.getState().exporting, exportTime: anim.exportTime, exporting: anim.exporting, qualityPlan: useRenderFlags.getState().qualityPlan };
+  const prev = { w: st.size.width, h: st.size.height, dpr: st.viewport.dpr, frameloop: st.frameloop, transparent: useRenderFlags.getState().transparent, transparentShadows: useRenderFlags.getState().transparentShadows, exportQuality: useRenderFlags.getState().exporting, exportTime: anim.exportTime, exporting: anim.exporting, qualityPlan: useRenderFlags.getState().qualityPlan };
   let resized = false;
   try {
     if (wasPlaying) ui.setPlaying(false);
@@ -168,7 +169,7 @@ export async function withExportSession<T>(opts: ExportSessionOptions, fn: (s: E
     st.setFrameloop("never");
     st.setDpr(1);
     st.setSize(opts.width, opts.height);
-    useRenderFlags.getState().setTransparent(opts.transparent);
+    useRenderFlags.setState({ transparent: opts.transparent, transparentShadows: opts.transparentShadows ?? true });
     await waitForAssets(opts.signal);
     await nextFrame();
     await nextFrame();
@@ -212,7 +213,7 @@ export async function withExportSession<T>(opts: ExportSessionOptions, fn: (s: E
     anim.exporting = prev.exporting;
     useRenderFlags.getState().setExporting(prev.exportQuality);
     useUI.setState({ time: prevTime });
-    useRenderFlags.getState().setTransparent(prev.transparent);
+    useRenderFlags.setState({ transparent: prev.transparent, transparentShadows: prev.transparentShadows });
     try {
       if (resized) {
         st.setDpr(prev.dpr);
@@ -242,10 +243,10 @@ function flatten(canvas: HTMLCanvasElement, width: number, height: number): HTML
   return flat;
 }
 
-export async function captureImage(opts: { width: number; height: number; format: ImageFormat; quality?: number; transparent: boolean; time?: number; signal?: AbortSignal }): Promise<Blob> {
+export async function captureImage(opts: { width: number; height: number; format: ImageFormat; quality?: number; transparent: boolean; transparentShadows?: boolean; time?: number; signal?: AbortSignal }): Promise<Blob> {
   const time = opts.time ?? useUI.getState().time;
   const transparent = opts.transparent && opts.format !== "jpg";
-  return withExportSession({ width: opts.width, height: opts.height, transparent, scope: { type: "still", time }, signal: opts.signal }, async ({ canvas, renderAt }) => {
+  return withExportSession({ width: opts.width, height: opts.height, transparent, transparentShadows: opts.transparentShadows, scope: { type: "still", time }, signal: opts.signal }, async ({ canvas, renderAt }) => {
     await renderAt(time);
     // a second pass lets lazily-created effect targets settle at the new size
     await renderAt(time);
@@ -271,6 +272,7 @@ export interface VideoExportOptions {
   /** motion-blur samples per frame (1 = off) */
   samples: number;
   transparent: boolean;
+  transparentShadows?: boolean;
   format: "mp4" | "webm";
   onProgress?: (p: number, label: string) => void;
   signal?: AbortSignal;
@@ -374,7 +376,7 @@ export async function exportVideo(opts: VideoExportOptions): Promise<{ blob: Blo
   if (!codecs.length) throw new Error("This browser cannot encode video (WebCodecs unavailable)");
 
   const scope: ExportScope = { type: "video", start: 0, end: total };
-  return withExportSession({ width: opts.width, height: opts.height, transparent: opts.transparent, motionSamples: opts.samples, scope, signal: opts.signal }, async ({ canvas, renderAt }) => {
+  return withExportSession({ width: opts.width, height: opts.height, transparent: opts.transparent, transparentShadows: opts.transparentShadows, motionSamples: opts.samples, scope, signal: opts.signal }, async ({ canvas, renderAt }) => {
     const accum = document.createElement("canvas");
     accum.width = opts.width;
     accum.height = opts.height;

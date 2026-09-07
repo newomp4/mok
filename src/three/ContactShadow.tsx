@@ -35,7 +35,8 @@ export function renderContactShadow(gl: THREE.WebGLRenderer, scene: THREE.Scene,
   if (!isEffectivelyVisible(shadow)) return;
   const background = scene.background, override = scene.overrideMaterial;
   const { target, blurred, depth, plane, horizontal, vertical } = resources;
-  withHiddenObjects([shadow, ...mainCamera.children], () => {
+  const catcher = scene.getObjectByName("ground-shadow-catcher");
+  withHiddenObjects([shadow, ...mainCamera.children, ...(catcher ? [catcher] : [])], () => {
     try {
       scene.background = null;
       scene.overrideMaterial = depth;
@@ -69,17 +70,17 @@ export function ContactShadow({ position, scale, blur, opacity, far, resolution 
 }) {
   const group = useRef<THREE.Group>(null);
   const camera = useRef<THREE.OrthographicCamera>(null);
-  const transparent = useRenderFlags((s) => s.transparent);
+  const hidden = useRenderFlags((s) => s.transparent && !s.transparentShadows);
   const resources = useMemo(() => createContactShadowResources(scale, resolution), [scale, resolution]);
   useEffect(() => () => disposeResources(resources), [resources]);
   useEffect(() => { resources.catcher.opacity = opacity; }, [resources, opacity]);
   useFrame(({ gl, scene, camera: mainCamera }) => {
     const shadow = group.current, cam = camera.current;
-    if (!shadow || !cam || anim.card || transparent) return;
+    if (!shadow || !cam || anim.card || hidden) return;
     renderContactShadow(gl, scene, mainCamera, shadow, cam, resources, blur);
   });
   return (
-    <group ref={group} visible={!transparent} rotation-x={Math.PI / 2} position={position} dispose={null}>
+    <group ref={group} visible={!hidden} rotation-x={Math.PI / 2} position={position} dispose={null}>
       <mesh geometry={resources.geometry} material={resources.catcher} scale={[1, -1, 1]} rotation={[-Math.PI / 2, 0, 0]} />
       <orthographicCamera ref={camera} args={[-scale / 2, scale / 2, scale / 2, -scale / 2, 0, far]} />
     </group>

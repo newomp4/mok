@@ -5,6 +5,7 @@ import { ANIMATED_GIF_MESSAGE, blobToDataURL, dataURLToBlob, ensureMedia, regist
 import { uid } from "./ids";
 import { normalizeProject } from "./defaults";
 import { validateMediaRef } from "./validateProject";
+import { draftKey, leaseKey, ownedTransaction, ProjectOwnershipError, useProjectOwnership, writeTicket, type WriteTicket, type ProjectLease } from "./projectOwnership";
 
 const PROJECT_PREFIX = "project:";
 const INDEX_KEY = "projects:index";
@@ -88,11 +89,9 @@ let lastListFailed = false;
 /** True when the last listing came back empty because storage refused to be read, not because it is empty. */
 export function listingFailed(): boolean { return lastListFailed; }
 
-function writeProjectRecord(p: Project, onlyIfSaved: boolean): Promise<void> {
-  return projectStore("readwrite", (store) => new Promise<void>((resolve, reject) => {
+function writeProjectRecord(p: Project, onlyIfSaved: boolean, ticket: WriteTicket | null | undefined): Promise<void> {
+  return ownedTransaction<void>(p.id, ticket, (store) => {
     const tx = store.transaction;
-    tx.oncomplete = () => resolve();
-    tx.onabort = tx.onerror = () => reject(tx.error ?? new Error("Project storage transaction failed"));
     const request = store.get(INDEX_KEY);
     request.onsuccess = () => {
       try {
@@ -101,20 +100,22 @@ function writeProjectRecord(p: Project, onlyIfSaved: boolean): Promise<void> {
         if (onlyIfSaved && !idx.some((m) => m.id === p.id)) return;
         const meta: ProjectMeta = { id: p.id, name: p.name, updatedAt: p.updatedAt, device: p.mockup.device };
         store.put(p, PROJECT_PREFIX + p.id);
+        if (ticket !== undefined) store.put(p, draftKey(p.id));
         store.put([meta, ...idx.filter((m) => m.id !== p.id)], INDEX_KEY);
-      } catch (error) { tx.abort(); reject(error); }
+      } catch { tx.abort(); }
     };
-    request.onerror = () => reject(request.error);
-  }));
+  });
 }
 
 function queueProjectSave(p: Project, onlyIfSaved: boolean): Promise<void> {
   p = structuredClone(p);
+  const ticket = writeTicket(p.id);
   return writeInOrder(async () => {
     try {
-      await writeProjectRecord(p, onlyIfSaved);
+      await writeProjectRecord(p, onlyIfSaved, ticket);
       lastFailure = { message: "", at: 0 };
     } catch (e) {
+      if (e instanceof ProjectOwnershipError) throw e;
       reportStorageFailure(`Could not save “${p.name}”`, e);
     }
   });
@@ -127,7 +128,9 @@ export function saveProjectIfSaved(p: Project): Promise<void> { return queueProj
 
 export async function loadProject(id: string): Promise<Project | null> {
   await writeTail;
-  const p = (await idbGet(PROJECT_PREFIX + id)) as Project | undefined;
+  const saved = (await idbGet(PROJECT_PREFIX + id)) as Project | undefined;
+  const draft = (await idbGet(draftKey(id))) as Project | undefined;
+  const p = draft ?? saved;
   if (!p) return null;
   const safe = normalizeProject(p);
   await restoreMedia(safe);
@@ -137,6 +140,20 @@ export async function loadProject(id: string): Promise<Project | null> {
 export async function deleteProject(id: string): Promise<void> {
   return writeInOrder(async () => {
     try {
+      if (useProjectOwnership.getState().enabled) {
+        await projectStore("readwrite", (store) => new Promise<void>((resolve, reject) => {
+          const tx = store.transaction;
+          tx.oncomplete = () => resolve(); tx.onabort = tx.onerror = () => reject(tx.error ?? new ProjectOwnershipError());
+          const lease = store.get(leaseKey(id));
+          lease.onsuccess = () => {
+            const l = lease.result as ProjectLease | undefined;
+            if (l && l.expires > Date.now() && l.token !== writeTicket(id)?.token) { tx.abort(); return; }
+            const index = store.get(INDEX_KEY);
+            index.onsuccess = () => { store.delete(PROJECT_PREFIX + id); store.delete(draftKey(id)); store.put((index.result ?? []).filter((m: ProjectMeta) => m.id !== id), INDEX_KEY); };
+          };
+        }));
+        return;
+      }
       await idbDel(PROJECT_PREFIX + id);
       await idbUpdate<ProjectMeta[]>(INDEX_KEY, (idx = []) => idx.filter((m) => m.id !== id));
     } catch (e) {
@@ -145,11 +162,18 @@ export async function deleteProject(id: string): Promise<void> {
   });
 }
 
-export async function saveAutosave(p: Project): Promise<void> {
+export async function saveAutosave(p: Project, explicitTicket?: WriteTicket): Promise<void> {
   p = structuredClone(p);
+  const ticket = explicitTicket ?? writeTicket(p.id);
+  if (ticket === null) return;
   return writeInOrder(async () => {
-    try { await idbSet(AUTOSAVE_KEY, p); autosaveWarned = false; }
+    try {
+      if (ticket === undefined) await idbSet(AUTOSAVE_KEY, p);
+      else await ownedTransaction<void>(p.id, ticket, (store) => { store.put(p, draftKey(p.id)); store.put(p, AUTOSAVE_KEY); });
+      autosaveWarned = false;
+    }
     catch (e) {
+      if (e instanceof ProjectOwnershipError) return;
       // silently losing the session is the worst outcome; warn once per failure streak
       console.warn("autosave failed", e);
       if (!autosaveWarned) { autosaveWarned = true; onStorageError("Autosave failed — this browser is blocking storage"); }
@@ -160,7 +184,9 @@ export async function saveAutosave(p: Project): Promise<void> {
 export async function loadAutosave(): Promise<Project | null> {
   try {
     await writeTail;
-    const p = (await idbGet(AUTOSAVE_KEY)) as Project | undefined;
+    let tabProject: string | null = null;
+    try { tabProject = sessionStorage.getItem("mok:open-project"); } catch {}
+    const p = (tabProject && await idbGet(draftKey(tabProject))) || (await idbGet(AUTOSAVE_KEY)) as Project | undefined;
     if (!p) return null;
     const safe = normalizeProject(p);
     await restoreMedia(safe);
@@ -186,6 +212,9 @@ export function collectMedia(p: Project): MediaRef[] {
  * Returns how many records were removed.
  */
 export async function pruneMedia(live?: Project): Promise<number> {
+  // Another tab's pending imports and undo history are not visible here. A global sweep would
+  // delete live bytes; retaining them is preferable until a cross-tab media manifest exists.
+  if (useProjectOwnership.getState().enabled) return 0;
   try {
     await writeTail;
     const keep = new Set<string>();

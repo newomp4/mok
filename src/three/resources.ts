@@ -18,7 +18,7 @@ export function useOwnedResources(resources: object) {
 }
 
 /** Primitive GLTF objects bypass R3F's automatic disposal. Track their private clones explicitly. */
-export function ownModelResource<T extends THREE.Material | THREE.BufferGeometry>(root: THREE.Object3D, resource: T): T {
+export function ownModelResource<T extends THREE.Material | THREE.BufferGeometry | THREE.Texture>(root: THREE.Object3D, resource: T): T {
   const owned = (root.userData.ownedResources ??= new Set<Disposable>()) as Set<Disposable>;
   owned.add(resource);
   return resource;

@@ -1,0 +1,122 @@
+{
+  "imac-24.glb": {
+    "hash": "c1e4224aed23a87b4273416e82310cbdb7d5abc5a55ae8d1c4021dbbad1245cc",
+    "bytes": 3595864,
+    "br": {
+      "file": "imac-24.glb.c1e4224aed23a87b.br",
+      "bytes": 2827910
+    },
+    "gzip": {
+      "file": "imac-24.glb.c1e4224aed23a87b.gz",
+      "bytes": 2881326
+    }
+  },
+  "ipad-pro-13.glb": {
+    "hash": "c3e7d786895d104edad4e35b378c839bacb8b64cb840f31d61f470414740f8ff",
+    "bytes": 7837204,
+    "br": {
+      "file": "ipad-pro-13.glb.c3e7d786895d104e.br",
+      "bytes": 7145208
+    },
+    "gzip": {
+      "file": "ipad-pro-13.glb.c3e7d786895d104e.gz",
+      "bytes": 7197484
+    }
+  },
+  "iphone-16-pro-max.glb": {
+    "hash": "ce7eb0d92b2add24fec46269179f56809c7d935e3ebd0d9e5afab5624f5b8aef",
+    "bytes": 3414904,
+    "br": {
+      "file": "iphone-16-pro-max.glb.ce7eb0d92b2add24.br",
+      "bytes": 3144599
+    },
+    "gzip": {
+      "file": "iphone-16-pro-max.glb.ce7eb0d92b2add24.gz",
+      "bytes": 3164652
+    }
+  },
+  "iphone-17-pro-max.glb": {
+    "hash": "0461d70f80c71bbb0df8dcce59a2b055dcf390f48759273ec9a0e33c3af4b60e",
+    "bytes": 1452296,
+    "br": {
+      "file": "iphone-17-pro-max.glb.0461d70f80c71bbb.br",
+      "bytes": 1337313
+    },
+    "gzip": {
+      "file": "iphone-17-pro-max.glb.0461d70f80c71bbb.gz",
+      "bytes": 1348587
+    }
+  },
+  "iphone-17-pro.glb": {
+    "hash": "9b2623d65334a1f924d72cff6ed735274be51e8e28c9b299a9983877b28f28fa",
+    "bytes": 17162852,
+    "br": {
+      "file": "iphone-17-pro.glb.9b2623d65334a1f9.br",
+      "bytes": 16941212
+    },
+    "gzip": {
+      "file": "iphone-17-pro.glb.9b2623d65334a1f9.gz",
+      "bytes": 16955093
+    }
+  },
+  "macbook-pro-14.glb": {
+    "hash": "6b35692974bde834d4fb4e5a8b60377266723d70fa0915abcf45cca6fe419b14",
+    "bytes": 1319748,
+    "br": {
+      "file": "macbook-pro-14.glb.6b35692974bde834.br",
+      "bytes": 833597
+    },
+    "gzip": {
+      "file": "macbook-pro-14.glb.6b35692974bde834.gz",
+      "bytes": 871000
+    }
+  },
+  "macbook-pro-16.glb": {
+    "hash": "7b8ea1dc6dcb91ccb4a23f965c7ed068ebb6e8ef05307b2e42462fc228995036",
+    "bytes": 2699348,
+    "br": {
+      "file": "macbook-pro-16.glb.7b8ea1dc6dcb91cc.br",
+      "bytes": 2100777
+    },
+    "gzip": {
+      "file": "macbook-pro-16.glb.7b8ea1dc6dcb91cc.gz",
+      "bytes": 2146411
+    }
+  },
+  "pro-display-xdr.glb": {
+    "hash": "ceedaee9d8841baffb187014b2904ccfed1afda08366f2c3bf93f4abf4468fcd",
+    "bytes": 6090396,
+    "br": {
+      "file": "pro-display-xdr.glb.ceedaee9d8841baf.br",
+      "bytes": 4052644
+    },
+    "gzip": {
+      "file": "pro-display-xdr.glb.ceedaee9d8841baf.gz",
+      "bytes": 4166642
+    }
+  },
+  "watch-series-9.glb": {
+    "hash": "8bd14047e0c90dd8c72e39c19d0e2d5ae29144254678ee56ebe40575d8e77fd7",
+    "bytes": 4610580,
+    "br": {
+      "file": "watch-series-9.glb.8bd14047e0c90dd8.br",
+      "bytes": 4236566
+    },
+    "gzip": {
+      "file": "watch-series-9.glb.8bd14047e0c90dd8.gz",
+      "bytes": 4288063
+    }
+  },
+  "watch-ultra-2.glb": {
+    "hash": "da6f849a50f83ac6d6f82ef52d66b64ef44f0fa99df69b3634026c53fb7afee4",
+    "bytes": 11664232,
+    "br": {
+      "file": "watch-ultra-2.glb.da6f849a50f83ac6.br",
+      "bytes": 10864218
+    },
+    "gzip": {
+      "file": "watch-ultra-2.glb.da6f849a50f83ac6.gz",
+      "bytes": 10945643
+    }
+  }
+}

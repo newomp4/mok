@@ -1,7 +1,7 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { useFrame, useLoader, useThree } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import { MeshReflectorMaterial as FloorMaterial } from "@react-three/drei/materials/MeshReflectorMaterial.js";
 import { BlurPass } from "@react-three/drei/materials/BlurPass.js";
 import { anim } from "@/three/anim";
@@ -15,6 +15,7 @@ import { resizeShadowMap, useRenderQuality } from "@/three/renderQuality";
 import { clipReflectionCamera, isEffectivelyVisible, withHiddenObjects, withOffscreenPass } from "@/three/renderPass";
 import { reflectionSamples } from "@/three/reflectionSamples";
 import { createReceiverOnlyShadowMaterial } from "@/three/shadowCalibration";
+import { acquireConcrete, configureConcreteMaps, type ConcreteMaps } from "@/three/concreteAssets";
 
 /**
  * A transparent export asks for the device on an empty frame. The lights still belong there, but
@@ -107,23 +108,29 @@ function SceneFog({ color, near, far }: { color: string; near: number; far: numb
 
 function ConcreteFloor({ size }: { size: number }) {
   const noRoom = useNoRoom();
-  const [diff, nor, rough, ao] = useLoader(THREE.TextureLoader, [
-    "/textures/concrete/diff.jpg", "/textures/concrete/nor_gl.jpg", "/textures/concrete/rough.jpg", "/textures/concrete/ao.jpg",
-  ]);
-  useMemo(() => {
-    diff.colorSpace = THREE.SRGBColorSpace;
-    for (const t of [diff, nor, rough, ao]) {
-      t.wrapS = t.wrapT = THREE.RepeatWrapping;
-      // one tile per ~1.2 world units keeps the aggregate visible without turning to noise
-      t.repeat.set(size / 3.4, size / 3.4);
-      t.anisotropy = 16;
-    }
-  }, [diff, nor, rough, ao, size]);
+  const gl = useThree((s) => s.gl), invalidate = useThree((s) => s.invalidate);
+  const quality = useRenderQuality();
+  const [maps, setMaps] = useState<ConcreteMaps | null>(null);
+  const displayed = useRef<(() => void) | null>(null);
+  const receiverShadow = useMemo(() => createReceiverOnlyShadowMaterial(), []);
+  useEffect(() => {
+    const incoming = acquireConcrete(gl, quality.hdrTier);
+    let cancelled = false, promoted = false;
+    void incoming.promise.then((loaded) => {
+      if (cancelled) return;
+      promoted = true; displayed.current?.(); displayed.current = incoming.release;
+      setMaps(loaded); invalidate();
+    }, () => {});
+    return () => { cancelled = true; if (!promoted) incoming.release(); };
+  }, [gl, quality.hdrTier, invalidate]);
+  useEffect(() => () => { displayed.current?.(); displayed.current = null; receiverShadow.dispose(); }, [receiverShadow]);
+  useMemo(() => { if (maps) configureConcreteMaps(maps, size, gl.capabilities.getMaxAnisotropy()); }, [maps, size, gl]);
   if (noRoom) return null;
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+    <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow customDepthMaterial={receiverShadow} customDistanceMaterial={receiverShadow}>
       <planeGeometry args={[size, size]} />
-      <meshStandardMaterial ref={(m) => { if (m) { addScreenGlow(m); addEnvironmentGain(m); } }} map={diff} normalMap={nor} roughnessMap={rough} aoMap={ao} color="#8e8e90" roughness={0.9} metalness={0} normalScale={new THREE.Vector2(0.7, 0.7)} />
+      {/* A ready tier adds map shader defines to the initially untextured floor. */}
+      <meshStandardMaterial key={maps?.tier ?? "pending"} ref={(m) => { if (m) { addScreenGlow(m); addEnvironmentGain(m); } }} map={maps?.diff} normalMap={maps?.normal} roughnessMap={maps?.rough} aoMap={maps?.ao} color="#bababc" roughness={0.95} metalness={0} normalScale={new THREE.Vector2(0.65, 0.65)} />
     </mesh>
   );
 }

@@ -34,7 +34,7 @@ rendering and encoding happens locally with WebGL and WebCodecs.
   variance-shadow-mapped lighting whose softness and opacity you control, an infinite sweep that dissolves into
   your own backdrop colour with no horizon seam, a reflective floor in the Dark room, and light thrown by the
   device screen itself, coloured by what is on the display. Light rotation swings the lights and their shadows,
-  not just the reflections, and a transparent export drops the room and leaves only the device
+  not just the reflections. Transparent exports remove the room and optionally retain the ground shadow
 - **8 lighting rigs** from CC0 Poly Haven HDRIs, rotatable and keyframeable, with contact-shadow softness and opacity
 - **Backgrounds**: solid colour, 20 layered mesh-gradient presets and 8 wallpaper-class ones with bokeh, light
   leaks and depth, all picked from a visual grid, your own image with blur, or transparent — and the same library
@@ -75,7 +75,8 @@ rendering and encoding happens locally with WebGL and WebCodecs.
   (VP9, alpha) up to 4K, 24 / 30 / 60 fps, 4× / 8× / 16× motion blur, App Store preview sizes, audio muxed in
 - **24 starter templates** with hover previews, including multi-shot sequences (title → device → logo), each
   opening with a sample screen already on the device
-- **Projects**: autosave, local project library (IndexedDB), portable `.mok.json` files, undo / redo
+- **Projects**: per-project autosave, local project library (IndexedDB), portable `.mok.json` files, undo / redo. One editing tab owns each project; explicit takeover or an editable copy prevents conflicting writes. Immediate reloads recover pending edits while the same lease remains authoritative.
+- **Local automation**: the standalone [MCP package](automation/README.md) creates and edits portable projects, imports workspace media, and runs cancellable image/video jobs in a private browser context.
 - Light and dark UI in Geist Sans + Geist Mono, keyboard shortcuts (`?`), onboarding plus isolated Timeline/Auto-motion practice tours, capture-shortcut preference and what's new
 
 ## Run it
@@ -87,6 +88,12 @@ pnpm dev
 
 Open http://localhost:3000. Production build: `pnpm build && pnpm start`. Deploys to Vercel as-is.
 
+## Latest changes
+
+Version 0.11.0 adds geometry-based occlusion to MacBook screen light, calmer MacBook 14 enclosure grain, optional shadows in transparent exports, cross-tab editing safeguards, cancel-safe logo insertion and one-step keyframe-column deletion. Browser export options reflect actual encoding support; Safari offers PNG/JPEG when WebP encoding is unavailable.
+
+Run `npm test`, `npm run typecheck` and `npm run lint` for application checks. Browser, visual and workflow verification details are in [the 0.11.0 release report](docs/research/release-0.11.0.md). MCP setup and tests are separate in [automation/README.md](automation/README.md).
+
 ## How it works
 
 - **Rendering** — three.js r185 via React Three Fiber. Devices are extruded rounded-rect solids with
@@ -94,7 +101,7 @@ Open http://localhost:3000. Production build: `pnpm build && pnpm start`. Deploy
   whose emissive map is the uploaded media, with a clear coat so the HDRI reflects across the glass
   like real cover glass. The renderer uses Khronos Neutral tone mapping; lighting and glass can affect displayed screenshot colors.
 - **Speed** — the scene only re-renders on demand (state changes, playback, export), textures are
-  uploaded before model promotion, HDRIs have licensed 2K and 1K tiers, and PMREM/model caches keep at most two/three unused-or-active entries except temporarily pinned work. All ten detailed models use KTX2 UASTC textures with complete mip chains. Memory planning selects actual GPU-supported MSAA counts; busy previews adapt resolution and idle frames restore the user's quality preference.
+  uploaded before model promotion, HDRIs have licensed 2K and 1K tiers, and PMREM/model caches keep at most two/three unused-or-active entries except temporarily pinned work. All ten detailed models use KTX2 UASTC textures with complete mip chains. Lossless Brotli/gzip model responses reduce download sizes without changing decoded model bytes; static GLBs remain the fallback. Concrete uses licensed 2K/1K KTX2 color, normal and packed surface maps. Memory planning selects actual GPU-supported MSAA counts; busy previews adapt resolution and idle frames restore the user's quality preference.
 - **Screen resolution** — preview screen canvases use up to 2560 pixels on the long edge. Exports
   increase this to match the output: normally a 4096-pixel edge and 12 megapixels, or up to an 8192-pixel edge and 24 megapixels for larger captures when the memory plan permits, always bounded by the GPU texture limit. This improves display detail in large captures; it cannot recover detail absent from the
   uploaded image. Darkroom reflection buffers are released when the scene is closed.

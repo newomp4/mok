@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import { visibleBounds } from "@/three/bounds";
+import { buildDeckHeightField, screenOcclusionGLSL } from "@/three/screenOcclusion";
+import { ownModelResource } from "@/three/resources";
 
 interface ScreenRectangle { origin: THREE.Vector3; u: THREE.Vector3; v: THREE.Vector3 }
 const rectangles = new WeakMap<THREE.BufferGeometry, ScreenRectangle | null>();
@@ -79,6 +81,11 @@ export function createScreenReceiver(frame: THREE.Object3D, minY: number, maxY: 
     inverse: new THREE.Uniform(new THREE.Matrix4()),
     up: new THREE.Uniform(new THREE.Vector3(0, 1, 0)),
     height: new THREE.Uniform(new THREE.Vector2(minY, maxY)),
+    blockers: new THREE.Uniform<THREE.Texture | null>(null),
+    blockerBounds: new THREE.Uniform(new THREE.Vector4()),
+    blockerHeight: new THREE.Uniform(new THREE.Vector2()),
+    blockerBias: new THREE.Uniform(0),
+    blockersEnabled: new THREE.Uniform(0),
     normalMatrix: new THREE.Matrix3(),
   };
 }
@@ -109,10 +116,15 @@ export function laptopReceivers(root: THREE.Object3D, screen: THREE.Mesh, lid: T
   if (largest < 1e-6) return null;
   const top = Math.max(...candidates.filter((c) => c.area >= largest * 0.35).map((c) => c.box.max.y));
   const minY = top - screenHeight * 0.055, maxY = top + screenHeight * 0.05;
-  return {
-    receiver: createScreenReceiver(nativeFrame, minY, maxY),
-    meshes: new Set(candidates.filter((c) => c.box.max.y >= minY && c.box.min.y <= maxY).map((c) => c.mesh)),
-  };
+  const meshes = new Set(candidates.filter((c) => c.box.max.y >= minY && c.box.min.y <= maxY).map((c) => c.mesh));
+  const receiver = createScreenReceiver(nativeFrame, minY, maxY);
+  const field = buildDeckHeightField(meshes, nativeFrame, minY, maxY);
+  if (field) {
+    receiver.blockers.value = ownModelResource(root, field.texture);
+    receiver.blockerBounds.value.copy(field.bounds); receiver.blockerHeight.value.copy(field.height);
+    receiver.blockerBias.value = field.bias; receiver.blockersEnabled.value = 1;
+  }
+  return { receiver, meshes };
 }
 
 const installed = new WeakSet<THREE.Material>();
@@ -127,6 +139,8 @@ export function installScreenSpill(material: THREE.MeshStandardMaterial, receive
       spillNormal: spill.normal, spillInverse: spill.inverse, spillArea: spill.area,
       spillMaxMip: spill.maxMip, spillStrength: spill.strength,
       spillDeckInverse: receiver.inverse, spillDeckUp: receiver.up, spillDeckHeight: receiver.height,
+      spillBlockers: receiver.blockers, spillBlockerBounds: receiver.blockerBounds, spillBlockerHeight: receiver.blockerHeight,
+      spillBlockerBias: receiver.blockerBias, spillBlockersEnabled: receiver.blockersEnabled,
     });
     shader.vertexShader = `varying vec3 vSpillWorld;\n${shader.vertexShader}`.replace("#include <project_vertex>", `
       vec4 spillPosition = vec4(transformed, 1.0);
@@ -145,6 +159,7 @@ export function installScreenSpill(material: THREE.MeshStandardMaterial, receive
       uniform mat4 spillInverse, spillDeckInverse;
       uniform vec2 spillDeckHeight;
       uniform float spillArea, spillMaxMip, spillStrength;
+      ${screenOcclusionGLSL}
       vec3 sampleScreenSpill(vec2 uv, float lod, vec2 filterWidth) {
         // The display is a finite emitter. Filter its boundary as well as its image: clipping a
         // blurred tap at UV 0/1 creates visible bands when the reflected rectangle crosses a deck.
@@ -170,7 +185,8 @@ export function installScreenSpill(material: THREE.MeshStandardMaterial, receive
             float incidence = max(dot(spillWorldNormal, lightDirection), 0.0);
             float weight = emission * incidence * patchArea / (distanceSq + patchArea * 0.25);
             projectedWeight += weight;
-            irradiance += sampleScreenSpill(suv, spillMaxMip - 2.0, vec2(0.008)) * weight;
+            float lightVisibility = screenLightVisibility(spillOrigin + spillU * suv.x + spillV * suv.y);
+            irradiance += sampleScreenSpill(suv, spillMaxMip - 2.0, vec2(0.008)) * weight * lightVisibility;
           }
           // Projected solid angle is at most PI over the receiving hemisphere. Near a closed lid,
           // coarse patch quadrature can overshoot that bound; normalize only those close samples.
@@ -195,7 +211,8 @@ export function installScreenSpill(material: THREE.MeshStandardMaterial, receive
             float dotNV = max(dot(spillWorldNormal, viewDirection), 0.0);
             vec3 fresnel = F_Schlick(material.specularColorBlended, material.specularF90, dotNV);
             float visibility = spillArea / (spillArea + cone * cone * 4.0);
-            reflectedLight.indirectSpecular += reflection * fresnel * visibility * spillStrength;
+            float reflectedVisibility = screenLightVisibility(spillOrigin + spillU * clamp(centerUv.x, 0.0, 1.0) + spillV * clamp(centerUv.y, 0.0, 1.0));
+            reflectedLight.indirectSpecular += reflection * fresnel * visibility * spillStrength * reflectedVisibility;
           }
         }
       }`);

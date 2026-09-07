@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef } from "react";
-import { useEditor, redo, undo, beginInteraction, endInteraction, hasKeyClipboard, hasShotClipboard, lastCopyWasKeyframes } from "@/store/editor";
+import { useEditor, redo, undo, beginInteraction, endInteraction, cancelInteraction, hasKeyClipboard, hasShotClipboard, lastCopyWasKeyframes } from "@/store/editor";
 import { APP_VERSION } from "@/lib/version";
 import type { AnimProp, Project } from "@/lib/types";
 import { useUI } from "@/store/ui";
@@ -20,12 +20,15 @@ import { DEVICES, getDevice, preferModel, type DeviceSpec } from "@/lib/devices"
 import * as screens from "@/lib/screens";
 import { clamp } from "@/lib/cn";
 import { hasOpenLayer } from "@/components/ui";
+import { canEditProject, openProjectOwnership, ownershipReady, releaseProjectOwnership, startProjectOwnership, takeOverProjectOwnership, useProjectOwnership } from "@/lib/projectOwnership";
+let bootstrapReady: Promise<void> = Promise.resolve();
 
 export function useBootstrap() {
   useEffect(() => {
     const ui = useUI.getState();
+    useProjectOwnership.setState({ enabled: true, projectId: null, mode: "checking", reason: "Restoring your project…" });
     // debug handle for QA / power users
-    (window as unknown as { __mok: unknown }).__mok = { useEditor, useUI, actions, capture, registry: registryViewport, templates: TEMPLATES, anim: animState, effectDefs: EFFECT_DEFS, devices: DEVICES, scenes: SCENES, screens, persistence, version: APP_VERSION };
+    (window as unknown as { __mok: unknown }).__mok = { useEditor, useUI, actions, capture, registry: registryViewport, templates: TEMPLATES, anim: animState, effectDefs: EFFECT_DEFS, devices: DEVICES, scenes: SCENES, screens, persistence, ownership: { ready: async (id: string) => { await bootstrapReady; return ownershipReady(id); }, state: useProjectOwnership, takeOver: takeOverProjectOwnership, release: releaseProjectOwnership }, version: APP_VERSION };
     ui.setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
     setStorageErrorHandler((what) => useUI.getState().showToast(what));
     onMediaPersistFailed((name, reason) => useUI.getState().showToast(
@@ -37,12 +40,14 @@ export function useBootstrap() {
     // a saved project reaches the store from the autosave, the Projects modal or a .mok import alike,
     // so the upgrade to the photoreal models runs on whatever lands there
     const unsubModels = useEditor.subscribe((s) => s.project, (p) => {
-      if (migrateToModels(p)) useEditor.setState({ project: { ...p } });
+      if (!canEditProject(p.id)) return;
+      const copy = structuredClone(p);
+      if (migrateToModels(copy)) useEditor.setState({ project: copy });
     });
     const initialProject = useEditor.getState().project;
-    loadAutosave().then((p) => {
+    bootstrapReady = loadAutosave().then((p) => {
       if (cancelled || !p || useEditor.getState().project !== initialProject) return;
-      useEditor.getState().replaceProject(p);
+      useEditor.getState().replaceProject(p, true);
       useEditor.temporal.getState().clear();
       useUI.getState().setActiveShot(p.shots[0]?.id ?? null);
     }).catch(() => { if (!cancelled) ui.showToast("The previous session could not be restored. Your saved projects are still in Projects."); });
@@ -56,6 +61,31 @@ export function useBootstrap() {
       else markSeen();
     } catch {}
     return () => { cancelled = true; window.clearTimeout(welcomeTimer); unsubModels(); };
+  }, []);
+}
+
+export function useOwnership() {
+  useEffect(() => {
+    let cancelled = false, stop = () => {}, unsubscribe = () => {};
+    void bootstrapReady.then(() => {
+      if (cancelled) return;
+      stop = startProjectOwnership({
+      current: () => useEditor.getState().project,
+      restore: (p) => {
+        const safe = structuredClone(p); migrateToModels(safe);
+        useEditor.getState().replaceProject(safe, true);
+        useEditor.temporal.getState().clear();
+        useUI.setState({ selectedKeys: [], selectedShots: [], activeShotId: safe.shots[0]?.id ?? null, time: 0 });
+        try { sessionStorage.setItem("mok:open-project", safe.id); } catch {}
+      },
+      flush: (p, ticket) => saveAutosave(p, ticket),
+      stopEditing: () => { cancelInteraction(); useUI.setState({ playing: false, recording: false, autoMotion: false, cropShot: null, picker: null, pasteRequest: null, interacting: false }); },
+    });
+      unsubscribe = useEditor.subscribe((s) => s.project, (p, previous) => {
+      if (p.id !== previous.id) void openProjectOwnership(p, previous);
+      });
+    });
+    return () => { cancelled = true; unsubscribe(); stop(); };
   }, []);
 }
 
@@ -112,6 +142,7 @@ export function useAutosave() {
     let timer: number | null = null;
     let pending: Project | null = null;
     const persist = (p: Project) => {
+      if (!canEditProject(p.id)) return;
       void saveAutosave(p);
       void saveProjectIfSaved(p).catch(() => {});
     };
@@ -139,6 +170,7 @@ export function usePasteImport() {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
       if (hasOpenLayer() || useUI.getState().exporting || useUI.getState().tourStep !== null) return;
+      if (!canEditProject(useEditor.getState().project.id)) return;
       const files = extractFiles(e.clipboardData);
       if (files.length) { e.preventDefault(); requestPaste(files); return; }
       // Let the native paste event deliver files before considering the editor's internal copy.

@@ -120,6 +120,15 @@ await test('one export plan budgets mixed depth/off shots before the first N=4 s
     });
     assert.equal(useRenderFlags.getState().qualityPlan, null);
     await withExportSession({ width: 320, height: 180, transparent: false, scope: { type: 'still', time: .5 } }, async () => assert.equal(useRenderFlags.getState().qualityPlan.samples, 4, 'unrelated depth shot must not lower a still capture'));
+    useRenderFlags.setState({ transparent: true, transparentShadows: false });
+    await withExportSession({ width: 320, height: 180, transparent: true }, async () => {
+      assert.equal(useRenderFlags.getState().transparentShadows, true, 'transparent exports include the ground shadow by default');
+    });
+    assert.equal(useRenderFlags.getState().transparentShadows, false, 'capture restores the previous cutout preview');
+    await assert.rejects(withExportSession({ width: 320, height: 180, transparent: true, transparentShadows: true }, async () => { throw new Error('GPU failure'); }), /GPU failure/);
+    assert.equal(useRenderFlags.getState().transparent, true);
+    assert.equal(useRenderFlags.getState().transparentShadows, false, 'failure restores the previous shadow preference');
+    useRenderFlags.setState({ transparent: false, transparentShadows: true });
   } finally { globalThis.requestAnimationFrame = previousRaf; viewport.get = null; }
 });
 
