@@ -5,6 +5,12 @@ const bounds = new THREE.Box3(), lightBounds = new THREE.Box3(), identity = new 
 const point = new THREE.Vector3(), ray = new THREE.Vector3(), position = new THREE.Vector3(), target = new THREE.Vector3();
 const radiusBases = new WeakMap<THREE.LightShadow, { authored: number; applied: number }>();
 
+/** Retain the authored midpoint while making zero actually remove a shadow. */
+export function shadowStrength(opacity: number, midpoint: number, maximum = 1): number {
+  const value = Math.min(1, Math.max(0, Number.isFinite(opacity) ? opacity : 0.5));
+  return value <= 0.5 ? midpoint * value * 2 : midpoint + (maximum - midpoint) * (value - 0.5) * 2;
+}
+
 /** VSM also draws receiveShadow meshes as casters. Infinite floors must only receive shadows. */
 export function createReceiverOnlyShadowMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
@@ -13,6 +19,31 @@ export function createReceiverOnlyShadowMaterial(): THREE.ShaderMaterial {
     fragmentShader: "void main(){ discard; }",
     colorWrite: false, depthWrite: false,
   });
+}
+
+/**
+ * VSM includes receivers in its depth pass. A sloping sweep therefore needs valid samples on both
+ * sides of the blur kernel: clamp-to-edge moments otherwise make the floor shadow itself along
+ * the map boundary. The fitted camera reserves this strip outside the device's projected shadow.
+ */
+export function addVsmReceiverBoundaryGuard(material: THREE.Material): void {
+  if (material.userData.vsmReceiverBoundaryGuard) return;
+  material.userData.vsmReceiverBoundaryGuard = true;
+  const before = material.onBeforeCompile, key = material.customProgramCacheKey.bind(material);
+  const chunk = THREE.ShaderChunk.shadowmap_pars_fragment;
+  const start = chunk.indexOf("#elif defined( SHADOWMAP_TYPE_VSM )");
+  const guarded = chunk.slice(0, start) + chunk.slice(start).replace(
+    "bool inFrustum = shadowCoord.x >= 0.0 && shadowCoord.x <= 1.0 && shadowCoord.y >= 0.0 && shadowCoord.y <= 1.0;",
+    `vec2 receiverKernel = (vec2(shadowRadius) + 1.0) / shadowMapSize;
+      vec2 receiverEdge = min(shadowCoord.xy, 1.0 - shadowCoord.xy);
+      bool inFrustum = all(greaterThanEqual(receiverEdge, receiverKernel));`,
+  );
+  material.onBeforeCompile = (shader, renderer) => {
+    before.call(material, shader, renderer);
+    shader.fragmentShader = shader.fragmentShader.replace("#include <shadowmap_pars_fragment>", guarded);
+  };
+  material.customProgramCacheKey = () => `${key()}|vsm-receiver-boundary-v1`;
+  material.needsUpdate = true;
 }
 
 /** Sub-texel receiver offsets scale with the shadow's actual coverage, not a fixed 2 mm gap. */
@@ -24,6 +55,8 @@ export function shadowBias(span: number, depth: number, resolution: number) {
 /** Fit the visible caster and its bounded floor projection in the current light frame. */
 export function calibrateShadow(light: THREE.DirectionalLight | THREE.SpotLight, device: THREE.Object3D, floorY: number, fitSize: number, resolution: number): void {
   const shadow = light.shadow, camera = shadow.camera;
+  let radius = radiusBases.get(shadow);
+  if (!radius || radius.applied !== shadow.radius) radius = { authored: shadow.radius, applied: shadow.radius };
   light.updateWorldMatrix(true, false); light.target.updateWorldMatrix(true, false);
   light.getWorldPosition(position); light.target.getWorldPosition(target);
   camera.position.copy(position); camera.up.set(0, 1, 0); camera.lookAt(target); camera.updateMatrixWorld();
@@ -41,7 +74,10 @@ export function calibrateShadow(light: THREE.DirectionalLight | THREE.SpotLight,
       lightBounds.expandByPoint(point.applyMatrix4(camera.matrixWorldInverse));
     }
     const c = camera as THREE.OrthographicCamera;
-    const pad = fitSize * 0.1;
+    // Keep the complete VSM kernel outside the fitted caster and floor projection, including at
+    // maximum softness. Its authored radius uses the original 3.2 * fitSize camera coverage.
+    const blurWorld = radius.authored / resolution * fitSize * 3.2;
+    const pad = Math.max(fitSize * 0.1, blurWorld * 1.25);
     let width = Math.max(fitSize * 0.7, lightBounds.max.x - lightBounds.min.x + pad * 2);
     let height = Math.max(fitSize * 0.7, lightBounds.max.y - lightBounds.min.y + pad * 2);
     const texel = Math.max(width, height) / resolution;
@@ -56,8 +92,6 @@ export function calibrateShadow(light: THREE.DirectionalLight | THREE.SpotLight,
     span = 2 * Math.tan((camera as THREE.PerspectiveCamera).fov * Math.PI / 360) * distance;
   }
   Object.assign(shadow, shadowBias(span, camera.far - camera.near, resolution));
-  let radius = radiusBases.get(shadow);
-  if (!radius || radius.applied !== shadow.radius) radius = { authored: shadow.radius, applied: shadow.radius };
   radius.applied = radius.authored * fitSize * 3.2 / Math.max(span, 0.01);
   shadow.radius = radius.applied;
   radiusBases.set(shadow, radius);

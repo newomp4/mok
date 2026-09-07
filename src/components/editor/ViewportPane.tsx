@@ -22,6 +22,7 @@ import { shotKind } from "@/lib/defaults";
 import { getDevice } from "@/lib/devices";
 import { Button, IconButton } from "@/components/ui";
 import { StudioLooks } from "./StudioLooks";
+import { CaptionPositionOverlay } from "./CaptionPositionOverlay";
 
 // the wheel zooms in as far as the inspector's Zoom row does, so the two never disagree, and keeps
 // its own generous reach on the way out
@@ -325,6 +326,7 @@ export function ViewportPane() {
         {frame.w > 0 && !no3d && <Viewport dpr={dpr} />}
         <FocusMarker />
         <Guides />
+        <CaptionPositionOverlay />
       </div>
       <LoadingPill />
       <UploadHint />

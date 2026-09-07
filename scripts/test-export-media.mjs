@@ -4,10 +4,14 @@ import { test } from 'node:test';
 const { ExportVideoDecoder } = await import('../src/export/videoDecoder.ts');
 const { getVideoFrame } = await import('../src/lib/videoFrames.ts');
 const { MemoryOutputFile, createExportOutput, MEMORY_OUTPUT_LIMIT } = await import('../src/export/output.ts');
-const { audioSegments, sourceAudioGainAt, sourceAudioAt, audioHeadroom, mixAudioChunk } = await import('../src/lib/audioPlan.ts');
+const { audioSegments, sourceAudioGainAt, sourceAudioAt, audioHeadroom, mixAudioChunk, hasAudio } = await import('../src/lib/audioPlan.ts');
 const { trimAudioPacket } = await import('../src/export/audioEncode.ts');
 const { EncodedPacket } = await import('mediabunny');
 const { createProject } = await import('../src/lib/defaults.ts');
+const { exportQualityRequirements } = await import('../src/export/quality.ts');
+const { planRenderQuality } = await import('../src/three/qualityPlan.ts');
+const { seekVideoElement } = await import('../src/export/videoSeek.ts');
+const { exportAssets } = await import('../src/export/assets.ts');
 const canvas = () => ({ width: 1, height: 1, getContext: () => ({ clearRect() {} }) });
 const media = (id = 'video') => ({ ref: { id, name: `${id}.mp4`, kind: 'video', duration: 2 }, blob: new Blob(), kind: 'video' });
 function pcm(values, rate = 8) {
@@ -146,4 +150,76 @@ await test('source fade-out follows a trimmed project endpoint in preview and ex
   assert.equal(sourceAudioAt(p, .75, 1).gain, .5);
   assert.equal(sourceAudioGainAt(shot, .75, 1), .5);
   assert.equal(sourceAudioAt(p, 1, 1), null);
+});
+
+await test('picker and capture budget only the still/current hold or trimmed video interval', () => {
+  const p = createProject(); p.effects = [{ id: 'bloom', enabled: true, params: {} }]; p.blur.mode = 'depth';
+  p.shots = [
+    { ...p.shots[0], id: 'simple', duration: 1, blurMode: 'off', effects: [{ id: 'grain', enabled: false, params: {} }] },
+    { ...p.shots[0], id: 'heavy', gap: 1, duration: 1, blurMode: 'depth' },
+  ];
+  const still = exportQualityRequirements(p, { type: 'still', time: .5 });
+  assert.equal(still.depth, false); assert.equal(still.effectCount, 0);
+  assert.deepEqual(exportQualityRequirements(p, { type: 'still', time: 1.5 }), still, 'gap holds the preceding shot');
+  assert.deepEqual(exportQualityRequirements(p, { type: 'video', start: 0, end: 2 }), still, 'an exact trimmed endpoint excludes the next shot');
+  const later = exportQualityRequirements(p, { type: 'still', time: 2 });
+  assert.equal(later.depth, true); assert.equal(later.effectCount, 1);
+  assert.deepEqual(exportQualityRequirements(p, { type: 'video', start: 0, end: 2.1 }), later);
+  assert.deepEqual(exportQualityRequirements(p, { type: 'still', time: 5 }), later, 'extended tail uses the final visible shot');
+  const hardware = { width: 4096, height: 4096, maxTextureSize: 8192, maxSamples: 4, budgetBytes: 900 * 1024 * 1024 };
+  assert.equal(planRenderQuality({ ...hardware, ...still }).supported, true);
+  assert.equal(planRenderQuality({ ...hardware, ...later }).supported, false, 'unrelated depth could formerly disable this valid still');
+});
+
+await test('DOM fallback rejects a failed seek instead of encoding the previously decoded frame', async () => {
+  class Video extends EventTarget {
+    readyState = 2; seeking = false; error = null; at = 0; writes = 0; listeners = new Set(); mode = 'ok';
+    get currentTime() { return this.at; }
+    set currentTime(value) {
+      this.writes++;
+      if (this.mode === 'throw') throw new DOMException('No supported seek range', 'InvalidStateError');
+      if (this.mode === 'stale') return;
+      this.at = this.mode === 'clamped' ? 0 : value; this.seeking = true;
+      if (this.mode === 'wedged') return;
+      queueMicrotask(() => {
+        this.seeking = false;
+        if (this.mode === 'error') { this.error = { code: 3 }; this.dispatchEvent(new Event('error')); }
+        else this.dispatchEvent(new Event('seeked'));
+      });
+    }
+    addEventListener(name, callback, options) { this.listeners.add(callback); super.addEventListener(name, callback, options); }
+    removeEventListener(name, callback, options) { this.listeners.delete(callback); super.removeEventListener(name, callback, options); }
+  }
+  for (const mode of ['throw', 'stale', 'clamped', 'error', 'wedged', 'ok']) {
+    const video = new Video(); video.mode = mode;
+    if (mode === 'ok') { await seekVideoElement(video, .5, undefined, 5); assert.equal(video.currentTime, .5); }
+    else await assert.rejects(seekVideoElement(video, .5, undefined, 5), /could not|too long/);
+    assert.equal(video.listeners.size, 0, `${mode} must release every seek listener`);
+    assert.ok(video.writes <= 2, 'failed seeking stays bounded');
+  }
+  const video = new Video(); video.mode = 'wedged'; const controller = new AbortController();
+  const pending = seekVideoElement(video, .5, controller.signal); controller.abort();
+  await assert.rejects(pending, { name: 'AbortError' }); assert.equal(video.listeners.size, 0);
+});
+
+await test('only visible enabled captions add fonts to still and video export readiness', () => {
+  const p = createProject(), font = { font: 'Geist', weight: 600 };
+  p.shots = [
+    { ...p.shots[0], id: 'caption', duration: 1, caption: { enabled: true, text: font } },
+    { ...p.shots[0], id: 'disabled', duration: 1, caption: { enabled: false, text: { font: 'Other', weight: 400 } } },
+    { ...p.shots[0], id: 'later', duration: 1, kind: 'text', text: { font: 'Later', weight: 400 }, caption: { enabled: true, text: { font: 'Ignored', weight: 400 } } },
+  ];
+  assert.deepEqual(exportAssets(p, { type: 'still', time: .5 }, true).fonts, [font]);
+  assert.deepEqual(exportAssets(p, { type: 'still', time: 1.5 }, true).fonts, []);
+  assert.deepEqual(exportAssets(p, { type: 'video', start: 0, end: 2 }, true).fonts, [font]);
+  assert.deepEqual(exportAssets(p, { type: 'still', time: 2.5 }, true).fonts, [p.shots[2].text]);
+});
+
+await test('audio presence in the picker does not expand tiny clips into unbounded loop segments', () => {
+  const p = createProject(); p.shots[0].duration = 180; p.shots[0].speed = 4;
+  p.shots[0].media = { ...media().ref, duration: 1 / 240 }; p.shots[0].audio = { enabled: true, volume: 1 };
+  assert.equal(hasAudio(p, 180), true);
+  assert.throws(() => audioSegments(p, 180), /loops too frequently/, 'actual mixing retains its explicit segment budget');
+  p.shots[0].gap = 1; assert.equal(hasAudio(p, .5), false);
+  p.shots[0].audio.enabled = false; assert.equal(hasAudio(p, 180), false);
 });

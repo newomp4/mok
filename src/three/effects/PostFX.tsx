@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useRenderShot, useShotView } from "@/three/Device";
 import { useFrame, useThree } from "@react-three/fiber";
-import { EffectComposer, Bloom, ChromaticAberration, Noise, SMAA, ToneMapping, Vignette } from "@react-three/postprocessing";
+import { EffectComposer, ChromaticAberration, Noise, SMAA, ToneMapping, Vignette } from "@react-three/postprocessing";
 import { BlendFunction, ToneMappingMode, type EffectComposer as EffectComposerImpl } from "postprocessing";
 import * as THREE from "three";
 import { useEditor } from "@/store/editor";
@@ -19,6 +19,7 @@ import { DitheredOutputPass, LinearCapturePass, StraightColorPass } from "./Line
 import { resolveShotEffects } from "@/lib/shotView";
 import { DetailShadowPass } from "./DetailShadowPass";
 import { LinearDepthOfFieldEffect } from "./LinearDepthOfFieldEffect";
+import { CompositableBloomEffect } from "./CompositableBloomEffect";
 
 export function PostFX() {
   const view = useShotView();
@@ -43,6 +44,7 @@ export function PostFX() {
   const lens = useMemo(() => createLensDistortion(), []);
   const ghost = useMemo(() => new GhostEffect(), []);
   const liquid = useMemo(() => new LiquidGlassEffect(), []);
+  const bloom = useMemo(() => new CompositableBloomEffect(), []);
   const scene = useThree((s) => s.scene);
   const camera = useThree((s) => s.camera);
   const depth = useMemo(() => new LinearDepthOfFieldEffect(camera), [camera]);
@@ -61,7 +63,7 @@ export function PostFX() {
   const focusRayWait = useRef(0);
   const focusTarget = useRef<number | null>(null);
 
-  useEffect(() => () => { focus.dispose(); sharpen.dispose(); glass.dispose(); lens.dispose(); ghost.dispose(); liquid.dispose(); }, [focus, sharpen, glass, lens, ghost, liquid]);
+  useEffect(() => () => { focus.dispose(); sharpen.dispose(); glass.dispose(); lens.dispose(); ghost.dispose(); liquid.dispose(); bloom.dispose(); }, [focus, sharpen, glass, lens, ghost, liquid, bloom]);
 
   useEffect(() => {
     viewport.composer = composerRef.current;
@@ -88,6 +90,9 @@ export function PostFX() {
   };
 
   useEffect(() => {
+    bloom.intensity = param("bloom", "intensity");
+    bloom.luminanceMaterial.threshold = param("bloom", "threshold");
+    bloom.mipmapBlurPass.radius = param("bloom", "radius");
     sharpen.amount = param("sharpen", "amount");
     glass.width = param("glassBorder", "width");
     glass.opacity = param("glassBorder", "opacity");
@@ -99,7 +104,7 @@ export function PostFX() {
     const radius = follow ? Math.min(0.5, borderRadius * 4) : param("liquidGlass", "radius");
     liquid.set(param("liquidGlass", "x"), param("liquidGlass", "y"), param("liquidGlass", "width"), param("liquidGlass", "height"), radius, param("liquidGlass", "refraction"), param("liquidGlass", "tint"), param("liquidGlass", "dispersion"), param("liquidGlass", "shine"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effects, sharpen, glass, lens, ghost, liquid, borderRadius]);
+  }, [effects, sharpen, glass, lens, ghost, liquid, bloom, borderRadius]);
 
   useFrame((state) => {
     const v = anim.values;
@@ -201,6 +206,11 @@ export function PostFX() {
   }, -5);
 
   const bloomOn = !!on("bloom");
+  useEffect(() => {
+    // A removed effect no longer receives composer resize calls. Release an old export-sized
+    // pyramid; EffectPass sizes it again before it is next enabled.
+    if (!bloomOn) bloom.setSize(1, 1);
+  }, [bloomOn, bloom]);
   const chromaOn = !!on("chromatic");
   const chromaAmt = param("chromatic", "amount") * 0.004;
   const grainOn = !!on("grain");
@@ -222,7 +232,7 @@ export function PostFX() {
       {sharpenOn ? <primitive object={sharpen} /> : <></>}
       {ghostOn ? <primitive object={ghost} /> : <></>}
       {liquidOn ? <primitive object={liquid} /> : <></>}
-      {bloomOn ? <Bloom mipmapBlur intensity={param("bloom", "intensity")} luminanceThreshold={param("bloom", "threshold")} radius={param("bloom", "radius")} levels={6} /> : <></>}
+      {bloomOn ? <primitive object={bloom} /> : <></>}
       <primitive object={capture} />
       <primitive object={straight} />
       <ToneMapping mode={ToneMappingMode.NEUTRAL} />

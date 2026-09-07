@@ -124,7 +124,10 @@ test("contact-shadow resize resources own and release every render target, mater
     assert.equal(owned.target.width, resolution); assert.equal(owned.blurred.height, resolution);
     const shader = { fragmentShader: THREE.ShaderLib.depth.fragmentShader };
     owned.depth.onBeforeCompile(shader, {});
-    assert.ok(shader.fragmentShader.includes("vec4( vec3(0.0), 1.0 - fragCoordZ );"));
+    assert.equal(owned.depth.depthTest, true);
+    assert.equal(owned.depth.depthWrite, true);
+    assert.equal(owned.target.texture.type, THREE.HalfFloatType);
+    assert.equal(owned.blurred.depthBuffer, false);
     let disposed = 0;
     for (const resource of [owned.target, owned.blurred, owned.geometry, owned.depth, owned.horizontal, owned.vertical, owned.catcher]) resource.addEventListener("dispose", () => disposed++);
     disposeResources(owned);

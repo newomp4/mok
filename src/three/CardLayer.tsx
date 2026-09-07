@@ -17,7 +17,7 @@ export const CARD_Z = 0.6;
 const EFFECT_INDEX = { none: 0, liquidMetal: 1, gemSmoke: 2, heatmap: 3 } as const;
 const fontKeyOf = fontKey;
 
-const cardFrag = /* glsl */ `
+export const cardFrag = /* glsl */ `
 uniform sampler2D map;
 uniform float opacity;
 uniform float blurRadius;
@@ -88,14 +88,14 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
-const cardVert = /* glsl */ `
+export const cardVert = /* glsl */ `
 varying vec2 vUv;
 void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
 
 function easeOutCubic(t: number) { return 1 - Math.pow(1 - t, 3); }
 
 /** Opacity / offset / scale of the card content from its enter + exit animations. */
-export function enterExitAt(shot: Shot, t: number): { opacity: number; dx: number; dy: number; scale: number; blur: number } {
+export function enterExitAt(shot: Pick<Shot, "duration" | "enter" | "exit">, t: number): { opacity: number; dx: number; dy: number; scale: number; blur: number } {
   let opacity = 1, dx = 0, dy = 0, scale = 1, blur = 0;
   const apply = (fx: EnterExit | undefined, p: number, dir: 1 | -1) => {
     if (!fx || fx.effect === "none" || p >= 1) return;
@@ -149,7 +149,7 @@ export function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxW: num
 
 const fontsPending = new Set<string>();
 
-function drawText(ctx: CanvasRenderingContext2D, W: number, H: number, st: TextStyle) {
+export function drawText(ctx: CanvasRenderingContext2D, W: number, H: number, st: TextStyle) {
   ctx.clearRect(0, 0, W, H);
   ctx.textBaseline = "middle";
   ctx.textAlign = st.align;

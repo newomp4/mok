@@ -22,9 +22,10 @@ import type { DeviceOrientation } from "@/lib/types";
 import { applyCameraPreset, importBackgroundImage, importFilesToShot, importLogo, importScreenBackground, resetBlur, resetCamera, setShotMedia, applySampleScreen } from "@/lib/actions";
 import { SAMPLE_SCREENS, drawSampleScreen } from "@/lib/screens";
 import { pickFiles } from "./hooks";
-import { createProject, defaultLogoStyle, defaultTextStyle, shotKind } from "@/lib/defaults";
+import { createProject, defaultCaptionStyle, defaultLogoStyle, defaultTextStyle, shotKind } from "@/lib/defaults";
 import { FONTS, cssFamily, ensureFont, getFont, nearestWeight, type FontDef } from "@/lib/fonts";
 import { anim } from "@/three/anim";
+import { previewCaption, startCaptionPosition } from "@/lib/captionPosition";
 
 /* ---------- animated value helpers ---------- */
 /** What each animated property ships at, so a right-click on its row can put it back. */
@@ -236,11 +237,15 @@ const ENTER_EXIT: { value: EnterExitEffect; label: string }[] = [
   { value: "slideLeft", label: "Slide left" }, { value: "slideRight", label: "Slide right" }, { value: "scale", label: "Scale" }, { value: "blur", label: "Soft" },
 ];
 
-function EnterExitRows({ shot }: { shot: Shot }) {
+function EnterExitRows({ shot, caption = false }: { shot: Shot; caption?: boolean }) {
   const updateShot = useEditor((s) => s.updateShot);
   const row = (key: "enter" | "exit", label: string) => {
-    const fx: EnterExit = shot[key] ?? { effect: "none", duration: 0.4 };
-    const set = (mut: (f: EnterExit) => void) => updateShot(shot.id, (s) => { const f = s[key] ?? { effect: "fade", duration: 0.4 }; mut(f); s[key] = f; });
+    const fx: EnterExit = (caption ? shot.caption?.[key] : shot[key]) ?? { effect: "none", duration: 0.4 };
+    const set = (mut: (f: EnterExit) => void) => updateShot(shot.id, (s) => {
+      const target = caption ? (s.caption ??= defaultCaptionStyle()) : s;
+      const f = target[key] ?? { effect: "fade", duration: 0.4 }; mut(f); target[key] = f;
+      if (caption && s.caption) delete s.caption.timing;
+    });
     return (
       <>
         <div className="label-sm px-0.5 pt-2 text-muted">{label}</div>
@@ -315,27 +320,47 @@ function FontPicker({ value, onChange }: { value: string; onChange: (v: string) 
   );
 }
 
-function TextEditor({ shot }: { shot: Shot }) {
+function TextEditor({ shot, caption = false }: { shot: Shot; caption?: boolean }) {
   const updateShot = useEditor((s) => s.updateShot);
-  const st = shot.text ?? defaultTextStyle();
-  const set = (mut: (t: TextStyle) => void) => updateShot(shot.id, (s) => { if (!s.text) s.text = defaultTextStyle(); mut(s.text); });
+  const st = (caption ? shot.caption?.text : shot.text) ?? defaultTextStyle();
+  const set = (mut: (t: TextStyle) => void) => updateShot(shot.id, (s) => { if (caption) { s.caption ??= defaultCaptionStyle(); mut(s.caption.text); } else { s.text ??= defaultTextStyle(); mut(s.text); } });
   // warm the picker so each family previews in its own face
   useEffect(() => { for (const f of FONTS) void ensureFont(f.family, 500); }, []);
   const font = getFont(st.font);
   return (
     <div className="flex flex-col gap-1">
-      <TextAreaRow value={st.text} onChange={(v) => set((t) => { t.text = v; })} placeholder="Type your text" />
+      <TextAreaRow value={st.text} onChange={(v) => set((t) => { t.text = v; })} placeholder={caption ? "Type your caption" : "Type your text"} />
       <FontPicker value={st.font} onChange={(v) => set((t) => { t.font = v; t.weight = nearestWeight(v, t.weight); })} />
       <SelectRow label="Weight" value={String(nearestWeight(st.font, st.weight))} onChange={(v) => set((t) => { t.weight = Number(v); })} options={font.weights.map((w) => ({ value: String(w), label: WEIGHT_NAMES[w] ?? String(w) }))} />
       <NumberRow label="Size" value={st.size} min={0.02} max={0.3} step={0.005} onChange={(v) => set((t) => { t.size = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
       <Segmented size="sm" value={st.align} onChange={(v) => set((t) => { t.align = v; })} options={[{ value: "left", label: <span className="sr-only">Align left</span>, icon: "align-left" }, { value: "center", label: <span className="sr-only">Align center</span>, icon: "align-center" }, { value: "right", label: <span className="sr-only">Align right</span>, icon: "align-right" }]} />
       <ColorRow label="Text colour" value={st.color} onChange={(v) => set((t) => { t.color = v; })} />
-      <ColorRow label="Background" value={st.background} onChange={(v) => set((t) => { t.background = v; })} />
+      {!caption && <ColorRow label="Background" value={st.background} onChange={(v) => set((t) => { t.background = v; })} />}
       <NumberRow label="Line height" value={st.lineHeight} min={0.8} max={2} step={0.05} onChange={(v) => set((t) => { t.lineHeight = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
       <NumberRow label="Letter spacing" value={st.letterSpacing} min={-0.1} max={0.3} step={0.005} unit="em" onChange={(v) => set((t) => { t.letterSpacing = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
-      <EnterExitRows shot={shot} />
+      <EnterExitRows shot={shot} caption={caption} />
     </div>
   );
+}
+
+function CaptionSection() {
+  const shot = useRenderShot(), updateShot = useEditor((s) => s.updateShot);
+  const [open, setOpen] = useState(false);
+  if (!shot || shotKind(shot) !== "media") return null;
+  const c = shot.caption;
+  const set = (edit: (caption: NonNullable<Shot["caption"]>) => void) => updateShot(shot.id, (s) => { s.caption ??= defaultCaptionStyle(); edit(s.caption); });
+  return <Section title="Caption" sub={c?.enabled ? shot.name : "Overlay text"} open={open} onToggle={() => setOpen((v) => !v)}>
+    <ToggleRow label="Show caption" checked={c?.enabled ?? false} onChange={(enabled) => { set((c) => { c.enabled = enabled; }); if (enabled) previewCaption(shot.id); }} />
+    {c?.enabled && <>
+      <SelectRow label="Layer" value={c.layer} options={[{ value: "front", label: "In front of device" }, { value: "behind", label: "Behind device" }]} onChange={(layer) => set((c) => { c.layer = layer; })} />
+      <Button size="sm" onClick={() => startCaptionPosition(shot.id)}>Position on canvas</Button>
+      <NumberRow label="Horizontal offset" value={c.x * 100} min={-50} max={50} step={1} unit="%" onChange={(v) => set((c) => { c.x = v / 100; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+      <NumberRow label="Vertical offset" value={c.y * 100} min={-50} max={50} step={1} unit="%" onChange={(v) => set((c) => { c.y = v / 100; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+      <TextEditor shot={shot} caption />
+      <p className="label-sm pt-1 text-muted">One caption for {shot.name}. It follows this shot&apos;s timing.{c.timing ? " Split and trimmed clips retain their original animation until you edit Enter or Exit." : ""}</p>
+      <Button variant="ghost" size="sm" icon="trash" onClick={() => updateShot(shot.id, (s) => { delete s.caption; })}>Remove caption</Button>
+    </>}
+  </Section>;
 }
 
 const LOGO_EFFECTS: { value: LogoEffect; label: string; preview: string }[] = [
@@ -1083,6 +1108,7 @@ export function Inspector() {
           <div className="label-sm border-b border-line px-3 py-3 leading-relaxed text-muted">Text and logo shots fill the frame. Scene, mockup, camera and blur settings apply to media shots.</div>
         ) : (
           <>
+            <CaptionSection />
             <SceneSection />
             <MockupSection />
             <CameraSection />

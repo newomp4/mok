@@ -45,6 +45,7 @@ export function exportAssets(project: Project, scope: ExportScope, transparent: 
     track.start < scope.end && track.start + audioLength(track) > scope.start ? track : null;
   if (audio) add(audio.media);
   const fonts = shots.filter((s) => s.kind === "text" && s.text).map((s) => s.text!);
+  for (const shot of mediaShots) if (shot.caption?.enabled) fonts.push(shot.caption.text);
   return { shots, media: [...media.values()], fonts, audio };
 }
 

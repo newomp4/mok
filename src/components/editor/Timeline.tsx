@@ -18,6 +18,7 @@ import { shotKind } from "@/lib/defaults";
 import { blip } from "@/lib/sounds";
 import { EasingButton, SelectionCount } from "./EasingEditor";
 import { insertLogoFromPicker } from "@/lib/logoInsertion";
+import { trimShotHead } from "@/lib/trimShot";
 
 const LEFT_W = 184;
 const RULER_H = 22;
@@ -943,7 +944,7 @@ function ShotBlock({ shot, start, pps, active, selected, dx, onSelect, onExpand,
   const { media, status } = useMediaResource(source);
   const missing = status === "missing";
   const resize = useRef<{ x: number; d: number } | null>(null);
-  const trimLeft = useRef<{ x: number; d: number; trim: number; keys: Shot["keyframes"] } | null>(null);
+  const trimLeft = useRef<{ x: number; shot: Shot } | null>(null);
   const move = useRef<{ x: number; moved: boolean } | null>(null);
   const hasKeys = Object.values(shot.keyframes).some((k) => k && k.length > 0);
   const kind = shotKind(shot);
@@ -996,21 +997,16 @@ function ShotBlock({ shot, start, pps, active, selected, dx, onSelect, onExpand,
         data-resize=""
         title="Trim the start"
         className="absolute inset-y-0 left-0 w-2 cursor-ew-resize hover:bg-black/20"
-        onPointerDown={(e) => { e.stopPropagation(); (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); trimLeft.current = { x: e.clientX, d: shot.duration, trim: shot.trimStart ?? 0, keys: JSON.parse(JSON.stringify(shot.keyframes)) }; beginInteraction(); }}
+        onPointerDown={(e) => { e.stopPropagation(); (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); trimLeft.current = { x: e.clientX, shot: structuredClone(shot) }; beginInteraction(); }}
         onPointerMove={(e) => {
           const t = trimLeft.current;
           if (!t) return;
           // trimming from the head shortens the shot and pulls its content and keyframes with it
-          const dt = clamp(Math.round(((e.clientX - t.x) / pps) * 100) / 100, -t.trim / (shot.speed ?? 1), t.d - 0.5);
+          const dt = clamp(Math.round(((e.clientX - t.x) / pps) * 100) / 100, -(t.shot.trimStart ?? 0) / (t.shot.speed ?? 1), t.shot.duration - 0.5);
           update((p) => {
             const sh = p.shots.find((x) => x.id === shot.id);
             if (!sh) return;
-            sh.duration = Math.round((t.d - dt) * 100) / 100;
-            sh.trimStart = Math.max(0, Math.round((t.trim + dt * (sh.speed ?? 1)) * 100) / 100);
-            for (const [prop, list] of Object.entries(t.keys) as [AnimProp, { t: number }[]][]) {
-              if (!list?.length) continue;
-              sh.keyframes[prop] = list.map((k) => ({ ...k, t: Math.round((k.t - dt) * 1000) / 1000 })) as never;
-            }
+            trimShotHead(sh, t.shot, dt);
           });
         }}
         onPointerUp={() => { trimLeft.current = null; endInteraction(); }}

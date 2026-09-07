@@ -160,7 +160,8 @@ export const DEVICES: DeviceSpec[] = [
     id: "apple-watch-9-glb", name: "Apple Watch Series 9", family: "watch",
     screenPx: [396, 484], screenMm: [34, 40.5], screenRadius: 13,
     body: { w: 39, h: 45, d: 10.7, r: 15 },
-    model: { url: "/models/watch-series-9.glb", screenMesh: "rpqLEPlKpASApqb,uBMkHzJfTETpPSo,hUTWIfJTbVAiNOd,hNUadlaBSDpAdCh", size: 130 },
+    // The other black/glass meshes include the rear health sensors and must keep their source materials.
+    model: { url: "/models/watch-series-9.glb", screenMesh: "rpqLEPlKpASApqb", size: 130 },
     finishes: [{ id: "midnight", name: "Midnight", color: "#2b3140" }],
     fitSize: 1.05, icon: "watch", placement: "float",
   },

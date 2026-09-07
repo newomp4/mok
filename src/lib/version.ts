@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.11.1";
+export const APP_VERSION = "0.12.0";
 
 export interface ChangelogEntry {
   version: string;
@@ -8,6 +8,18 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.12.0",
+    date: "Sep 7, 2026",
+    title: "Clearer glass, grounded shadows and layered captions",
+    items: [
+      "Contact shadows use the nearest surface and grow softer and fainter with height. Shadow opacity reaches zero, and room floors extend through the fog instead of ending along a visible line.",
+      "Planar iPad displays no longer show diagonal reflection facets. Duplicate iPhone screen glass no longer washes out your media, and invisible model helpers stay out of shadows. Authored geometry and source textures are preserved.",
+      "Add a caption to any device shot, position it in front of or behind the device, and animate its entrance and exit. Captions survive saving, duplication, splitting and trimming, and appear in image and video exports.",
+      "Crop to Screen follows orientation, browser chrome and screen padding. Batch uploads decode before adding shots, report failures accurately and keep per-shot effects and padding. Read-only tabs no longer crash when adding a shot from the camera.",
+      "Export size checks use the current frame or selected range. Video seeking rejects stale frames, missing media reports a recoverable error, and bloom combines its glow with transparent shadows correctly. Head trims preserve screen and source-audio fade timing.",
+    ],
+  },
   {
     version: "0.11.1",
     date: "Sep 7, 2026",

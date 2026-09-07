@@ -17,13 +17,14 @@ import { Device, useDeviceLayout, useShotView } from "@/three/Device";
 import { EnvScene } from "@/three/scenes/EnvScene";
 import { PostFX } from "@/three/effects/PostFX";
 import { CARD_Z, CardLayer, FadeOverlay, setToneMapped } from "@/three/CardLayer";
+import { CaptionLayer } from "@/three/CaptionLayer";
 import { rasterSize } from "@/three/raster";
 import { ContactShadow } from "@/three/ContactShadow";
 import { ShadowCatcher } from "@/three/ShadowCatcher";
 import { resizeShadowMap, useRenderQuality } from "@/three/renderQuality";
 import { acquireEnvironment } from "@/three/environmentAssets";
 import { resolveShotEffects } from "@/lib/shotView";
-import { calibrateShadow } from "@/three/shadowCalibration";
+import { calibrateShadow, shadowStrength } from "@/three/shadowCalibration";
 
 const DEG = Math.PI / 180;
 
@@ -140,6 +141,7 @@ function CameraRig({ fitSize }: { fitSize: number }) {
         <group ref={roll}>
           <PerspectiveCamera ref={cam} makeDefault fov={24} near={0.02} far={400} position={[0, 0, 6]}>
             <CardLayer />
+            <CaptionLayer />
             <FadeOverlay />
           </PerspectiveCamera>
         </group>
@@ -347,7 +349,7 @@ function BackdropKey({ floorY, fitSize, soft, opacity }: { floorY: number; fitSi
   const showShadow = useRenderFlags((s) => !s.transparent || s.transparentShadows);
   const quality = useRenderQuality();
   const shadowRef = useCallback((light: THREE.DirectionalLight | null) => { if (light) resizeShadowMap(light.shadow, quality.shadow); }, [quality.shadow]);
-  const base = Math.min(0.8, 0.1 + opacity * 0.55);
+  const base = shadowStrength(opacity, 0.375, 0.65);
   const f = fitSize;
   return (
     <group position={[0, floorY, 0]}>
@@ -361,6 +363,7 @@ function BackdropKey({ floorY, fitSize, soft, opacity }: { floorY: number; fitSi
         shadow-normalBias={0.02}
         shadow-radius={Math.max(1, 1 + soft * 120) * quality.shadow / 2048}
         shadow-blurSamples={Math.round(8 + soft * 16)}
+        shadow-intensity={shadowStrength(opacity, 1)}
       >
         <orthographicCamera attach="shadow-camera" args={[-f * 1.6, f * 1.6, f * 1.6, -f * 1.6, 0.1, f * 22]} />
       </directionalLight>
@@ -399,17 +402,17 @@ export function SceneRoot() {
       </Suspense>
       <Device layout={layout} />
       <ShadowCalibration floorY={layout.floorY} fitSize={sceneSize} />
-      {shadowsOn && transparentShadows && <DeviceOnly><ShadowCatcher floorY={layout.floorY - 0.006} size={sceneSize * 10} opacity={Math.min(0.85, 0.15 + shadowOpacity * 0.7)} /></DeviceOnly>}
+      {shadowsOn && transparentShadows && <DeviceOnly><ShadowCatcher floorY={layout.floorY - 0.006} size={sceneSize * 10} opacity={shadowStrength(shadowOpacity, 0.5, 0.85)} /></DeviceOnly>}
       {shadowsOn && (
         // A key light alone leaves the device looking like it hovers. This is the tight occlusion
         // right under it, which is what actually sits it on the ground.
         <DeviceOnly>
-          <ContactShadow position={[0, layout.floorY + 0.0015, 0]} scale={sceneSize * 1.45} blur={2.4} opacity={Math.min(0.85, 0.28 + shadowOpacity * 0.5)} far={sceneSize * 0.4} resolution={quality.contact} />
+          <ContactShadow position={[0, layout.floorY + 0.0015, 0]} scale={sceneSize * 1.45} blur={0.4 + shadowSoft * 4} opacity={shadowStrength(shadowOpacity, 0.53, 0.78)} far={sceneSize * 0.4} resolution={quality.contact} />
         </DeviceOnly>
       )}
       {!shadowsOn && contactShadow && (
         <DeviceOnly>
-          <ContactShadow position={[0, layout.floorY - 0.004, 0]} scale={sceneSize * (2.2 + shadowSoft * 1.4)} blur={0.6 + shadowSoft * 4} opacity={shadowOpacity} far={sceneSize * (0.8 + shadowSoft * 1.2)} resolution={quality.contact} />
+          <ContactShadow position={[0, layout.floorY - 0.004, 0]} scale={sceneSize * 3.6} blur={(0.6 + shadowSoft * 4) * 2.9 / 3.6} opacity={shadowOpacity} far={sceneSize * 1.4} resolution={quality.contact} />
         </DeviceOnly>
       )}
       <PostFX />

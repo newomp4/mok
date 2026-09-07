@@ -7,7 +7,9 @@ import { getDevice } from "@/lib/devices";
 import { setShotMedia } from "@/lib/actions";
 import { Button, Modal, Segmented } from "@/components/ui";
 import { clamp } from "@/lib/cn";
-import { resolveShotView } from "@/lib/shotView";
+import { resolveScreenPadding, resolveShotView } from "@/lib/shotView";
+import { cropScreenAspect } from "@/lib/crop";
+import { captureEditIntent } from "@/lib/editIntent";
 
 type Rect = { x: number; y: number; w: number; h: number };
 type Handle = "move" | "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
@@ -22,8 +24,9 @@ export function CropModal() {
   const cropShot = useUI((s) => s.cropShot);
   const setCropShot = useUI((s) => s.setCropShot);
   const toast = useUI((s) => s.showToast);
-  const shot = useEditor((s) => s.project.shots.find((x) => x.id === cropShot) ?? null);
-  const deviceId = useEditor((s) => resolveShotView(s.project, s.project.shots.find((x) => x.id === cropShot) ?? null).device);
+  const project = useEditor((s) => s.project);
+  const shot = project.shots.find((x) => x.id === cropShot) ?? null;
+  const view = resolveShotView(project, shot);
   const media = useMedia(shot?.media);
   const [rect, setRect] = useState<Rect>({ x: 0, y: 0, w: 1, h: 1 });
   const [aspect, setAspect] = useState<string>("free");
@@ -34,8 +37,8 @@ export function CropModal() {
 
   if (!shot || !media || media.kind !== "image") return null;
   const img = media.element as HTMLImageElement;
-  const spec = getDevice(deviceId);
-  const screenAspect = spec.screenPx[0] / spec.screenPx[1];
+  const spec = getDevice(view.device);
+  const screenAspect = cropScreenAspect(spec, media.ref, view.orientation, resolveScreenPadding(project, shot));
   const ratio = aspect === "free" ? null : aspect === "screen" ? screenAspect : Number(aspect);
   const imgAspect = media.width / Math.max(1, media.height);
   const minW = 1 / Math.max(1, media.width), minH = 1 / Math.max(1, media.height);
@@ -101,8 +104,9 @@ export function CropModal() {
 
   const apply = async () => {
     if (busy) return;
-    const projectId = useEditor.getState().project.id;
     const mediaId = media.ref.id;
+    const intent = captureEditIntent((p) => p.shots.find((s) => s.id === shot.id)?.media?.id === mediaId && useUI.getState().cropShot === shot.id);
+    if (!intent.current()) { intent.dispose(); return; }
     setBusy(true);
     try {
       const sx = Math.min(media.width - 1, Math.max(0, Math.round(rect.x * media.width))), sy = Math.min(media.height - 1, Math.max(0, Math.round(rect.y * media.height)));
@@ -114,8 +118,7 @@ export function CropModal() {
       if (!blob) throw new Error("Could not encode the crop");
       const file = new File([blob], `${media.ref.name.replace(/\.[a-z0-9]+$/i, "")}-crop.png`, { type: "image/png" });
       const ref = await importMedia(file);
-      const current = useEditor.getState().project;
-      if (current.id !== projectId || current.shots.find((s) => s.id === shot.id)?.media?.id !== mediaId || useUI.getState().cropShot !== shot.id) {
+      if (!intent.current()) {
         await deleteMedia(ref.id);
         return;
       }
@@ -125,6 +128,7 @@ export function CropModal() {
     } catch (e) {
       toast(`Crop failed: ${(e as Error).message}`);
     } finally {
+      intent.dispose();
       setBusy(false);
     }
   };

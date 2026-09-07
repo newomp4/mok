@@ -284,7 +284,9 @@ export const useEditor = create<EditorState>()(
             if (source) {
               shot.media = source.media;
               shot.fit = source.fit;
-              for (const key of ["device", "orientation", "finish", "scene", "lighting", "blurMode", "bokeh", "notch"] as const) Object.assign(shot, { [key]: source[key] });
+              for (const key of ["device", "orientation", "finish", "scene", "lighting", "blurMode", "bokeh", "notch", "screenPadding", "effects"] as const) {
+                if (source[key] !== undefined) Object.assign(shot, { [key]: structuredClone(source[key]) });
+              }
               shot.pose = Object.fromEntries([...SHOT_SCOPED].map((prop) => [prop, closingValue(p, source, prop)]));
             }
           }
@@ -333,6 +335,11 @@ export const useEditor = create<EditorState>()(
             const envelope = a.audio.envelope ?? { offset: 0, duration: a.duration };
             a.audio.envelope = { ...envelope };
             b.audio = { ...b.audio!, envelope: { ...envelope, offset: envelope.offset + t } };
+          }
+          if (a.caption) {
+            const timing = a.caption.timing ?? { offset: 0, duration: a.duration };
+            a.caption.timing = { ...timing };
+            b.caption = { ...b.caption!, timing: { ...timing, offset: timing.offset + t } };
           }
           b.duration = Math.round((a.duration - t) * 100) / 100;
           a.duration = t;
@@ -687,6 +694,9 @@ export const endInteraction = () => {
   interactionSnapshot = null;
   // a click that changed nothing must not push a step, and must not wipe redo
   if (!before || before === useEditor.getState().project || before.id !== useEditor.getState().project.id) return;
+  // Escape or dragging back to the original values is a no-op, even though live writes updated
+  // the document timestamp. Keep the existing undo/redo chain in that case.
+  if (JSON.stringify({ ...before, updatedAt: 0 }) === JSON.stringify({ ...useEditor.getState().project, updatedAt: 0 })) return;
   const past = [...t.pastStates, { project: before }];
   useEditor.temporal.setState({ pastStates: past.slice(-200), futureStates: [] });
 };

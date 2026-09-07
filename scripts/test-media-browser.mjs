@@ -22,7 +22,7 @@ const ffmpeg = (...args) => execFileSync('ffmpeg', ['-hide_banner', '-loglevel',
 ffmpeg('-f', 'rawvideo', '-pixel_format', 'rgb24', '-video_size', `${width}x${height}`, '-framerate', '120', '-i', join(temporary, 'frames.rgb'), '-f', 'lavfi', '-i', 'sine=frequency=1000:sample_rate=48000:duration=1', '-c:v', 'libx264', '-crf', '10', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-shortest', join(temporary, 'cfr.mp4'));
 ffmpeg('-display_rotation:v:0', '90', '-i', join(temporary, 'cfr.mp4'), '-c', 'copy', join(temporary, 'rotated.mp4'));
 ffmpeg('-i', join(temporary, 'cfr.mp4'), '-an', '-vf', String.raw`setpts=if(lt(N\,10)\,N/(120*TB)\,(10/120+(N-10)/30)/TB)`, '-fps_mode', 'vfr', '-c:v', 'libx264', '-crf', '10', '-pix_fmt', 'yuv420p', join(temporary, 'vfr.mp4'));
-const allowed = new Set(['/src/export/videoDecoder.ts', '/src/export/abort.ts', '/src/export/output.ts', '/src/export/audioDecode.ts', '/src/export/audioEncode.ts', '/src/export/mp4Timing.ts', '/src/lib/audioPlan.ts', '/src/lib/animation.ts', '/src/lib/videoFrames.ts', '/src/three/raster.ts']);
+const allowed = new Set(['/src/export/videoDecoder.ts', '/src/export/videoSeek.ts', '/src/export/abort.ts', '/src/export/output.ts', '/src/export/audioDecode.ts', '/src/export/audioEncode.ts', '/src/export/mp4Timing.ts', '/src/lib/audioPlan.ts', '/src/lib/animation.ts', '/src/lib/videoFrames.ts', '/src/three/raster.ts']);
 const server = createServer(async (req, res) => {
   try {
     const path = new URL(req.url, 'http://localhost').pathname;
@@ -48,6 +48,7 @@ try {
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   const result = await page.evaluate(async () => {
     const { ExportVideoDecoder } = await import('/src/export/videoDecoder.ts');
+    const { seekVideoElement } = await import('/src/export/videoSeek.ts');
     const { getVideoFrame } = await import('/src/lib/videoFrames.ts');
     const { openAudioChunks } = await import('/src/export/audioDecode.ts');
     const { audioSegments, mixAudioChunk } = await import('/src/lib/audioPlan.ts');
@@ -74,6 +75,16 @@ try {
     await decoder.prepare(rotated, .5); const rotatedFrame = getVideoFrame('rotated');
     check(rotatedFrame.width === 48 && rotatedFrame.height === 64, `Rotation metadata applied incorrectly: ${rotatedFrame.width}x${rotatedFrame.height}`);
     decoder.dispose(); check(getVideoFrame('rotated') === null, 'Decoded override survives disposal');
+    const nativeUrl = URL.createObjectURL(cfr.blob), nativeVideo = document.createElement('video'); nativeVideo.muted = true; nativeVideo.preload = 'auto'; nativeVideo.src = nativeUrl;
+    await new Promise((resolve, reject) => { nativeVideo.onloadeddata = resolve; nativeVideo.onerror = reject; });
+    const nativeCanvas = document.createElement('canvas'); nativeCanvas.width = 64; nativeCanvas.height = 48;
+    const nativeFrames = [];
+    for (const time of [.5, 1 / 120, .999]) {
+      await seekVideoElement(nativeVideo, time); nativeCanvas.getContext('2d').drawImage(nativeVideo, 0, 0);
+      const frame = frameNumber({ image: nativeCanvas }); nativeFrames.push(frame);
+      check(frame === Math.floor(time * 120 + 1e-7), `Native fallback returned stale frame ${frame} at ${time}`);
+    }
+    nativeVideo.removeAttribute('src'); nativeVideo.load(); URL.revokeObjectURL(nativeUrl);
     const audio = await openAudioChunks(cfr); check(audio, 'AAC source track missing');
     const shot = { id: 'a', duration: .5, gap: .1, speed: 2, trimStart: .25, media: cfr.ref, audio: { enabled: true, volume: 1, fadeIn: .1, fadeOut: .1 } };
     const project = { shots: [shot], audio: null }, total = .537;
@@ -126,7 +137,7 @@ try {
     alphaDecoder.dispose();
     webmInput.dispose(); await webmStorage.cleanup();
     const cancel = new AbortController(), aborted = await createExportOutput(1024, cancel.signal); cancel.abort(); await aborted.cleanup();
-    return { decoded, rotated: [rotatedFrame.width, rotatedFrame.height], audioRms: rms(.25, .35), audioHz: crossings * 10, outputBytes: size, outputDuration: duration, webmDuration, webmPacketDuration, opusLag, opusDelay: webmAudio.delay, transparentSource: true, audioDelay: audioSource.delay, bestLag, maxError, opfsFilesAfterCleanup: files };
+    return { decoded, nativeFrames, rotated: [rotatedFrame.width, rotatedFrame.height], audioRms: rms(.25, .35), audioHz: crossings * 10, outputBytes: size, outputDuration: duration, webmDuration, webmPacketDuration, opusLag, opusDelay: webmAudio.delay, transparentSource: true, audioDelay: audioSource.delay, bestLag, maxError, opfsFilesAfterCleanup: files };
   });
   console.log(JSON.stringify(result, null, 2));
 } finally { await browser.close(); await new Promise((r) => server.close(r)); await rm(temporary, { recursive: true, force: true }); }

@@ -75,7 +75,18 @@ export function audioSegments(project: Project, total: number): AudioSegment[] {
   return segments;
 }
 
-export function hasAudio(project: Project, total: number): boolean { return audioSegments(project, total).length > 0; }
+/** Presence checks run in the picker too; they must not expand thousands of short source loops. */
+export function hasAudio(project: Project, total: number): boolean {
+  if (project.audio && project.audio.volume > 0 && Math.min(total, project.audio.start + audioLength(project.audio)) > Math.max(0, project.audio.start)) return true;
+  let cursor = 0;
+  for (const shot of project.shots) {
+    const start = cursor + Math.max(0, shot.gap ?? 0); cursor = start + shot.duration;
+    if (start >= total) break;
+    const duration = shot.media?.duration ?? 0, rate = shot.speed ?? 1;
+    if ((shot.kind ?? "media") === "media" && shot.media?.kind === "video" && shot.audio?.enabled && shot.audio.volume > 0 && Number.isFinite(duration) && duration > 0 && Number.isFinite(rate) && rate > 0 && Math.min(cursor, total) > start) return true;
+  }
+  return false;
+}
 export function segmentGain(segment: AudioSegment, time: number, total: number): number {
   return segment.shot ? sourceAudioGainAt(segment.shot, time - segment.shotStart!, Math.max(0, total - segment.shotStart!)) : audioGainAt(segment.track!, time, total);
 }

@@ -9,6 +9,8 @@ import { availableSampleCounts, deviceMemoryGB, planRenderQuality } from "@/thre
 import { captureImage, estimateBitrate, exportVideo, type ImageFormat, type VideoQuality } from "@/export/capture";
 import { downloadBlob } from "@/lib/persistence";
 import { exportAssets } from "@/export/assets";
+import { exportQualityRequirements } from "@/export/quality";
+import { hasAudio } from "@/lib/audioPlan";
 import { totalDuration } from "@/lib/animation";
 import { exportSizeFor, quickCapture, slug } from "./hooks";
 import { chime } from "@/lib/sounds";
@@ -44,6 +46,7 @@ export function ExportButton() {
   const [imageSupport, setImageSupport] = useState<ImageExportSupport | null>(null);
   useEffect(() => { let mounted = true; void imageExportSupport().then((support) => { if (mounted) setImageSupport(support); }); return () => { mounted = false; }; }, []);
   const [tab, setTab] = useState<"image" | "video">("image");
+  const captureTime = useUI((s) => open && tab === "image" ? s.time : 0);
   useAlphaPreview(open, tab === "image" ? imageState.transparent && imageState.format !== "jpg" : videoState.transparent, tab === "image" ? imageState.transparentShadows : videoState.transparentShadows);
   const ref = useRef<HTMLButtonElement>(null);
   const [, force] = useState(0);
@@ -126,13 +129,10 @@ export function ExportButton() {
     maxTextureSize: capabilities?.maxTextureSize ?? 8192,
     maxSamples: capabilities?.maxSamples ?? 4,
     supportedSamples,
-    detailShadows: (project.scene.detailShadows ?? 0) > 0,
     deviceMemoryGB: deviceMemoryGB(),
-    effectCount: Math.max(project.effects.length, ...project.shots.map((shot) => shot.effects?.length ?? project.effects.length)),
-    depth: project.blur.mode === "depth" || project.shots.some((shot) => shot.blurMode === "depth"),
   };
-  const imageQuality = planRenderQuality({ ...qualityOptions, width: imgDims[0], height: imgDims[1] });
-  const videoQuality = planRenderQuality({ ...qualityOptions, width: vidDims[0], height: vidDims[1], motionSamples: BLUR_SAMPLES[videoState.blur] });
+  const imageQuality = planRenderQuality({ ...qualityOptions, ...exportQualityRequirements(project, { type: "still", time: captureTime }), width: imgDims[0], height: imgDims[1] });
+  const videoQuality = planRenderQuality({ ...qualityOptions, ...exportQualityRequirements(project, { type: "video", start: 0, end: duration }), width: vidDims[0], height: vidDims[1], motionSamples: BLUR_SAMPLES[videoState.blur] });
   const orientationOptions = [
     { value: "landscape" as Orientation, label: "Landscape", icon: "landscape" },
     { value: "square" as Orientation, label: "Square", icon: "square-outline" },
@@ -192,7 +192,7 @@ export function ExportButton() {
             <Segmented size="sm" value={videoState.transparent ? "webm" : videoState.format} onChange={(v) => { videoState.format = v; rerender(); }} options={[{ value: "mp4", label: "MP4 · H.264", disabled: videoState.transparent }, { value: "webm", label: "WebM · VP9" }]} />
             <ToggleRow label="Transparent background" checked={videoState.transparent} onChange={(v) => { videoState.transparent = v; rerender(); }} hint="WebM" />
             {videoState.transparent && <ToggleRow label="Include ground shadow" checked={videoState.transparentShadows} onChange={(v) => { videoState.transparentShadows = v; rerender(); }} />}
-            <Summary title={`${vidDims[0]} × ${vidDims[1]}`} tag={`${videoState.fps} fps · ~${mbps.toFixed(0)} Mbps`} sub={`${duration.toFixed(1)}s · ${exportPlan.shots.length} shot${exportPlan.shots.length === 1 ? "" : "s"} in range${exportPlan.audio ? " · audio" : ""}${videoState.blur !== "off" ? ` · ${BLUR_SAMPLES[videoState.blur]}× motion blur` : ""}`} />
+            <Summary title={`${vidDims[0]} × ${vidDims[1]}`} tag={`${videoState.fps} fps · ~${mbps.toFixed(0)} Mbps`} sub={`${duration.toFixed(1)}s · ${exportPlan.shots.length} shot${exportPlan.shots.length === 1 ? "" : "s"} in range${hasAudio(project, duration) ? " · audio" : ""}${videoState.blur !== "off" ? ` · ${BLUR_SAMPLES[videoState.blur]}× motion blur` : ""}`} />
             {(videoQuality.reason || videoQuality.note) && <p role="status" className="px-0.5 text-[11px] leading-relaxed text-muted">{videoQuality.reason ?? videoQuality.note}</p>}
             <Button variant="solid" size="lg" disabled={!videoQuality.supported} onClick={() => void runVideo()} className="mt-1 w-full">Export video</Button>
             <p className="px-0.5 pt-1 text-[10px] leading-relaxed text-muted">Frames are rendered one by one and encoded with WebCodecs, so the export is deterministic at any frame rate.</p>

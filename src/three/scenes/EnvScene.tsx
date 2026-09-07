@@ -14,7 +14,7 @@ import { addEnvironmentGain } from "@/three/environmentGain";
 import { resizeShadowMap, useRenderQuality } from "@/three/renderQuality";
 import { clipReflectionCamera, isEffectivelyVisible, withHiddenObjects, withOffscreenPass } from "@/three/renderPass";
 import { reflectionSamples } from "@/three/reflectionSamples";
-import { createReceiverOnlyShadowMaterial } from "@/three/shadowCalibration";
+import { addVsmReceiverBoundaryGuard, createReceiverOnlyShadowMaterial, shadowStrength } from "@/three/shadowCalibration";
 import { acquireConcrete, configureConcreteMaps, type ConcreteMaps } from "@/three/concreteAssets";
 
 /**
@@ -40,9 +40,8 @@ const SHADOW_SPREAD: Record<ScenePresetId, number> = {
 /**
  * Shadow softness and opacity for the lit scenes. These sliders used to move nothing outside the
  * studio backdrop: `shadow.radius` is ignored under PCFSoftShadowMap, so the authored blur never
- * applied. The renderer now uses variance shadow maps, where both actually take effect. Softness
- * stands for the size of the source, so it sets the widest penumbra the key can throw; the floors
- * pull that back in again wherever the caster is close to them.
+ * applied. Variance maps soften the directional cast shadow; the separate height-aware contact
+ * pass keeps the device grounded with a tighter shadow where its underside meets the floor.
  */
 function useSceneShadow(spread: number, resolution: number) {
   const soft = useEditor((s) => s.project.scene.shadowSoft ?? 0.5);
@@ -52,7 +51,7 @@ function useSceneShadow(spread: number, resolution: number) {
   return {
     "shadow-radius": Math.max(1, soft * spread) * resolution / 2048,
     "shadow-blurSamples": Math.round(8 + soft * 24),
-    "shadow-intensity": Math.max(0.05, Math.min(1, 0.15 + opacity * 1.7)),
+    "shadow-intensity": shadowStrength(opacity, 1),
   } as const;
 }
 
@@ -76,14 +75,16 @@ function SoftFloor({ size, center, edge, roughness = 0.96 }: { size: number; cen
     ctx.fillRect(0, 0, 512, 512);
     const t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace;
+    // Extend the sweep beyond the fog's far plane without enlarging its central light pool.
+    t.repeat.set(2, 2); t.offset.set(-0.5, -0.5);
     return t;
   }, [center, edge]);
   useEffect(() => () => tex.dispose(), [tex]);
   if (noRoom) return null;
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-      <planeGeometry args={[size, size]} />
-      <meshStandardMaterial ref={(m) => { if (m) addEnvironmentGain(m); }} map={tex} roughness={roughness} metalness={0} envMapIntensity={0.3} />
+    <mesh renderOrder={-100} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+      <planeGeometry args={[size * 2, size * 2]} />
+      <meshStandardMaterial ref={(m) => { if (m) { addEnvironmentGain(m); addVsmReceiverBoundaryGuard(m); } }} map={tex} roughness={roughness} metalness={0} envMapIntensity={0.3} />
     </mesh>
   );
 }
@@ -99,7 +100,7 @@ function SceneFog({ color, near, far }: { color: string; near: number; far: numb
   }, [scene, color, near, far, noRoom]);
   if (noRoom) return null;
   return (
-    <mesh>
+    <mesh renderOrder={-100}>
       <sphereGeometry args={[far * 1.6, 32, 16]} />
       <meshBasicMaterial color={color} side={THREE.BackSide} fog={false} />
     </mesh>
@@ -127,7 +128,7 @@ function ConcreteFloor({ size }: { size: number }) {
   useMemo(() => { if (maps) configureConcreteMaps(maps, size, gl.capabilities.getMaxAnisotropy()); }, [maps, size, gl]);
   if (noRoom) return null;
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow customDepthMaterial={receiverShadow} customDistanceMaterial={receiverShadow}>
+    <mesh renderOrder={-100} rotation={[-Math.PI / 2, 0, 0]} receiveShadow customDepthMaterial={receiverShadow} customDistanceMaterial={receiverShadow}>
       <planeGeometry args={[size, size]} />
       {/* A ready tier adds map shader defines to the initially untextured floor. */}
       <meshStandardMaterial key={maps?.tier ?? "pending"} ref={(m) => { if (m) { addScreenGlow(m); addEnvironmentGain(m); } }} map={maps?.diff} normalMap={maps?.normal} roughnessMap={maps?.rough} aoMap={maps?.ao} color="#bababc" roughness={0.95} metalness={0} normalScale={new THREE.Vector2(0.65, 0.65)} />
@@ -257,7 +258,7 @@ function MirrorFloor({ size }: { size: number }) {
     }));
   }, 0.6);
   return (
-    <mesh ref={mesh} rotation={[-Math.PI / 2, 0, 0]} receiveShadow customDepthMaterial={buffers.receiverShadow} customDistanceMaterial={buffers.receiverShadow}>
+    <mesh ref={mesh} renderOrder={-100} rotation={[-Math.PI / 2, 0, 0]} receiveShadow customDepthMaterial={buffers.receiverShadow} customDistanceMaterial={buffers.receiverShadow}>
       <planeGeometry args={[size, size]} />
       <primitive object={buffers.material} attach="material" />
     </mesh>
@@ -301,7 +302,7 @@ export function EnvScene({ preset, floorY, fitSize, backdrop }: { preset: SceneP
       {preset === "concrete" && (
         // a single raking key and a cool back rim over polished concrete in a dark room
         <>
-          <ConcreteFloor size={f * 26} />
+          <ConcreteFloor size={f * 64} />
           <SceneFog color={backdrop ?? "#0f1013"} near={f * 8} far={f * 24} />
           <directionalLight ref={shadowRef} position={[f * 3.4, f * 2.6, f * 1.6]} intensity={3.4} color="#ffeedd" castShadow shadow-mapSize={[quality.shadow, quality.shadow]} shadow-bias={-0.0005} shadow-normalBias={0.02} {...keyShadow}>
             <orthographicCamera attach="shadow-camera" args={[shadow.left, shadow.right, shadow.top, shadow.bottom, shadow.near, shadow.far]} />
@@ -311,7 +312,7 @@ export function EnvScene({ preset, floorY, fitSize, backdrop }: { preset: SceneP
           <hemisphereLight intensity={0.26} color="#8fa0bd" groundColor="#332f2a" />
         </>
       )}
-      {preset === "darkroom" && !noRoom && <MirrorFloor size={f * 30} />}
+      {preset === "darkroom" && !noRoom && <MirrorFloor size={f * 64} />}
       {preset === "darkroom" && (
         // black mirror floor, one cool rim, and the screen lighting its own surroundings
         <>

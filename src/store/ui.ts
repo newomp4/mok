@@ -64,6 +64,8 @@ interface UIState {
   setSelectedShots: (ids: string[]) => void;
   /** shot whose image is being cropped */
   cropShot: string | null;
+  /** Explicit canvas positioning mode; project identity prevents a stale mode after switching. */
+  captionPosition: { projectId: string; shotId: string } | null;
   setCropShot: (id: string | null) => void;
   /** onboarding tour step (null = not running) */
   tourStep: number | null;
@@ -145,6 +147,7 @@ export const useUI = create<UIState>()(subscribeWithSelector((set, get) => ({
   selectedShots: [],
   setSelectedShots: (selectedShots) => set({ selectedShots }),
   cropShot: null,
+  captionPosition: null,
   setCropShot: (cropShot) => set({ cropShot }),
   tourStep: null,
   tourKind: "editor",

@@ -113,16 +113,16 @@ test("moving a contact-shadow caster replaces the old silhouette and excludes ca
     caster = "right";
     renderContactShadow(f.gl, f.scene, f.camera, f.shadow, f.contactCamera, f.resources, 2.4);
     assert.deepEqual([...pixels.get(f.resources.target)], ["right"], "previous positions do not accumulate into a trail");
-    assert.equal(calls, 10); assert.equal(f.overlay.visible, true); assert.equal(f.hiddenOverlay.visible, false);
+    assert.equal(calls, 6); assert.equal(f.overlay.visible, true); assert.equal(f.hiddenOverlay.visible, false);
     assert.equal(f.catcher.visible, true);
     f.shadow.visible = false;
     renderContactShadow(f.gl, f.scene, f.camera, f.shadow, f.contactCamera, f.resources, 2.4);
-    assert.equal(calls, 10, "a hidden/transparent catcher never spends a GPU pass");
+    assert.equal(calls, 6, "a hidden/transparent catcher never spends a GPU pass");
   } finally { f.clean(); }
 });
 
 test("depth and blur failures restore scene overrides, renderer state and all temporary visibility", () => {
-  for (const failAt of [1, 2, 5]) {
+  for (const failAt of [1, 2, 3]) {
     const f = contactFixture(), before = snapshot(f.gl), background = f.scene.background, override = f.scene.overrideMaterial;
     let calls = 0;
     f.gl.render = () => { if (++calls === failAt) throw new Error("GPU pass failed"); };
@@ -149,4 +149,31 @@ test("reflection clipping rejects degenerate planes without corrupting projectio
   assert.ok(new THREE.Vector3(0, 0, -3).project(camera).z > -1, "geometry in front of the mirror remains visible");
   const identity = camera.projectionMatrix.clone().multiply(camera.projectionMatrixInverse);
   identity.elements.forEach((value, i) => assert.ok(Math.abs(value - (i % 5 === 0 ? 1 : 0)) < 1e-9));
+});
+
+test('contact pass excludes fully invisible helper meshes and restores them after a render failure', async () => {
+  const { castsContactShadow } = await import('../src/three/contactShadowPass.ts');
+  const f = contactFixture(), helper = new THREE.Mesh(new THREE.PlaneGeometry(), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0 }));
+  f.scene.add(helper);
+  assert.equal(castsContactShadow(helper.material), false);
+  helper.material.transparent = false; assert.equal(castsContactShadow(helper.material), true);
+  helper.material.transparent = true;
+  f.gl.render = () => { assert.equal(helper.visible, false); throw new Error('interrupted'); };
+  try {
+    assert.throws(() => renderContactShadow(f.gl, f.scene, f.camera, f.shadow, f.contactCamera, f.resources, 2), /interrupted/);
+    assert.equal(helper.visible, true);
+  } finally { helper.geometry.dispose(); helper.material.dispose(); f.clean(); }
+});
+
+test('shadow controls remove every shadow layer at zero while keeping their calibrated midpoints', async () => {
+  const { shadowStrength } = await import('../src/three/shadowCalibration.ts');
+  for (const [midpoint, maximum] of [[.375, .65], [.5, .85], [.53, .78], [1, 1]]) {
+    assert.equal(shadowStrength(0, midpoint, maximum), 0);
+    assert.equal(shadowStrength(.5, midpoint, maximum), midpoint);
+    assert.equal(shadowStrength(1, midpoint, maximum), maximum);
+    assert.equal(shadowStrength(-1, midpoint, maximum), 0);
+    assert.equal(shadowStrength(2, midpoint, maximum), maximum);
+    let previous = 0;
+    for (let i = 0; i <= 100; i++) { const value = shadowStrength(i / 100, midpoint, maximum); assert.ok(value >= previous); previous = value; }
+  }
 });

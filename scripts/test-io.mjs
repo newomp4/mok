@@ -3,6 +3,12 @@ import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 
 const records = new Map();
+let holdSamples = false;
+const sampleWaiters = [];
+globalThis.__ioSampleBlob = () => new Promise((resolve) => {
+  const done = () => resolve(new Blob(['sample'], { type: 'image/png' }));
+  if (holdSamples) sampleWaiters.push(done); else done();
+});
 let transaction = Promise.resolve();
 const later = () => new Promise((r) => setTimeout(r, 1));
 globalThis.__ioDb = {
@@ -38,6 +44,10 @@ globalThis.__ioDb = {
 };
 registerHooks({ resolve(specifier, context, nextResolve) {
   if (specifier === 'idb-keyval') return { url: 'data:text/javascript,export const {get,set,del,keys,update,createStore}=globalThis.__ioDb;', shortCircuit: true };
+  if (specifier === './screens' && context.parentURL?.endsWith('/src/lib/actions.ts')) {
+    const real = new URL('../src/lib/screens.ts', import.meta.url).href;
+    return { url: `data:text/javascript,${encodeURIComponent(`export { getSampleScreen } from ${JSON.stringify(real)}; export const sampleScreenBlob = (...args) => globalThis.__ioSampleBlob(...args);`)}`, shortCircuit: true };
+  }
   return nextResolve(specifier, context);
 } });
 const urls = new Map(), revoked = new Set();
@@ -47,7 +57,7 @@ URL.createObjectURL = (blob) => { const url = `blob:test-${++urlIndex}`; urls.se
 URL.revokeObjectURL = (url) => { revoked.add(url); urls.delete(url); };
 globalThis.Image = class {
   naturalWidth = 80; naturalHeight = 60;
-  set src(value) { this._src = value; if (!value) return; const done = () => this.onload?.(); if (holdImages) imageWaiters.push(done); else queueMicrotask(done); }
+  set src(value) { this._src = value; if (!value) return; const done = () => urls.get(value)?.name === 'broken.png' ? this.onerror?.() : this.onload?.(); if (holdImages) imageWaiters.push(done); else queueMicrotask(done); }
   get src() { return this._src; }
 };
 globalThis.FileReader = class { readAsDataURL(blob) { blob.arrayBuffer().then((buffer) => { this.result = `data:${blob.type};base64,${Buffer.from(buffer).toString('base64')}`; this.onload?.(); }); } };
@@ -68,14 +78,15 @@ const { validateMediaRef } = await import('../src/lib/validateProject.ts');
 const persistence = await import('../src/lib/persistence.ts');
 const media = await import('../src/lib/media.ts');
 const audio = await import('../src/lib/audio.ts');
-const { useEditor } = await import('../src/store/editor.ts');
+const { useEditor, undo } = await import('../src/store/editor.ts');
 const { useUI } = await import('../src/store/ui.ts');
 const { viewport, useRenderFlags } = await import('../src/three/registry.ts');
 const { anim } = await import('../src/three/anim.ts');
 const { withExportSession, captureImage, exportVideo } = await import('../src/export/capture.ts');
 const { exportAssets, shotsInExport, exportSampleTime } = await import('../src/export/assets.ts');
 const { locate } = await import('../src/lib/animation.ts');
-const { importFilesToShot } = await import('../src/lib/actions.ts');
+const { importFilesToShot, importBackgroundImage, importScreenBackground, applySampleScreen } = await import('../src/lib/actions.ts');
+const { useProjectOwnership } = await import('../src/lib/projectOwnership.ts');
 const { repairMedia } = await import('../src/lib/repairMedia.ts');
 
 const malformed = { ...createProject(), camera: { fov: NaN, zoom: 0 }, scene: null, screen: null, mockup: null, blur: null, shots: [ { id: 'same', duration: 0, keyframes: { 'camera.x': [{ t: 1, v: 3, ease: 'expoIn' }, { t: NaN, v: 4 }, { t: 0, v: 2 }, { t: 1, v: 6, ease: 'backIn' }], bad: [1] }, pose: { 'camera.x': Infinity }, media: { id: '__proto__', kind: 'image', width: 50, height: 50 } }, { id: 'same', kind: 'text', text: null } ] };
@@ -225,6 +236,73 @@ const beforeAudioOnly = structuredClone(useEditor.getState().project.shots);
 assert.equal(await importFilesToShot([new File(['mp3'], 'replacement.mp3')], mixedImportTarget), null);
 assert.equal(useEditor.getState().project.audio.media.name, 'replacement.mp3');
 assert.deepEqual(useEditor.getState().project.shots, beforeAudioOnly, 'an audio-only import must not alter or add visual shots');
+
+const batchBefore = structuredClone(useEditor.getState().project); useEditor.temporal.getState().clear();
+await importFilesToShot([new File(['a'],'first.png',{type:'image/png'}),new File(['bad'],'broken.png',{type:'image/png'}),new File(['b'],'last.png',{type:'image/png'})],mixedImportTarget);
+const batch = useEditor.getState().project;
+assert.equal(batch.shots.length,batchBefore.shots.length+1,'a failed decode cannot leave an extra shot');
+assert.equal(batch.shots[0].media.name,'first.png'); assert.equal(batch.shots[1].media.name,'last.png'); assert.notEqual(batch.shots[0].media.id,batch.shots[1].media.id);
+assert.match(useUI.getState().toast.text,/2 files added.*1 skipped.*broken.png/);
+assert.equal(useEditor.temporal.getState().pastStates.length,1); undo(); assert.deepEqual(useEditor.getState().project,batchBefore);
+holdImages=true;
+const countBefore=Object.keys(media.useMediaStore.getState().items).length;
+const staleUpload=importFilesToShot([new File(['held'],'held.png',{type:'image/png'})],mixedImportTarget);
+while(!imageWaiters.length) await later();
+useEditor.getState().replaceProject(createProject()); useEditor.getState().replaceProject(batchBefore); const restoredBatch = structuredClone(useEditor.getState().project); imageWaiters.shift()();
+assert.equal(await staleUpload,null); holdImages=false;
+assert.equal(Object.keys(media.useMediaStore.getState().items).length,countBefore,'cancelled import releases its unused media');
+assert.deepEqual(useEditor.getState().project,restoredBatch);
+
+const waitForQueue = async (queue) => { for (let n = 0; n < 1000; n++) { if (queue.length) return; await later(); } throw new Error('Deferred decoder was not reached'); };
+const mediaInventory = () => ({ items: Object.keys(media.useMediaStore.getState().items).sort(), saved: [...records.keys()].filter((k) => k.startsWith('media:')).sort(), urls: [...urls.keys()].sort() });
+// Exercise both background targets with real importMedia decoding and persistence mocks.
+for (const [label, action, background] of [
+  ['scene', importBackgroundImage, (p) => p.scene.background],
+  ['screen', importScreenBackground, (p) => p.screen.bg],
+]) {
+  useEditor.getState().replaceProject(createProject());
+  const inventory = mediaInventory();
+  await action(new File(['mp3'], 'wrong-type.mp3', { type: 'audio/mpeg' }));
+  assert.deepEqual(mediaInventory(), inventory, `${label}: rejected audio must release decoded media, URL and stored bytes`);
+  for (const change of ['project-ABA', 'target-ABA', 'ownership']) {
+    const before = structuredClone(useEditor.getState().project), inventory = mediaInventory(); holdImages = true;
+    const pending = action(new File(['png'], `${label}-held.png`, { type: 'image/png' }));
+    await waitForQueue(imageWaiters);
+    if (change === 'project-ABA') { useEditor.getState().replaceProject(createProject()); useEditor.getState().replaceProject(before); }
+    if (change === 'target-ABA') { useEditor.getState().update((p) => { background(p).color = '#fd30a8'; }); useEditor.getState().update((p) => { background(p).color = background(before).color; }); }
+    if (change === 'ownership') { useProjectOwnership.setState({ enabled: true, projectId: before.id, mode: 'readonly', token: null }); useProjectOwnership.setState({ enabled: false }); }
+    const restored = structuredClone(useEditor.getState().project); imageWaiters.shift()(); await pending; holdImages = false;
+    assert.deepEqual(useEditor.getState().project, restored, `${label}: ${change} cannot apply a stale background`);
+    assert.deepEqual(mediaInventory(), inventory, `${label}: ${change} releases all unused media resources`);
+  }
+  // An unrelated camera edit is not a cancellation: the target remains valid.
+  holdImages = true; const pending = action(new File(['png'], `${label}-accepted.png`, { type: 'image/png' }));
+  await waitForQueue(imageWaiters); useEditor.getState().update((p) => { p.camera.zoom = 1.4; }); imageWaiters.shift()(); await pending; holdImages = false;
+  assert.equal(background(useEditor.getState().project).image.name, `${label}-accepted.png`); assert.equal(useEditor.getState().project.camera.zoom, 1.4);
+}
+// Sample generation and source decoding are separate async boundaries; test cancellation at both.
+useEditor.getState().replaceProject(createProject());
+let sampleProject = structuredClone(useEditor.getState().project), sampleTarget = sampleProject.shots[0].id;
+holdSamples = true;
+const sampleInventory = mediaInventory(), staleGeneration = applySampleScreen('analytics', sampleTarget);
+await waitForQueue(sampleWaiters);
+useEditor.getState().replaceProject(createProject()); useEditor.getState().replaceProject(sampleProject); sampleWaiters.shift()(); await staleGeneration; holdSamples = false;
+assert.deepEqual(mediaInventory(), sampleInventory, 'a cancelled sample generation must never start source decoding');
+assert.equal(useEditor.getState().project.shots[0].media, null);
+for (const change of ['project-ABA', 'source-ABA', 'device', 'orientation']) {
+  useEditor.getState().replaceProject(createProject());
+  sampleProject = structuredClone(useEditor.getState().project); sampleTarget = sampleProject.shots[0].id; const inventory = mediaInventory(); holdImages = true;
+  const pending = applySampleScreen('analytics', sampleTarget);
+  await waitForQueue(imageWaiters);
+  if (change === 'project-ABA') { useEditor.getState().replaceProject(createProject()); useEditor.getState().replaceProject(sampleProject); }
+  if (change === 'source-ABA') { useEditor.getState().updateShot(sampleTarget, (s) => { s.media = originalRef; }); useEditor.getState().updateShot(sampleTarget, (s) => { s.media = sampleProject.shots[0].media; }); }
+  if (change === 'device') useEditor.getState().update((p) => { p.mockup.device = 'browser'; });
+  if (change === 'orientation') useEditor.getState().updateShot(sampleTarget, (s) => { s.orientation = 'landscape'; });
+  const restored = structuredClone(useEditor.getState().project); imageWaiters.shift()(); await pending; holdImages = false;
+  assert.deepEqual(useEditor.getState().project, restored, `sample ${change} cannot overwrite a later target`);
+  assert.deepEqual(mediaInventory(), inventory, `sample ${change} releases decoded media and stored bytes`);
+}
+await applySampleScreen('analytics', sampleTarget); assert.ok(useEditor.getState().project.shots[0].media?.name.endsWith('.png'), 'a valid sample still commits its rendered source');
 
 const unavailable = { ...originalRef, id: 'missing-for-retry' };
 assert.equal(media.getMediaStatus(null), 'empty');

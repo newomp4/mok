@@ -1,4 +1,4 @@
-import { ANIM_PROPS, type MediaRef, type Project, type Shot, type Keyframe, type AnimProp } from "./types";
+import { ANIM_PROPS, type MediaRef, type Project, type Shot, type Keyframe, type AnimProp, type TextStyle } from "./types";
 import { DEVICES } from "./devices";
 import { ASPECTS, EFFECT_DEFS, LIGHTINGS, SCENES } from "./presets";
 import { EASES, MAX_PROJECT_DURATION } from "./animation";
@@ -144,6 +144,17 @@ export function validateProject(value: unknown, defaults: Project): Project {
     if (blurModes.includes(s.blurMode as typeof blurModes[number])) shot.blurMode = s.blurMode as Shot["blurMode"];
     if (typeof s.bokeh === "boolean") shot.bokeh = s.bokeh;
     if (typeof s.notch === "boolean") shot.notch = s.notch;
+    if ((!shot.kind || shot.kind === "media") && s.caption && typeof s.caption === "object") {
+      const c = object(s.caption), text = object(c.text), timing = object(c.timing);
+      const duration = num(timing.duration, shot.duration, .1, 86400);
+      const style: TextStyle = fields(text, { text: "Your caption", font: "Geist", weight: 600, size: .065, color: "#111111", align: "center" as const, background: "#f2f2f2", lineHeight: 1.15, letterSpacing: -.02 });
+      style.align = choice(text.align, ["left", "center", "right"], "center");
+      style.size = num(text.size, .065, .001, 5); style.weight = num(text.weight, 600, 100, 900);
+      style.lineHeight = num(text.lineHeight, 1.15, .1, 10); style.letterSpacing = num(text.letterSpacing, -.02, -1, 5);
+      shot.caption = { enabled: c.enabled !== false, text: style, x: num(c.x, 0, -1, 1), y: num(c.y, .3, -1, 1), layer: choice(c.layer, ["front", "behind"], "front") };
+      if (c.timing) shot.caption.timing = { offset: num(timing.offset, 0, 0, duration), duration };
+      for (const key of ["enter", "exit"] as const) if (c[key]) shot.caption[key] = { effect: choice(object(c[key]).effect, ["none", "fade", "slideUp", "slideDown", "slideLeft", "slideRight", "scale", "blur"], "fade"), duration: num(object(c[key]).duration, .3, 0, c.timing ? duration : shot.duration) };
+    }
     if (shot.kind === "text") {
       shot.text = fields(s.text, { text: "Your headline here", font: "Geist", weight: 600, size: 0.09, color: "#111111", align: "center" as const, background: "#f2f2f2", lineHeight: 1.15, letterSpacing: -0.02 });
       shot.text.align = choice(object(s.text).align, ["left", "center", "right"], "center");

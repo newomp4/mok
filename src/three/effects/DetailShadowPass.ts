@@ -63,13 +63,19 @@ export function createDetailMaskMaterial(source: THREE.Material): THREE.MeshBasi
 
 function updateDetailMaskMaterial(mask: THREE.MeshBasicMaterial, source: THREE.Material): void {
   const original = source as THREE.MeshStandardMaterial;
-  const map = original.map ?? null, alphaMap = original.alphaMap ?? null;
+  // Caption alpha lives in a shader uniform. A solid black replacement would mask the entire
+  // viewport and switch off detail shading whenever even one letter is in front of the device.
+  const caption = source.name === "Caption overlay" ? source as THREE.ShaderMaterial : null;
+  const map = caption?.uniforms.map.value ?? original.map ?? null, alphaMap = original.alphaMap ?? null;
   if (mask.side !== source.side || mask.map !== map || mask.alphaMap !== alphaMap || mask.transparent !== source.transparent ||
       mask.vertexColors !== source.vertexColors || mask.alphaHash !== source.alphaHash || mask.clippingPlanes !== source.clippingPlanes || mask.clipIntersection !== source.clipIntersection) mask.needsUpdate = true;
   mask.color.setHex(receivesDetailShadows(source) ? 0xffffff : 0x000000);
   mask.side = source.side; mask.map = map; mask.alphaMap = alphaMap;
   mask.alphaTest = source.alphaTest; mask.alphaHash = source.alphaHash;
-  mask.opacity = source.opacity; mask.transparent = source.transparent; mask.vertexColors = source.vertexColors;
+  mask.opacity = caption?.uniforms.opacity.value ?? source.opacity; mask.transparent = source.transparent; mask.vertexColors = source.vertexColors;
+  mask.blending = source.blending;
+  mask.blendSrc = source.blendSrc; mask.blendDst = source.blendDst; mask.blendEquation = source.blendEquation;
+  mask.blendSrcAlpha = source.blendSrcAlpha; mask.blendDstAlpha = source.blendDstAlpha; mask.blendEquationAlpha = source.blendEquationAlpha;
   mask.depthTest = source.depthTest; mask.depthWrite = source.depthWrite; mask.depthFunc = source.depthFunc;
   mask.polygonOffset = source.polygonOffset; mask.polygonOffsetFactor = source.polygonOffsetFactor; mask.polygonOffsetUnits = source.polygonOffsetUnits;
   mask.clippingPlanes = source.clippingPlanes; mask.clipIntersection = source.clipIntersection;

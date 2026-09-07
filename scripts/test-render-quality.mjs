@@ -157,3 +157,15 @@ test('lens blur retains source alpha and keeps half-float radiance targets linea
     for (const key of ['renderTarget', 'renderTargetNear', 'renderTargetFar', 'renderTargetMasked']) assert.equal(effect[key].texture.colorSpace, THREE.NoColorSpace);
   } finally { effect.dispose(); }
 });
+
+test('caption detail masks preserve only glyph coverage in either render layer', () => {
+  const texture = new THREE.Texture();
+  for (const front of [true, false]) {
+    const source = new THREE.ShaderMaterial({ name: 'Caption overlay', uniforms: { map: { value: texture }, opacity: { value: .4 } }, transparent: front, depthTest: false, depthWrite: false, blending: front ? THREE.NormalBlending : THREE.CustomBlending, blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneMinusSrcAlphaFactor });
+    const mask = createDetailMaskMaterial(source);
+    assert.equal(receivesDetailShadows(source), false); assert.equal(mask.map, texture); assert.equal(mask.opacity, .4);
+    assert.equal(mask.depthWrite, false); assert.equal(mask.depthTest, false); assert.equal(mask.blending, source.blending);
+    assert.equal(mask.color.getHex(), 0); mask.dispose(); source.dispose();
+  }
+  texture.dispose();
+});

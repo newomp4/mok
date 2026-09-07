@@ -176,6 +176,7 @@ export function planarizeScreenUVs(mesh: THREE.Mesh, root: THREE.Object3D, targe
     if (dv < minV) minV = dv; if (dv > maxV) maxV = dv;
   }
   const geometry = ownModelResource(root, mesh.geometry.clone());
+  stabilizeScreenNormals(geometry, mesh.matrixWorld, f);
   const uvs = new Float32Array(pos.count * 2);
   const lenU = Math.max(1e-9, maxU - minU), lenV = Math.max(1e-9, maxV - minV);
   // centre a rectangle with the device's true screen aspect inside the mesh; whatever is left
@@ -195,6 +196,35 @@ export function planarizeScreenUVs(mesh: THREE.Mesh, root: THREE.Object3D, targe
   geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
   mesh.geometry = geometry;
   mesh.userData.screenAspect = (lenU * spanU) / (lenV * spanV);
+}
+
+/**
+ * Quantized imported normals can turn a flat display into small reflective facets.
+ * Repair only an almost perfectly planar, consistently facing surface, and only
+ * on the instance-owned geometry. Curved glass, bevels and opposing faces retain
+ * their authored normals. Position/index data and the cached source stay intact.
+ */
+export function stabilizeScreenNormals(geometry: THREE.BufferGeometry, matrixWorld: THREE.Matrix4, frame: MeshFrame): boolean {
+  const normals = geometry.getAttribute("normal"), positions = geometry.getAttribute("position");
+  if (!normals || !positions || positions.count < 3 || normals.count !== positions.count || frame.extents[0] <= 1e-9 || frame.thin > 0.0002) return false;
+  const normalMatrix = new THREE.Matrix3().getNormalMatrix(matrixWorld);
+  const n = frame.axes[2].clone(), p = new THREE.Vector3();
+  p.fromBufferAttribute(normals, 0).applyMatrix3(normalMatrix).normalize();
+  if (p.dot(n) < 0) n.negate();
+  let min = Infinity, max = -Infinity;
+  for (let i = 0; i < positions.count; i++) {
+    p.fromBufferAttribute(normals, i).applyMatrix3(normalMatrix).normalize();
+    if (p.dot(n) < Math.cos(2 * Math.PI / 180)) return false;
+    p.fromBufferAttribute(positions, i).applyMatrix4(matrixWorld).sub(frame.center);
+    const depth = p.dot(n); min = Math.min(min, depth); max = Math.max(max, depth);
+  }
+  // PCA samples large meshes; check every vertex before flattening any normals.
+  if (max - min > frame.extents[0] * 0.0002) return false;
+  const local = n.applyMatrix3(new THREE.Matrix3().setFromMatrix4(matrixWorld).transpose()).normalize();
+  const repaired = new Float32Array(normals.count * 3);
+  for (let i = 0; i < normals.count; i++) local.toArray(repaired, i * 3);
+  geometry.setAttribute("normal", new THREE.BufferAttribute(repaired, 3));
+  return true;
 }
 
 /**
@@ -416,6 +446,15 @@ export function hideScreenOverlays(root: THREE.Object3D, screen: THREE.Mesh): TH
   const inv = deviceInverse(screen);
   const { box: sb, size: ss } = meshBox(screen, inv);
   const sArea = [ss.x, ss.y, ss.z].sort((a, c) => c - a).slice(0, 2).reduce((a, c) => a * c, 1);
+  // Some source cover glass sits just above the OLED, without intersecting its
+  // zero-thickness box. Measure these separate sheets in the display's plane.
+  const f = meshFrame(screen), n = f.axes[2].clone();
+  const front = new THREE.Vector3(0, 0, 1).transformDirection(inv.clone().invert());
+  if (n.dot(front) < 0) n.negate();
+  const u = f.axes[0], v = new THREE.Vector3().crossVectors(n, u).normalize();
+  const toScreen = new THREE.Matrix4().makeBasis(u, v, n).setPosition(f.center).invert();
+  const screenBox = vertexBounds([screen], toScreen), screenSize = screenBox.getSize(new THREE.Vector3());
+  const frontGap = Math.max(screenSize.x, screenSize.y) * 0.01;
   const hidden: THREE.Mesh[] = [];
   root.traverse((o) => {
     const m = o as THREE.Mesh;
@@ -425,11 +464,43 @@ export function hideScreenOverlays(root: THREE.Object3D, screen: THREE.Mesh): TH
     const { box: b, size: bs } = meshBox(m, inv);
     const area = [bs.x, bs.y, bs.z].sort((a, c) => c - a).slice(0, 2).reduce((a, c) => a * c, 1);
     const inter = b.clone().intersect(sb);
-    if (inter.isEmpty()) return;
     const is = new THREE.Vector3(); inter.getSize(is);
     const interArea = [is.x, is.y, is.z].sort((a, c) => c - a).slice(0, 2).reduce((a, c) => a * c, 1);
-    // covers most of the screen and is not much bigger than it (a whole-body glass shell would be)
-    if (interArea > sArea * 0.6 && area < sArea * 1.8) { m.visible = false; hidden.push(m); }
+    const cover = vertexBounds([m], toScreen), size = cover.getSize(new THREE.Vector3());
+    // A tilted back or distant front sheet can intersect the device-axis box
+    // without reaching the display plane. Keep existing overlapping covers only
+    // when their depth really crosses the display.
+    const overlaps = !inter.isEmpty() && interArea > sArea * 0.6 && area < sArea * 1.8
+      && cover.min.z <= screenBox.max.z && cover.max.z >= screenBox.min.z;
+    if (overlaps) { m.visible = false; hidden.push(m); return; }
+    const overlapU = Math.max(0, Math.min(cover.max.x, screenBox.max.x) - Math.max(cover.min.x, screenBox.min.x));
+    const overlapV = Math.max(0, Math.min(cover.max.y, screenBox.max.y) - Math.max(cover.min.y, screenBox.min.y));
+    const flatFrontCover = cover.min.z >= screenBox.max.z - frontGap * 0.01
+      && cover.max.z <= screenBox.max.z + frontGap
+      && size.z < Math.min(screenSize.x, screenSize.y) * 0.02
+      && overlapU * overlapV > screenSize.x * screenSize.y * 0.6
+      && size.x * size.y < screenSize.x * screenSize.y * 1.8;
+    if (flatFrontCover) { m.visible = false; hidden.push(m); }
+  });
+  return hidden;
+}
+
+/** Authoring helpers with no visible or transmitted contribution must not set
+ * the model scale, attachment bounds or shadow silhouette. Keep live displays,
+ * mixed material slots and zero-opacity transmitting glass. Never mutate a
+ * source material: finish changes still need its original opacity/texture data.
+ */
+export function hideInvisibleModelMeshes(root: THREE.Object3D, screens: readonly THREE.Mesh[] = []): THREE.Mesh[] {
+  const live = new Set(screens), hidden: THREE.Mesh[] = [];
+  root.traverse(o => {
+    const mesh = o as THREE.Mesh;
+    // Object visibility also hides descendants; leave grouping meshes intact.
+    if (!mesh.isMesh || mesh.children.length || live.has(mesh)) return;
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    if (!materials.length || !materials.every(material => material.transparent && material.opacity === 0
+      && !((material as THREE.MeshPhysicalMaterial).transmission > 0))) return;
+    mesh.visible = false;
+    hidden.push(mesh);
   });
   return hidden;
 }
@@ -461,7 +532,8 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
   const root = useMemo(() => {
     const clone = gltf.scene.clone(true);
     clone.updateWorldMatrix(true, true);
-    const box = new THREE.Box3().setFromObject(clone);
+    hideInvisibleModelMeshes(clone, findScreenMeshes(clone, model.screenMesh));
+    const box = visibleBounds(clone, new THREE.Matrix4());
     const size = new THREE.Vector3();
     const center = new THREE.Vector3();
     box.getSize(size);
@@ -476,7 +548,7 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
     holder.add(yawGroup);
     holder.scale.setScalar(scale);
     return holder;
-  }, [gltf.scene, model.scale, model.size, spec.body.h, spec.body.w]);
+  }, [gltf.scene, model.scale, model.size, model.screenMesh, spec.body.h, spec.body.w]);
   const mounts = useMemo(() => ({ count: 0, root }), [root]);
   const compiling = useMemo(() => ({ tasks: new Set<Promise<unknown>>(), root }), [root]);
 

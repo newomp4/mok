@@ -1,7 +1,7 @@
 // Actual browser-engine render/export checks. Supply MOK_QA_NODE_MODULES if Playwright is external.
 // MOK_QA_ENGINES=chrome,firefox,webkit MOK_QA_URL=http://127.0.0.1:3000 node scripts/browser-matrix.mjs /tmp/mok-matrix
 import { createRequire } from 'node:module';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 const require = createRequire(process.env.MOK_QA_NODE_MODULES ? join(process.env.MOK_QA_NODE_MODULES, 'package.json') : import.meta.url);
 const { chromium, firefox, webkit } = require('playwright');
@@ -9,6 +9,8 @@ const destination = resolve(process.argv[2] ?? 'browser-matrix');
 await mkdir(destination, { recursive: true });
 const url = process.env.MOK_QA_URL ?? 'http://127.0.0.1:3000';
 const engines = (process.env.MOK_QA_ENGINES ?? 'chrome,firefox,webkit').split(',');
+const version = /APP_VERSION\s*=\s*"([^"]+)"/.exec(await readFile(new URL('../src/lib/version.ts', import.meta.url), 'utf8'))?.[1];
+if (!version) throw new Error('Cannot identify the current app version for the browser fixture');
 const results = [];
 for (const engine of engines) {
   const report = { engine, url, checks: [], errors: [], warnings: [], failedRequests: [] }; results.push(report);
@@ -22,7 +24,7 @@ for (const engine of engines) {
     page.on('pageerror', e => report.errors.push(String(e)));
     page.on('response', response => { if (response.status() >= 400) report.failedRequests.push({ url: response.url(), status: response.status() }); });
     page.on('console', m => { if (m.type() === 'error') report.errors.push(m.text()); if (m.type() === 'warning') report.warnings.push(m.text()); });
-    await page.addInitScript(() => { localStorage.setItem('mok:toured', '1'); localStorage.setItem('mok:seen-version', '0.11.0'); });
+    await page.addInitScript(version => { localStorage.setItem('mok:toured', '1'); localStorage.setItem('mok:seen-version', version); }, version);
     await page.goto(url, { waitUntil: 'networkidle' });
     await page.waitForFunction(() => window.__mok?.registry.state && window.__mok.registry.composer);
     report.capabilities = await page.evaluate(() => {

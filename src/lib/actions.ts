@@ -1,19 +1,21 @@
 "use client";
-import { useEditor, beginInteraction, endInteraction } from "@/store/editor";
+import { useEditor, beginInteraction, endInteraction, isShotScoped } from "@/store/editor";
 import { useUI, type PasteRequest } from "@/store/ui";
 import { CAMERA_PRESETS, MOTION_PRESETS, TEMPLATES, getScene } from "./presets";
-import type { AnimProp, FitMode, FocusArea, Keyframe, MediaRef, Project, Shot } from "./types";
+import { ANIM_LABELS, type AnimProp, type FitMode, type FocusArea, type Keyframe, type MediaRef, type Project, type Shot } from "./types";
 import { deleteMedia, importMedia, mediaType } from "./media";
 import { getDevice } from "./devices";
 import { getSampleScreen, sampleScreenBlob } from "./screens";
 import { contentDuration, locate, MAX_PROJECT_DURATION, sampleTrack, shotBase, shotStart } from "./animation";
 import { resolveScreenPadding, resolveShotView } from "./shotView";
 import { orientedScreenMillimeters, orientedScreenPixels } from "./orientation";
-import { createLogoShot, createProject, createShot, createTextShot, defaultLogoStyle, shotKind } from "./defaults";
+import { createLogoShot, createProject, createShot, createTextShot, shotKind } from "./defaults";
 import { deviceLayout } from "@/three/devices/layout";
 import { S } from "@/three/geometry";
 import { applyPastedMedia, type PasteMode } from "./paste";
 import { mapScreenFocusArea, type ScreenBounds } from "./screenLayout";
+import { canEditProject } from "./projectOwnership";
+import { captureEditIntent } from "./editIntent";
 
 export function applyCameraPreset(id: string) {
   const p = CAMERA_PRESETS.find((c) => c.id === id);
@@ -193,6 +195,7 @@ const POSE_PROPS: AnimProp[] = ["camera.x", "camera.y", "camera.z", "camera.fov"
  * moving the camera sets where the shot lands. The move is written as ordinary, editable keyframes.
  */
 export function addShotFromCamera(): string {
+  if (!canEditProject(useEditor.getState().project.id)) { useUI.getState().showToast("This project is read-only. Choose Edit here to add a shot."); return ""; }
   beginInteraction();
   try {
   const ed = useEditor.getState();
@@ -215,7 +218,8 @@ export function addShotFromCamera(): string {
     }
   });
   const p = useEditor.getState().project;
-  const shot = p.shots.find((s) => s.id === id)!;
+  const shot = p.shots.find((s) => s.id === id);
+  if (!shot) return "";
   // park exactly on the closing keyframe so moving the camera edits it rather than adding another
   useUI.getState().setTime(shotStart(p, id) + shot.duration);
   useUI.getState().showToast("Shot added — move the camera to set where it lands");
@@ -249,167 +253,190 @@ export function setShotMedia(shotId: string | null, media: MediaRef | null) {
 }
 
 export async function addAudioFile(file: File) {
-  const ui = useUI.getState();
-  const projectId = useEditor.getState().project.id;
-  try {
-    const ref = await importMedia(file);
-    if (useEditor.getState().project.id !== projectId) return;
-    if (ref.kind !== "audio") { ui.showToast("That file is not an audio file"); return; }
-    useEditor.getState().setAudio({ media: ref, start: 0, trimStart: 0, volume: 1, fadeIn: 0, fadeOut: 0 });
-    ui.showToast(`Audio added · ${ref.name}`);
-  } catch (e) {
-    ui.showToast(`Could not import audio: ${(e as Error).message}`);
-  }
+  if (!mediaType(file).startsWith("audio/")) { useUI.getState().showToast("That file is not an audio file"); return; }
+  await importFilesToShot([file]);
 }
 
 export async function importLogo(file: File, shotId: string) {
-  const ui = useUI.getState();
-  const projectId = useEditor.getState().project.id;
-  try {
-    const ref = await importMedia(file);
-    if (useEditor.getState().project.id !== projectId) return;
-    if (ref.kind !== "image") { ui.showToast("Logos must be images (PNG or SVG)"); return; }
-    useEditor.getState().updateShot(shotId, (s) => { if (!s.logo) s.logo = defaultLogoStyle(); s.logo.media = ref; });
-  } catch (e) {
-    ui.showToast(`Could not import logo: ${(e as Error).message}`);
-  }
+  if (!mediaType(file).startsWith("image/")) { useUI.getState().showToast("Logos must be images (PNG or SVG)"); return; }
+  const shot = useEditor.getState().project.shots.find((s) => s.id === shotId);
+  if (!shot || shotKind(shot) !== "logo") return;
+  await importFilesToShot([file], shotId);
 }
 
 export async function importFilesToShot(files: File[], shotId?: string | null): Promise<MediaRef | null> {
   if (!files.length) return null;
-  const ui = useUI.getState();
-  const projectId = useEditor.getState().project.id;
-  const audioFile = files.find((file) => mediaType(file).startsWith("audio/"));
-  if (audioFile) {
-    await addAudioFile(audioFile);
-    if (useEditor.getState().project.id !== projectId) return null;
-    files = files.filter((file) => !mediaType(file).startsWith("audio/"));
-    if (!files.length) return null;
-  }
-  // several files at once become a sequence: the first replaces the target, the rest follow it
-  if (files.length > 1) {
-    const first = await importFilesToShot([files[0]], shotId);
-    if (useEditor.getState().project.id !== projectId) return null;
-    const ed = useEditor.getState();
-    let after = shotId ?? ui.activeShotId ?? ed.project.shots[0]?.id ?? null;
-    for (const f of files.slice(1)) {
-      if (useEditor.getState().project.id !== projectId) return first;
-      const id = ed.addShot("media", after ?? undefined);
-      await importFilesToShot([f], id);
-      after = id;
-    }
-    ui.showToast(`${files.length} files added as ${files.length} shots`);
-    return first;
-  }
-  const targetId = shotId ?? ui.activeShotId ?? useEditor.getState().project.shots[0]?.id;
-  const target = useEditor.getState().project.shots.find((s) => s.id === targetId);
-  if (!target) return null;
-  if (target && shotKind(target) === "logo") { await importLogo(files[0], target.id); return null; }
-  if (target && shotKind(target) === "text") { ui.showToast("Text shots have no media. Select a media shot or add one with +."); return null; }
+  const ui = useUI.getState(), original = useEditor.getState().project;
+  const targetId = shotId ?? ui.activeShotId ?? original.shots[0]?.id;
+  const target = original.shots.find((s) => s.id === targetId);
+  const hasVisuals = files.some((file) => !mediaType(file).startsWith("audio/"));
+  const originalSource = (shotKind(target) === "logo" ? target?.logo?.media : target?.media)?.id;
+  const intent = captureEditIntent((p) => {
+    if (!hasVisuals) return p.audio?.media.id === original.audio?.media.id;
+    const current = p.shots.find((s) => s.id === targetId);
+    return !!current && shotKind(current) === shotKind(target) && (shotKind(current) === "logo" ? current.logo?.media : current.media)?.id === originalSource;
+  });
+  const refs: MediaRef[] = [], failures: string[] = [];
+  let committed = false;
   try {
-    const ref = await importMedia(files[0]);
-    if (useEditor.getState().project.id !== projectId || !useEditor.getState().project.shots.some((s) => s.id === target.id && s.media?.id === target.media?.id)) return null;
-    if (ref.kind === "audio") {
-      useEditor.getState().setAudio({ media: ref, start: 0, trimStart: 0, volume: 1, fadeIn: 0, fadeOut: 0 });
-      ui.showToast(`Audio added · ${ref.name}`);
-      return null;
+    if (!intent.current()) return null;
+    // Decode first. A failed later source must never leave an inherited duplicate in the timeline.
+    for (const file of files) {
+      let ref: MediaRef | null = null;
+      try {
+        ref = await importMedia(file);
+        if (!intent.current()) { await deleteMedia(ref.id); return null; }
+        if (ref.kind === "audio" && refs.some((r) => r.kind === "audio")) throw new Error("only one soundtrack can be added at a time");
+        if (ref.kind !== "audio" && (!target || shotKind(target) === "text")) throw new Error("select a media or logo shot first");
+        if (ref.kind !== "audio" && shotKind(target) === "logo" && ref.kind !== "image") throw new Error("logos must be images");
+        refs.push(ref);
+      } catch (error) {
+        if (ref) await deleteMedia(ref.id);
+        failures.push(`${file.name}: ${(error as Error).message}`);
+      }
+      if (!intent.current()) return null;
     }
-    const previous = target?.media ?? null;
-    setShotMedia(target.id, ref);
-    if (ref.kind === "video") {
+    if (!refs.length) { ui.showToast(`No files added · ${failures.join("; ")}`); return null; }
+    const visuals = refs.filter((r) => r.kind !== "audio"), first = visuals[0] ?? null;
+    const before = useEditor.getState().project;
+    const oldIds = new Set(before.shots.map((s) => s.id));
+    beginInteraction();
+    try {
       useEditor.getState().update((p) => {
-        const shot = p.shots.find((s) => s.id === target.id);
-        if (shot && ref.duration && ref.duration > 0.5) shot.duration = Math.min(30, Math.round(ref.duration * 10) / 10);
+        applyPastedMedia(p, refs, "replace", targetId ?? null);
+        const replaced = p.shots.find((s) => s.id === targetId);
+        if (first && replaced && shotKind(replaced) === "media") {
+          if (originalSource !== first.id) { delete replaced.trimStart; delete replaced.speed; }
+          if (first.kind === "video" && first.duration && first.duration > .5) replaced.duration = Math.min(30, Math.round(first.duration * 10) / 10);
+        }
+        // New shots start where the preceding media shot's animation ends, just like Add media.
+        for (const [i, shot] of p.shots.entries()) if (!oldIds.has(shot.id)) {
+          const source = [...p.shots.slice(0, i)].reverse().find((s) => shotKind(s) === "media");
+          if (!source) continue;
+          for (const key of ["fit", "device", "orientation", "finish", "scene", "lighting", "blurMode", "bokeh", "notch", "screenPadding", "effects"] as const) {
+            if (source[key] !== undefined) Object.assign(shot, { [key]: structuredClone(source[key]) });
+          }
+          shot.pose = Object.fromEntries((Object.keys(ANIM_LABELS) as AnimProp[]).filter(isShotScoped).map((prop) => [prop, source.keyframes[prop]?.length ? sampleTrack(source.keyframes[prop]!, source.duration) : shotBase(p, source, prop)]));
+        }
       });
-      // a video is a timeline job, so show the timeline rather than leaving it collapsed
-      if (!ui.timelineOpen) ui.setTimelineOpen(true);
-    }
-    const label = `${ref.kind === "video" ? "Video" : "Image"} added · ${ref.width} × ${ref.height}`;
-    if (previous && target) {
-      // the shot already had media: offer to keep it and put the new file on a new shot instead
-      ui.showToast(`${label} · replaced ${previous.name}`, {
+    } finally { endInteraction(); }
+    committed = useEditor.getState().project !== before;
+    if (!committed) return null;
+    const p = useEditor.getState().project;
+    const added = p.shots.filter((s) => !oldIds.has(s.id));
+    if (added.length) { const last = added[added.length - 1]; useUI.setState({ activeShotId: last.id, selectedShots: [last.id], selectedKeys: [], playing: false, time: shotStart(p, last.id) }); }
+    if (refs.some((r) => r.kind === "video" || r.kind === "audio")) ui.setTimelineOpen(true);
+    if (files.length > 1 || failures.length) {
+      ui.showToast(`${refs.length} file${refs.length === 1 ? "" : "s"} added${failures.length ? ` · ${failures.length} skipped: ${failures.join("; ")}` : ""}`);
+    } else if (!first) ui.showToast(`Audio added · ${refs[0].name}`);
+    else if (target && shotKind(target) === "media" && target.media) {
+      const previous = target.media;
+      ui.showToast(`${first.kind === "video" ? "Video" : "Image"} added · replaced ${previous.name}`, {
         label: "Add as new shot instead",
         onClick: () => {
           const ed = useEditor.getState();
-          if (ed.project.id !== projectId || ed.project.shots.find((s) => s.id === target.id)?.media?.id !== ref.id) return;
+          if (ed.project.id !== original.id || ed.project.shots.find((s) => s.id === target.id)?.media?.id !== first.id || !canEditProject(original.id)) return;
           beginInteraction();
           try {
-          ed.updateShot(target.id, (s) => { s.media = previous; s.duration = target.duration; s.trimStart = target.trimStart; s.speed = target.speed; });
-          const id = ed.addShot("media", target.id);
-          ed.updateShot(id, (s) => { s.media = ref; if (ref.kind === "video" && ref.duration && ref.duration > 0.5) s.duration = Math.min(30, Math.round(ref.duration * 10) / 10); });
+            ed.updateShot(target.id, (s) => { s.media = previous; s.duration = target.duration; s.trimStart = target.trimStart; s.speed = target.speed; });
+            const id = ed.addShot("media", target.id);
+            ed.updateShot(id, (s) => { s.media = first; if (first.kind === "video" && first.duration && first.duration > .5) s.duration = Math.min(30, Math.round(first.duration * 10) / 10); });
           } finally { endInteraction(); }
         },
       });
-    } else ui.showToast(label);
-    return ref;
-  } catch (e) {
-    ui.showToast(`Could not import file: ${(e as Error).message}`);
-    return null;
-  }
+    } else ui.showToast(`${first.kind === "video" ? "Video" : "Image"} added · ${first.width} × ${first.height}`);
+    return first;
+  } catch (error) { ui.showToast(`Could not import file: ${(error as Error).message}`); return null; }
+  finally { intent.dispose(); if (!committed) await Promise.all(refs.map((ref) => deleteMedia(ref.id))); }
 }
 
 export async function importBackgroundImage(file: File) {
   const ui = useUI.getState();
-  const projectId = useEditor.getState().project.id;
+  const original = useEditor.getState().project;
+  const target = JSON.stringify({ scene: original.scene.preset, background: original.scene.background });
+  const intent = captureEditIntent((p) => JSON.stringify({ scene: p.scene.preset, background: p.scene.background }) === target);
+  let ref: MediaRef | null = null, committed = false;
   try {
-    const ref = await importMedia(file);
-    if (useEditor.getState().project.id !== projectId) return;
+    if (!intent.current()) return;
+    ref = await importMedia(file);
+    if (!intent.current()) return;
     if (ref.kind !== "image") { ui.showToast("Backgrounds must be images"); return; }
+    const before = useEditor.getState().project;
     useEditor.getState().update((p) => {
       p.scene.background.type = "image";
       p.scene.background.image = ref;
     });
+    committed = useEditor.getState().project !== before;
   } catch (e) {
-    ui.showToast(`Could not import image: ${(e as Error).message}`);
-  }
+    if (intent.current()) ui.showToast(`Could not import image: ${(e as Error).message}`);
+  } finally { intent.dispose(); if (ref && !committed) await deleteMedia(ref.id); }
 }
 
 /** Put one of the built-in sample screens on a shot, rendered at the device's native resolution. */
 export async function applySampleScreen(id: string, shotId?: string | null) {
   const ui = useUI.getState();
   const ed = useEditor.getState();
-  const projectId = ed.project.id;
   const screen = getSampleScreen(id);
   if (!screen) return;
   const targetId = shotId ?? ui.activeShotId ?? ed.project.shots[0]?.id;
   const shot = ed.project.shots.find((x) => x.id === targetId);
   if (!shot || shotKind(shot) !== "media") return;
-  const spec = getDevice(shot.device ?? ed.project.mockup.device);
-  // The samples are laid out for a phone- or laptop-shaped screen. A device close to those
-  // proportions gets the sample at its native resolution so it fits the glass exactly; anything
-  // squarer — a watch, a portrait tablet — would crop the layout, so it is drawn at the proportions
-  // it was designed for and the shot's fit mode places it.
-  const landscape = screen.shape === "landscape";
-  const design = landscape ? 1.6 : 0.46;
-  let [w, h] = orientedScreenPixels(spec, resolveShotView(ed.project, shot).orientation);
-  if (spec.family === "flat") [w, h] = landscape ? [1600, 1000] : [1206, 2622];
-  else if (Math.abs(w / h - design) / design > 0.15) {
-    const long = Math.max(w, h);
-    [w, h] = landscape ? [long, Math.round(long / design)] : [Math.round(long * design), long];
-  }
-  // cap the long edge but keep the aspect, or the sample would be stretched on the screen
-  const cap = 2560;
-  const scale = Math.min(1, cap / Math.max(w, h));
-  const blob = await sampleScreenBlob(id, Math.round(w * scale), Math.round(h * scale));
-  if (!blob) return;
-  const file = new File([blob], `${screen.name}.png`, { type: "image/png" });
-  const ref = await importMedia(file);
-  if (useEditor.getState().project.id !== projectId || !useEditor.getState().project.shots.some((s) => s.id === shot.id && s.media?.id === shot.media?.id)) return;
-  setShotMedia(shot.id, ref);
-  ui.showToast(`${screen.name} sample screen added`);
+  const view = resolveShotView(ed.project, shot);
+  const intent = captureEditIntent((p) => {
+    const current = p.shots.find((s) => s.id === shot.id);
+    if (!current || shotKind(current) !== "media" || current.media?.id !== shot.media?.id) return false;
+    const currentView = resolveShotView(p, current);
+    return currentView.device === view.device && currentView.orientation === view.orientation;
+  });
+  let ref: MediaRef | null = null, committed = false;
+  try {
+    if (!intent.current()) return;
+    const spec = getDevice(shot.device ?? ed.project.mockup.device);
+    // The samples are laid out for a phone- or laptop-shaped screen. A device close to those
+    // proportions gets the sample at its native resolution so it fits the glass exactly; anything
+    // squarer — a watch, a portrait tablet — would crop the layout, so it is drawn at the proportions
+    // it was designed for and the shot's fit mode places it.
+    const landscape = screen.shape === "landscape";
+    const design = landscape ? 1.6 : 0.46;
+    let [w, h] = orientedScreenPixels(spec, resolveShotView(ed.project, shot).orientation);
+    if (spec.family === "flat") [w, h] = landscape ? [1600, 1000] : [1206, 2622];
+    else if (Math.abs(w / h - design) / design > 0.15) {
+      const long = Math.max(w, h);
+      [w, h] = landscape ? [long, Math.round(long / design)] : [Math.round(long * design), long];
+    }
+    // cap the long edge but keep the aspect, or the sample would be stretched on the screen
+    const cap = 2560;
+    const scale = Math.min(1, cap / Math.max(w, h));
+    const blob = await sampleScreenBlob(id, Math.round(w * scale), Math.round(h * scale));
+    if (!blob || !intent.current()) return;
+    const file = new File([blob], `${screen.name}.png`, { type: "image/png" });
+    ref = await importMedia(file);
+    if (!intent.current()) return;
+    const before = useEditor.getState().project;
+    setShotMedia(shot.id, ref);
+    committed = useEditor.getState().project !== before;
+    if (committed) ui.showToast(`${screen.name} sample screen added`);
+  } catch (e) {
+    if (intent.current()) ui.showToast(`Could not add sample screen: ${(e as Error).message}`);
+  } finally { intent.dispose(); if (ref && !committed) await deleteMedia(ref.id); }
 }
 
 export async function importScreenBackground(file: File) {
   const ui = useUI.getState();
-  const projectId = useEditor.getState().project.id;
+  const target = JSON.stringify(useEditor.getState().project.screen.bg);
+  const intent = captureEditIntent((p) => JSON.stringify(p.screen.bg) === target);
+  let ref: MediaRef | null = null, committed = false;
   try {
-    const ref = await importMedia(file);
-    if (useEditor.getState().project.id !== projectId) return;
+    if (!intent.current()) return;
+    ref = await importMedia(file);
+    if (!intent.current()) return;
     if (ref.kind !== "image") { ui.showToast("Screen backgrounds must be images"); return; }
+    const before = useEditor.getState().project;
     useEditor.getState().update((p) => { p.screen.bg = { type: "image", color: p.screen.bg?.color ?? "#000000", image: ref }; });
+    committed = useEditor.getState().project !== before;
   } catch (e) {
-    ui.showToast(`Could not import image: ${(e as Error).message}`);
-  }
+    if (intent.current()) ui.showToast(`Could not import image: ${(e as Error).message}`);
+  } finally { intent.dispose(); if (ref && !committed) await deleteMedia(ref.id); }
 }
 
 /** Map a source-image region to the visible device screen using the same fit as ScreenSurface. */
@@ -522,13 +549,14 @@ export async function executePaste(request: PasteRequest, mode: Exclude<PasteMod
   const intent = ++pasteGeneration;
   const ui = useUI.getState();
   ui.setPasteRequest(null);
+  const edit = captureEditIntent();
   const current = () => {
     const p = useEditor.getState().project;
     const shot = p.shots.find((s) => s.id === request.shotId);
     const mediaId = (shotKind(shot) === "logo" ? shot?.logo?.media?.id : shot?.media?.id) ?? null;
-    return intent === pasteGeneration && p.id === request.projectId && (!request.shotId || !!shot) && (mode !== "replace" || mediaId === request.mediaId);
+    return edit.current() && intent === pasteGeneration && p.id === request.projectId && (!request.shotId || !!shot) && (mode !== "replace" || mediaId === request.mediaId);
   };
-  if (!current()) { ui.showToast("The paste target changed. Paste again to choose its destination."); return; }
+  if (!current()) { edit.dispose(); ui.showToast("The paste target changed. Paste again to choose its destination."); return; }
   const refs: MediaRef[] = [];
   let committed = false;
   try {
@@ -537,14 +565,16 @@ export async function executePaste(request: PasteRequest, mode: Exclude<PasteMod
       if (!current()) { ui.showToast("The paste target changed. Paste again to choose its destination."); return; }
     }
     let first: string | null = null;
+    const before = useEditor.getState().project;
     beginInteraction();
     try { useEditor.getState().update((p) => { first = applyPastedMedia(p, refs, mode, request.shotId); }); }
     finally { endInteraction(); }
-    committed = true;
+    committed = useEditor.getState().project !== before;
+    if (!committed) return;
     const p = useEditor.getState().project;
     if (first) useUI.setState({ activeShotId: first, selectedShots: [first], selectedKeys: [], playing: false, time: shotStart(p, first) });
     if (refs.some((r) => r.kind === "video" || r.kind === "audio")) ui.setTimelineOpen(true);
     ui.showToast(mode === "replace" ? "Pasted media · existing clip timing preserved" : "Pasted media as new shots");
   } catch (e) { ui.showToast(`Could not paste media: ${(e as Error).message}`); }
-  finally { if (!committed) await Promise.all(refs.map((ref) => deleteMedia(ref.id))); }
+  finally { edit.dispose(); if (!committed) await Promise.all(refs.map((ref) => deleteMedia(ref.id))); }
 }

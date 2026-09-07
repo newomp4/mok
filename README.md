@@ -90,9 +90,9 @@ Open http://localhost:3000. Production build: `pnpm build && pnpm start`. Deploy
 
 ## Latest changes
 
-Version 0.11.0 adds geometry-based occlusion to MacBook screen light, calmer MacBook 14 enclosure grain, optional shadows in transparent exports, cross-tab editing safeguards, cancel-safe logo insertion and one-step keyframe-column deletion. Browser export options reflect actual encoding support; Safari offers PNG/JPEG when WebP encoding is unavailable.
+Version 0.12.0 adds height-aware contact shadows, clearer imported display glass, seamless room floors and captions that can sit in front of or behind a device. It also repairs failed-upload insertion, orientation-aware cropping, asynchronous editing, trimmed fades and export budgeting/seeking.
 
-Run `npm test`, `npm run typecheck` and `npm run lint` for application checks. Browser, visual and workflow verification details are in [the 0.11.0 release report](docs/research/release-0.11.0.md). MCP setup and tests are separate in [automation/README.md](automation/README.md).
+Run `npm test`, `npm run typecheck` and `npm run lint` for application checks. Browser, visual and workflow verification details are in [the 0.12.0 release report](docs/research/release-0.12.0.md). MCP setup and tests are separate in [automation/README.md](automation/README.md).
 
 ## How it works
 

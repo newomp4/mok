@@ -7,6 +7,7 @@ import { prepareAudioTrack } from "./audioEncode";
 import { hasAudio } from "@/lib/audioPlan";
 import { waitForGpuPreparation } from "@/three/gpuPreparation";
 import { ExportVideoDecoder } from "./videoDecoder";
+import { seekVideoElement } from "./videoSeek";
 import { createExportOutput, type ExportOutput } from "./output";
 import { availableSampleCounts, deviceMemoryGB, planRenderQuality } from "@/three/qualityPlan";
 import { anim } from "@/three/anim";
@@ -14,7 +15,8 @@ import { nextFrame, useRenderFlags, viewport } from "@/three/registry";
 import { useEditor } from "@/store/editor";
 import { useUI } from "@/store/ui";
 import { locate, totalDuration, MAX_PROJECT_DURATION } from "@/lib/animation";
-import { resolveShotView, resolveShotEffects } from "@/lib/shotView";
+import { resolveShotView } from "@/lib/shotView";
+import { exportQualityRequirements } from "./quality";
 import { getMedia, ensureMedia } from "@/lib/media";
 import { ensureFont } from "@/lib/fonts";
 import { exportAssets, exportSampleTime, type ExportScope } from "@/export/assets";
@@ -45,29 +47,6 @@ function shotViewAt(t: number): string {
   return `${shot?.id ?? ""}|${v.device}|${v.orientation}|${v.finish}|${v.scene}|${v.lighting}|${v.blurMode}|${v.bokeh}|${v.notch}`;
 }
 
-/** Resolves true when the element reports the seek landed, false when it ran out of time or the export was cancelled. */
-function awaitSeek(v: HTMLVideoElement, target: number, timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
-  return new Promise<boolean>((resolve) => {
-    let done = false;
-    let timer = 0;
-    const finish = (ok: boolean) => {
-      if (done) return;
-      done = true;
-      window.clearTimeout(timer);
-      v.removeEventListener("seeked", onSeeked);
-      signal?.removeEventListener("abort", onAbort);
-      resolve(ok);
-    };
-    const onSeeked = () => finish(true);
-    const onAbort = () => finish(false);
-    v.addEventListener("seeked", onSeeked);
-    signal?.addEventListener("abort", onAbort);
-    timer = window.setTimeout(() => finish(false), timeoutMs);
-    if (signal?.aborted) { finish(false); return; }
-    try { v.currentTime = target; } catch { finish(false); }
-  });
-}
-
 async function seekVideoForTime(t: number, decoder: ExportVideoDecoder, signal?: AbortSignal) {
   const p = useEditor.getState().project;
   const loc = locate(p, t);
@@ -75,26 +54,12 @@ async function seekVideoForTime(t: number, decoder: ExportVideoDecoder, signal?:
   const m = loc.shot?.media;
   if (!m || m.kind !== "video") { decoder.clear(); return; }
   const lm = getMedia(m.id);
-  if (!lm) return;
+  if (!lm) { decoder.clear(); throw new Error(`Missing video source: ${m.name}. Re-add the file before exporting.`); }
   const v = lm.element as HTMLVideoElement;
   if (!v.paused) v.pause();
   const target = ((loc.shot?.trimStart ?? 0) + loc.localT * (loc.shot?.speed ?? 1)) % (v.duration || 1);
   if (await decoder.prepare(lm, target, signal)) return;
-  // Exact timestamp requests replace the old 60 fps frame-window guess in the fallback too.
-  if (Math.abs(target - v.currentTime) < 1e-5 && !v.seeking && v.readyState >= 2) return;
-  // carrying on after a seek that never lands would encode whatever frame the element still holds,
-  // so try once more and then stop the export rather than let a stale frame through. The per-attempt
-  // budget stays short because this runs for every motion-blur sample: an element that has wedged
-  // has to surface as an error in seconds, not hold the whole export for minutes.
-  for (let attempt = 0; attempt < 2; attempt++) {
-    if (signal?.aborted) throw new DOMException("Export cancelled", "AbortError");
-    if (await awaitSeek(v, target, 1500, signal)) { return; }
-    // assigning currentTime moves the element's reported position immediately, so a wedged seek
-    // still reads back as the target; only the element's own state says whether it finished
-    if (!v.seeking && v.readyState >= 2) { return; }
-  }
-  if (signal?.aborted) throw new DOMException("Export cancelled", "AbortError");
-  throw new Error("A video shot took too long to seek. Try exporting again.");
+  await seekVideoElement(v, target, signal);
 }
 
 /**
@@ -142,9 +107,9 @@ export async function withExportSession<T>(opts: ExportSessionOptions, fn: (s: E
   const maxSize = st.gl.capabilities.maxTextureSize;
   if (opts.width > maxSize || opts.height > maxSize) throw new Error(`This device supports exports up to ${maxSize} pixels per side`);
   const project = useEditor.getState().project;
-  const assets = exportAssets(project, opts.scope ?? { type: "video", start: 0, end: totalDuration(project) }, opts.transparent);
-  const views = assets.shots.length ? assets.shots : [null];
-  const qualityPlan = planRenderQuality({ width: opts.width, height: opts.height, maxTextureSize: maxSize, maxSamples: st.gl.capabilities.maxSamples, supportedSamples: st.gl.getContext ? availableSampleCounts(st.gl.getContext() as WebGL2RenderingContext) : undefined, deviceMemoryGB: deviceMemoryGB(), motionSamples: opts.motionSamples, detailShadows: (project.scene.detailShadows ?? 0) > 0, effectCount: Math.max(...views.map((shot) => resolveShotEffects(project, shot).filter((effect) => effect.enabled).length)), depth: views.some((shot) => resolveShotView(project, shot).blurMode === "depth") });
+  const scope = opts.scope ?? { type: "video", start: 0, end: totalDuration(project) };
+  const assets = exportAssets(project, scope, opts.transparent);
+  const qualityPlan = planRenderQuality({ ...exportQualityRequirements(project, scope), width: opts.width, height: opts.height, maxTextureSize: maxSize, maxSamples: st.gl.capabilities.maxSamples, supportedSamples: st.gl.getContext ? availableSampleCounts(st.gl.getContext() as WebGL2RenderingContext) : undefined, deviceMemoryGB: deviceMemoryGB(), motionSamples: opts.motionSamples });
   if (!qualityPlan.supported) throw new Error(qualityPlan.reason);
   exportActive = true;
   const decoder = new ExportVideoDecoder({ onFallback: (name) => useUI.getState().showToast(`Using browser video seeking for ${name}; timestamp decoding is unavailable for this source.`) });

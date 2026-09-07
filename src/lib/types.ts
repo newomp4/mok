@@ -95,6 +95,18 @@ export interface TextStyle {
   /** em units */
   letterSpacing: number;
 }
+export interface CaptionStyle {
+  enabled: boolean;
+  text: TextStyle;
+  /** Offset from frame centre, as a fraction of frame width/height. Positive y moves up. */
+  x: number;
+  y: number;
+  layer: "front" | "behind";
+  enter?: EnterExit;
+  exit?: EnterExit;
+  /** Preserve the original animation phase when a caption's media shot is split or head-trimmed. */
+  timing?: { offset: number; duration: number };
+}
 export type LogoEffect = "none" | "liquidMetal" | "gemSmoke" | "heatmap";
 export interface LogoStyle {
   media: MediaRef | null;
@@ -121,6 +133,8 @@ export interface Shot {
   /** media (default), text card or logo card */
   kind?: ShotKind;
   text?: TextStyle;
+  /** One caption overlapping a media shot; independent text tracks are not implied. */
+  caption?: CaptionStyle;
   logo?: LogoStyle;
   enter?: EnterExit;
   exit?: EnterExit;

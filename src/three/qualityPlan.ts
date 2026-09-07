@@ -82,7 +82,9 @@ export function planRenderQuality(options: QualityPlanOptions): RenderQualityPla
     const detail = options.detailShadows ? pixels * 8 + 1024 * 1024 * 8 : 0;
     const accumulation = motion ? pixels * 8 : 0;
     const screen = Math.min(screenMaxPixels, screenMaxEdge ** 2, Math.max(pixels, 2_000_000)) * 4 * 4 / 3;
-    const auxiliary = 112 * MiB * auxiliaryScale ** 2 + Math.min(pixels * 0.85 ** 2, 4_000_000) * 8 * reflectionSamples * auxiliaryScale ** 2;
+    // Includes two half-float contact targets (one with depth), so faint height bands do not
+    // quantize away while blurring. The blur-only target has no depth attachment.
+    const auxiliary = 128 * MiB * auxiliaryScale ** 2 + Math.min(pixels * 0.85 ** 2, 4_000_000) * 8 * reflectionSamples * auxiliaryScale ** 2;
     const environment = (hdrTier === "2k" ? 64 : 16) * MiB; // includes generation scratch
     const estimatedBytes = Math.ceil(composer + effectTargets + detail + accumulation + screen + auxiliary + environment + assets);
     const supported = valid && estimatedBytes <= budgetBytes;
