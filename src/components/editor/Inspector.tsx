@@ -4,7 +4,7 @@ import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { useEditor, redo, undo, beginInteraction, endInteraction, isShotScoped } from "@/store/editor";
 import { useUI } from "@/store/ui";
-import { ANIM_LABELS, ANIM_PROPS, type AnimProp, type BlurMode, type EffectId, type EnterExit, type EnterExitEffect, type FitMode, type LogoEffect, type Shot, type TextStyle } from "@/lib/types";
+import { ANIM_LABELS, ANIM_PROPS, type AnimProp, type BlurMode, type EffectId, type EffectInstance, type EnterExit, type EnterExitEffect, type FitMode, type LogoEffect, type Shot, type TextStyle } from "@/lib/types";
 import { hasKeyframeAt, locate, sampleTrack, getBase, shotBase } from "@/lib/animation";
 import { DEVICES, FAMILY_LABELS, deviceGroup, getDevice, getFinish, type DeviceBrand, type DeviceFamily } from "@/lib/devices";
 import { BG_PRESETS, CAMERA_PRESETS, EFFECT_DEFS, LIGHTINGS, SCENES, getBgPreset, getEffectDef, getScene } from "@/lib/presets";
@@ -15,8 +15,8 @@ import { cn } from "@/lib/cn";
 import { useMediaResource, ACCEPTED_TYPES, ACCEPTED_IMAGES } from "@/lib/media";
 import { MediaRecovery } from "./MediaRecovery";
 import { useModelBounds } from "@/three/registry";
-import { useActiveShot, useRenderShot } from "@/three/Device";
-import { resolveShotView } from "@/lib/shotView";
+import { useRenderShot } from "@/three/Device";
+import { editShotEffects, resolveShotEffects, resolveScreenPadding, resolveShotView } from "@/lib/shotView";
 import { deviceOrientation, effectiveKeyboardCase, keyboardCaseAvailable, nativeOrientation, orientedScreenPixels, supportsOrientation } from "@/lib/orientation";
 import type { DeviceOrientation } from "@/lib/types";
 import { applyCameraPreset, importBackgroundImage, importFilesToShot, importLogo, importScreenBackground, resetBlur, resetCamera, setShotMedia, applySampleScreen } from "@/lib/actions";
@@ -114,7 +114,7 @@ const BLUR_POSE: AnimProp[] = ["blur.strength", "blur.focusSize", "blur.falloff"
 
 /* ---------- Shot (source) ---------- */
 function ShotSection() {
-  const shot = useActiveShot();
+  const shot = useRenderShot();
   const [open, setOpen] = useState(true);
   const kind = shotKind(shot);
   const title = kind === "text" ? "Text" : kind === "logo" ? "Logo" : "Source";
@@ -170,6 +170,13 @@ function MediaEditor({ shot }: { shot: Shot | null }) {
         <>
           <NumberRow label={<span className="flex items-center gap-1.5"><Icon name="gauge" size={11} className="text-muted" />Speed</span>} value={shot.speed ?? 1} min={0.25} max={4} step={0.05} unit="×" onChange={(v) => updateShot(shot.id, (s) => { s.speed = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
           <NumberRow label={<span className="flex items-center gap-1.5"><Icon name="stopwatch" size={11} className="text-muted" />Trim start</span>} value={shot.trimStart ?? 0} min={0} max={Math.max(0, (media.ref.duration ?? 0) - 0.5)} step={0.1} unit="s" onChange={(v) => updateShot(shot.id, (s) => { s.trimStart = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+          <ToggleRow label="Source audio" checked={shot.audio?.enabled ?? false} onChange={(enabled) => updateShot(shot.id, (s) => { s.audio = { volume: 1, ...s.audio, enabled }; })} />
+          {shot.audio?.enabled && <>
+            <NumberRow label="Source volume" value={(shot.audio.volume ?? 1) * 100} min={0} max={100} step={1} unit="%" onChange={(volume) => updateShot(shot.id, (s) => { s.audio = { enabled: true, ...s.audio, volume: volume / 100 }; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+            {(["fadeIn", "fadeOut"] as const).map((field) => <NumberRow key={field} label={field === "fadeIn" ? "Audio fade in" : "Audio fade out"} value={shot.audio?.[field] ?? 0} min={0} max={shot.audio?.envelope?.duration ?? shot.duration} step={0.1} unit="s" onChange={(duration) => updateShot(shot.id, (s) => { s.audio = { enabled: true, volume: 1, ...s.audio, [field]: Math.min(s.duration, duration) }; delete s.audio.envelope; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />)}
+            <p className="label-sm text-muted">Speed changes pitch. Silent sources stay silent.{shot.audio.envelope ? " Split clips retain the original fade timing until you edit a fade." : ""}</p>
+          </>}
+
         </>
       )}
       <Button variant="ghost" size="sm" icon="copy" onClick={() => update((p) => { for (const s of p.shots) if (shotKind(s) === "media") s.media = shot?.media ?? null; })} className="justify-start text-muted">Use for all shots</Button>
@@ -382,13 +389,15 @@ function LogoEditor({ shot }: { shot: Shot }) {
 
 /* ---------- Scene ---------- */
 function SceneSection() {
+  const shot = useRenderShot();
+  const view = useEditor(useShallow((s) => resolveShotView(s.project, shot)));
   const scene = useEditor((s) => s.project.scene);
   const update = useEditor((s) => s.update);
   const setPicker = useUI((s) => s.setPicker);
   const picker = useUI((s) => s.picker);
   const [open, setOpen] = useState(true);
-  const preset = getScene(scene.preset);
-  const custom = scene.preset === "custom";
+  const preset = getScene(view.scene);
+  const custom = view.scene === "custom";
   const bg = scene.background;
   if (picker === "scene") return <ScenePicker />;
   return (
@@ -416,6 +425,8 @@ function SceneSection() {
       <AnimRow prop="scene.lightRotY" label="Light rotation Y" min={0} max={360} step={1} />
       <AnimRow prop="scene.lightIntensity" label="Light intensity" min={0} max={3} step={0.01} />
       {custom && <ToggleRow label="Contact shadow" checked={scene.contactShadow} onChange={(v) => update((p) => { p.scene.contactShadow = v; })} />}
+      <NumberRow label="Detail shadows" value={scene.detailShadows ?? 0} min={0} max={1} step={0.05} onChange={(v) => update((p) => { p.scene.detailShadows = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+      <p className="label-sm text-muted">Adds subtle shading in small gaps. Screen content stays unchanged.</p>
       {/* the lit scenes cast their own shadows, so softness and opacity belong to them too */}
       {(!custom || scene.contactShadow) && (
         <>
@@ -618,6 +629,7 @@ function MockupSection() {
       )}
       <div className="label-sm px-0.5 pt-2 text-muted">Screen</div>
       {spec.family === "phone" && <ToggleRow label="Status bar" checked={!!screen.statusBar} onChange={(v) => update((p) => { p.screen.statusBar = v; })} hint="9:41" />}
+      <ScreenPaddingControl shot={renderShot} />
       <AnimRow prop="screen.brightness" label="Brightness" min={0} max={2} step={0.01} />
       {spec.family === "laptop" && <>
         <NumberRow label="Screen lighting" value={screen.spill ?? 1} min={0} max={2} step={0.05} onChange={(v) => update((p) => { p.screen.spill = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
@@ -948,18 +960,35 @@ function BlurSection() {
   );
 }
 
+function ScreenPaddingControl({ shot }: { shot: Shot | null }) {
+  const [scope, setScope] = useState<"shot" | "project">("shot");
+  const project = useEditor((s) => s.project);
+  const update = useEditor((s) => s.update);
+  const forShot = scope === "shot" && !!shot;
+  const value = forShot ? resolveScreenPadding(project, shot) : project.screen.padding ?? 0;
+  return <div className="flex flex-col gap-1.5">
+    <SelectRow label="Padding scope" value={forShot ? "shot" : "project"} onChange={setScope} options={[...(shot ? [{ value: "shot" as const, label: "This shot" }] : []), { value: "project", label: "Project default" }]} />
+    <NumberRow label="Screen padding" value={value * 100} min={0} max={45} step={0.5} unit="%" onChange={(v) => update((p) => { const target = forShot ? p.shots.find((s) => s.id === shot?.id) : null; if (target) target.screenPadding = v / 100; else if (!forShot) p.screen.padding = v / 100; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+    <p className="label-sm text-muted">Equal inset on all sides, below browser chrome. Reveals the screen background.</p>
+    {forShot && shot.screenPadding !== undefined && <Button size="sm" variant="ghost" onClick={() => update((p) => { const target = p.shots.find((s) => s.id === shot.id); if (target) delete target.screenPadding; })}>Use project padding</Button>}
+  </div>;
+}
+
 /* ---------- Effects ---------- */
 function EffectsSection() {
   const shot = useRenderShot();
   const family = useEditor((s) => getDevice(resolveShotView(s.project, shot).device).family);
-  const effects = useEditor((s) => s.project.effects);
+  const [scope, setScope] = useState<"shot" | "project">("shot");
+  const targetId = scope === "shot" ? shot?.id ?? null : null;
+  const effects = useEditor((s) => targetId ? resolveShotEffects(s.project, shot) : s.project.effects);
   const update = useEditor((s) => s.update);
   const [menu, setMenu] = useState(false);
   const addRef = useRef<HTMLButtonElement>(null);
+  const edit = (mutate: (effects: EffectInstance[]) => void) => update((p) => editShotEffects(p, targetId, mutate));
   const available = EFFECT_DEFS.filter((d) => !effects.some((e) => e.id === d.id));
   const add = (id: EffectId) => {
     const def = getEffectDef(id);
-    update((p) => { p.effects.push({ id, enabled: true, params: Object.fromEntries(def.params.map((x) => [x.key, x.default])) }); });
+    edit((effects) => { effects.push({ id, enabled: true, params: Object.fromEntries(def.params.map((x) => [x.key, x.default])) }); });
     setMenu(false);
   };
   return (
@@ -978,6 +1007,9 @@ function EffectsSection() {
         </>
       }
     >
+      <SelectRow label="Edit effects for" value={targetId ? "shot" : "project"} onChange={setScope} options={[...(shot ? [{ value: "shot" as const, label: "This shot" }] : []), { value: "project", label: "Project defaults" }]} />
+      <p className="label-sm text-muted">{targetId ? shot?.effects === undefined ? "Using project defaults. Your first edit creates a stack for this shot." : `Custom effects for ${shot?.name}.` : "Defaults apply to every shot without its own stack."}</p>
+      {targetId && shot?.effects !== undefined && <Button variant="ghost" size="sm" onClick={() => update((p) => { const target = p.shots.find((s) => s.id === targetId); if (target) delete target.effects; })}>Use project effects</Button>}
       {effects.length === 0 && <div className="label-sm py-1 text-muted">No effects. Add vignette, grain, bloom and more with +.</div>}
       {effects.map((e) => {
         const def = getEffectDef(e.id);
@@ -986,8 +1018,8 @@ function EffectsSection() {
             <div className="flex items-center gap-1.5 px-1">
               <Icon name={def.icon} size={13} className="text-muted" />
               <span className="label flex-1 text-fg">{def.name}</span>
-              <IconButton icon={e.enabled ? "eye" : "eye-off"} size={12} label={e.enabled ? "Disable" : "Enable"} onClick={() => update((p) => { const x = p.effects.find((y) => y.id === e.id); if (x) x.enabled = !x.enabled; })} className="h-6 w-6" />
-              <IconButton icon="trash" size={12} label="Remove" onClick={() => update((p) => { p.effects = p.effects.filter((y) => y.id !== e.id); })} className="h-6 w-6" />
+              <IconButton icon={e.enabled ? "eye" : "eye-off"} size={12} label={e.enabled ? "Disable" : "Enable"} onClick={() => edit((effects) => { const x = effects.find((y) => y.id === e.id); if (x) x.enabled = !x.enabled; })} className="h-6 w-6" />
+              <IconButton icon="trash" size={12} label="Remove" onClick={() => edit((effects) => { const index = effects.findIndex((y) => y.id === e.id); if (index >= 0) effects.splice(index, 1); })} className="h-6 w-6" />
             </div>
             {e.id === "depth" && family !== "flat" && <p className="label-sm px-1 text-muted">Applies to flat and browser mockups.</p>}
             {e.id === "pixel" && <p className="label-sm px-1 text-muted">RGB detail on the display. Zoom in to see individual pixels.</p>}
@@ -1000,7 +1032,7 @@ function EffectsSection() {
                 max={prm.max}
                 step={prm.step}
                 disabled={!e.enabled || (e.id === "depth" && family !== "flat")}
-                onChange={(v) => update((p) => { const x = p.effects.find((y) => y.id === e.id); if (x) x.params[prm.key] = v; })}
+                onChange={(v) => edit((effects) => { const x = effects.find((y) => y.id === e.id); if (x) x.params[prm.key] = v; })}
                 onDragStart={beginInteraction}
                 onDragEnd={endInteraction}
               />
@@ -1034,7 +1066,7 @@ export function Inspector() {
   const toggleTheme = useUI((s) => s.toggleTheme);
   const canUndo = useStore(useEditor.temporal, (s) => s.pastStates.length > 0);
   const canRedo = useStore(useEditor.temporal, (s) => s.futureStates.length > 0);
-  const shot = useActiveShot();
+  const shot = useRenderShot();
   const card = shotKind(shot) !== "media";
   return (
     <div className={cn("fixed bottom-2 right-2 top-[104px] z-30 w-[min(300px,calc(100vw-16px))] shrink-0 flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-xl md:static md:z-auto md:flex md:w-[240px] md:shadow-none", inspectorOpen ? "flex" : "hidden")}>

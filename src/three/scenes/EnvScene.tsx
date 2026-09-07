@@ -13,6 +13,8 @@ import { addScreenGlow, screenGlow } from "@/three/screenGlow";
 import { addEnvironmentGain } from "@/three/environmentGain";
 import { resizeShadowMap, useRenderQuality } from "@/three/renderQuality";
 import { clipReflectionCamera, isEffectivelyVisible, withHiddenObjects, withOffscreenPass } from "@/three/renderPass";
+import { reflectionSamples } from "@/three/reflectionSamples";
+import { createReceiverOnlyShadowMaterial } from "@/three/shadowCalibration";
 
 /**
  * A transparent export asks for the device on an empty frame. The lights still belong there, but
@@ -172,11 +174,13 @@ function ScreenGlow({ distance, intensity, height }: { distance: number; intensi
 function MirrorFloor({ size }: { size: number }) {
   const gl = useThree((s) => s.gl);
   const mesh = useRef<THREE.Mesh>(null);
-  const resolution = useRenderQuality().floor;
+  const quality = useRenderQuality();
+  const resolution = quality.floor;
+  const samples = reflectionSamples(gl, quality.reflectionSamples);
   const buffers = useMemo(() => {
     const options = { type: THREE.HalfFloatType, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter };
-    const raw = new THREE.WebGLRenderTarget(resolution, resolution, options);
-    raw.depthTexture = new THREE.DepthTexture(resolution, resolution, THREE.UnsignedShortType);
+    const raw = new THREE.WebGLRenderTarget(resolution, resolution, { ...options, samples });
+    raw.depthTexture = new THREE.DepthTexture(resolution, resolution, THREE.UnsignedIntType);
     const blurred = new THREE.WebGLRenderTarget(resolution, resolution, { ...options, depthBuffer: false });
     const blur = new BlurPass({ gl, resolution, width: 300, height: 90, minDepthThreshold: 0.4, maxDepthThreshold: 1.35, depthScale: 1.1 });
     const matrix = new THREE.Matrix4();
@@ -197,13 +201,15 @@ function MirrorFloor({ size }: { size: number }) {
     material.textureMatrix = matrix;
     material.defines = { ...material.defines, USE_BLUR: "", USE_DEPTH: "" };
     addScreenGlow(material);
-    return { raw, blurred, blur, material, matrix };
-  }, [gl, resolution]);
+    const receiverShadow = createReceiverOnlyShadowMaterial();
+    return { raw, blurred, blur, material, matrix, receiverShadow };
+  }, [gl, resolution, samples]);
   useEffect(() => () => {
     buffers.raw.dispose(); buffers.blurred.dispose();
     buffers.blur.renderTargetA.dispose(); buffers.blur.renderTargetB.dispose();
     buffers.blur.convolutionMaterial.dispose(); buffers.blur.screen.geometry.dispose();
     buffers.material.dispose();
+    buffers.receiverShadow.dispose();
   }, [buffers]);
   const rig = useMemo(() => ({
     camera: new THREE.PerspectiveCamera(), center: new THREE.Vector3(), eye: new THREE.Vector3(),
@@ -244,7 +250,7 @@ function MirrorFloor({ size }: { size: number }) {
     }));
   }, 0.6);
   return (
-    <mesh ref={mesh} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+    <mesh ref={mesh} rotation={[-Math.PI / 2, 0, 0]} receiveShadow customDepthMaterial={buffers.receiverShadow} customDistanceMaterial={buffers.receiverShadow}>
       <planeGeometry args={[size, size]} />
       <primitive object={buffers.material} attach="material" />
     </mesh>

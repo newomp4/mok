@@ -1,8 +1,8 @@
 # UltraMock comparison and rendering audit
 
-Research date: September 6, 2026. This is a functionality comparison, not a claim of identical rendering or exhaustive paid-feature access.
+Reference research date: September 6, 2026. mok functionality updated for version 0.10.0. This is a functionality comparison, not a claim of identical rendering or exhaustive paid-feature access.
 
-The subsequent [technical dossier](research/ultramock-technical-dossier.md) adds current stack fingerprints, free-asset metadata, deeper control inspection and a prioritized improvement plan. The verification section below records the earlier 84-test pass; the later renderer pass is documented separately in [screen lighting verification](renderer-screen-lighting.md) with 100 tests.
+The [technical dossier](research/ultramock-technical-dossier.md) records the reference stack fingerprints, free-asset metadata and deeper control inspection **before** this implementation. Its descriptions of missing mok controls are historical. The [implementation report](research/implementation-2026-09-06.md) records the subsequent delivery and final validation. The historical verification section below preserves the earlier 84-test pass; the separate [screen lighting verification](renderer-screen-lighting.md) records the following 100-test pass.
 
 ## Evidence and method
 
@@ -23,22 +23,24 @@ The [official changelog](https://www.ultramock.io/changelog) identifies Three.js
 | Lighting | Five choices observed: Default, Studio Soft, Dark Rim, Two Tone, Warm Glow; light rotation | Eight lighting presets using six HDR sources, plus four studio looks; intensity/rotation animation |
 | Scene environments | Custom plus three Pro entries observed: Dark Room MacBook, Concrete Dark, Studio | Custom, studio, concrete, darkroom and gallery; independently authored scenes, not exact environments |
 | Background | 19 preset entries and custom image upload observed | 28 independent presets, color/image/transparent backgrounds, blur; preset artwork differs |
-| Screen background | Color backing and a separate Screen Padding control observed on MacBook Neo in the deeper scan | Color/image/gradient backing for contain-fit media; no explicit media-padding control |
+| Screen background and padding | Color backing and a separate Screen Padding control observed on MacBook Neo in the deeper scan; reference units and complete fit interaction remain unverified | Color/image/gradient backing plus 0–45% padding, per shot or inherited from project defaults. Padding applies equally on each side below browser chrome and works with cover/contain/stretch, orientation and Auto-motion |
 | Screen texture | Pixel Grid observed | Replaced whole-frame pixelation with RGB subpixels attached to the screen UVs, with minification filtering |
 | Flat thickness | Depth effect observed on Flat | Added real flat/browser extrusion geometry with a depth control |
-| Effects | 12 entries observed: Depth, Glass Border, Sharpen, Vignette, Grain, Fish Eye, Pixel Grid, Chromatic Abb., Bloom, Screen Fade, Ghost, Liquid Glass | All 12 corresponding categories now available; independently implemented visual algorithms |
+| Effects | 12 entries observed: Depth, Glass Border, Sharpen, Vignette, Grain, Fish Eye, Pixel Grid, Chromatic Abb., Bloom, Screen Fade, Ghost, Liquid Glass | All 12 corresponding categories; independently implemented algorithms. Shots inherit project effects until first edit, then own an independent stack. An empty stack disables effects for that shot; Use project effects restores inheritance |
 | Blur | Reference blur section observed; maker describes radial, directional, tilt-shift and lens modes | Radial, directional, tilt-shift and depth lens, focal point/distance, keyframed rack focus and per-shot lens settings |
 | Timeline | Simple/Advanced, recording, reorder, trim, transitions, loop and zoom observed | Those workflows plus split, duplicate, reverse, multi-selection, clipboard, gaps, custom easing and undo/redo; retained clips remain inspectable beyond the export endpoint |
 | Project endpoint | Separate length field observed: 12-second ruler with six seconds of shots | Added independent playback/export length. Trims retain the endpoint; extensions grow it; shorter endpoints retain later editable clips. Three-minute cap prevents excessive allocations |
-| Auto-motion | Focus-area workflow and Compose/Shuffle instructions observed | Editable region-based motion; corrected cover/contain/stretch mapping, visible-region clipping, orientation mapping and trimmed-video preview |
+| Auto-motion | Focus-area workflow and Compose/Shuffle instructions observed | Editable region-based motion on the shot at the playhead; shared padding/fit geometry, visible-region clipping, orientation mapping and trimmed-video preview. Draw areas or add one by keyboard; arrows move it, Shift + arrows resize it, Delete removes it |
 | Text and logo | Maker/public context, not a complete live editing comparison | Text cards, typography, three logo shaders and enter/exit animations; Blur now actually blurs instead of changing opacity/scale |
 | Templates | 17 entries plus Starter observed in the opened collection; animation indicators visible | 24 starter templates with hover previews and personal template saving. Presets use mok's own scene/assets and may not visually match |
 | Still export | JPG/PNG/WebP, transparency, orientation, dimensions observed | All three formats, transparent PNG/WebP, preset/custom sizes and high-resolution output |
-| Video export | Four quality levels, 30/60 fps, four motion-blur levels, transparent option observed | MP4 and alpha WebM, quality/frame-rate/motion-blur options, one music/voiceover track with volume, trim and fades, deterministic sampling and cancellation. Audio embedded in source video clips is not currently mixed |
+| Video export and audio | Four quality levels, 30/60 fps, four motion-blur levels and a transparent option observed; paid output and complete source-audio behavior unverified | MP4 and alpha WebM, deterministic timestamp-based source decoding, quality/frame-rate/motion-blur options and cancellation. One soundtrack plus opt-in source-video audio per shot, with volume and independent audio fades. Trim, speed and loops follow the clip; speed changes pitch. Gaps and held end frames are silent. Splitting preserves the original fade timing until a fade is edited |
 | Export scope | Reference behavior not tested behind paid options | Still/video export only loads sources actually used in its time range; an unused missing clip cannot block an earlier output |
 | Project workflow | Save project and Pro gating observed | Local autosave, project library and portable files; missing files retain named placeholders and can be re-linked without losing timing or animation |
+| Paste and capture preferences | Ask/replace/add-shot paste choices and an enabled capture-shortcut preference observed; reference shortcut was Cmd/Ctrl+S | Remembered Ask/Replace/New shot choice. Replace preserves duration, trim, fit and camera; additional visual files become following shots and audio uses the soundtrack lane. Cmd/Ctrl+E capture can be disabled independently; Cmd/Ctrl+S continues saving the project |
+| Focused tutorials | Separate Help entries for timeline and Auto-motion observed; those reference tours were not launched | General onboarding plus interactive Timeline and Auto-motion practice tours with local examples, reset/back/next/exit controls and keyboard focus handling. Practice does not replace or edit the user's project |
 | Cloud/account features | Paid controls visible; execution unverified | No UltraMock account system, subscription or cloud collaboration; local portable projects are the personal-tool workflow |
-| Keyboard/mobile | Desktop comparison emphasized; no exhaustive reference mobile audit | Keyboard/focus controls and responsive mobile inspector from prior audit, checked again for new controls |
+| Keyboard/mobile | Desktop comparison emphasized; no exhaustive reference mobile audit | Keyboard/focus controls and responsive inspector from the prior audit. New controls and tours were exercised on desktop; this pass does not claim exhaustive mobile verification |
 
 Counts describe the libraries inspected on this date, not a promise of permanent catalog parity. Similar counts do not imply matching assets or algorithms.
 
@@ -70,15 +72,34 @@ Pixel detail now belongs to the display surface, rather than the background and 
 
 MacBook keyboards now receive screen-image lighting and rough, view-dependent display reflections. A live rectangular emitter follows the actual screen UVs and lid transform; receiver materials retain their authored PBR textures. The display texture is shared without adding reflection render targets. Brightness, video and screen fades update the effect in preview and export. The separate floor glow still uses average screen color.
 
-Remaining visual limits are explicit: imported asset detail varies; several models lack authored normal/roughness/AO maps. mok's HDRIs are currently 1024×512. There is no general global-illumination or path-tracing renderer; laptop screen lighting uses sampled direct illumination and an approximate rough reflection restricted to deck surfaces. It does not solve arbitrary scene occlusion or multiple light bounces. The deeper scan verified a public UltraMock studio HDR at 2048×1024 and KTX2 texture use in two free models. Its complete shaders, light calibration, broader asset pipeline, AO strategy and paid output quality remain unknown. See the [technical dossier](research/ultramock-technical-dossier.md) for exact metadata and sources. [Three material documentation](https://threejs.org/docs/pages/MeshPhysicalMaterial.html) and [PMREM documentation](https://threejs.org/docs/pages/PMREMGenerator.html) explain the underlying controls.
+Version 0.10.0 adds 2048×1024 HDRIs alongside the existing 1024×512 fallback tier, and converts all ten detailed device models to KTX2 textures with complete mip chains. Material-aware calibration preserves existing maps; optional Detail shadows adds selective crevice shading and defaults to zero. See [asset preparation](research/asset-render-preparation.md) for the measured download-size and GPU-texture-memory tradeoff.
 
-## Verification
+The renderer now plans allocations using output dimensions, effect needs, actual supported MSAA counts and a conservative memory estimate. It reduces antialiasing and auxiliary reflection/shadow buffers before refusing an over-budget request; it does not silently change output dimensions. Normal screen-raster export limits are 4096 pixels and 12 megapixels. Larger captures can use up to 8192 pixels and 24 megapixels when the plan permits, bounded by the GPU texture limit. Reduced-memory plans select smaller buffers and the 1K HDR tier. Preview resolution adapts during sustained expensive playback or interaction and returns to the user's quality setting while idle. These estimates are not measurements of free VRAM or guarantees that every device can export at the maximum size.
+
+Motion blur integrates linear HDR samples before tone mapping and final dithering. Timestamp-based source decoding replaces reliance on approximate video-element seeking where supported; unsupported inputs have a reported fallback. Encoded video streams to temporary browser storage when available, with a bounded memory fallback and cleanup after download or failure. The implementation report records final GPU, alpha and mixed-shot export validation; the old export results below are not evidence for every new render path.
+
+Remaining visual limits are explicit: imported asset detail varies; several models lack authored normal/roughness/AO maps. Texture compression and higher-resolution lighting cannot invent missing geometry or source detail. There is no general global-illumination or path-tracing renderer; laptop screen lighting uses sampled direct illumination and an approximate rough reflection restricted to deck surfaces. It does not solve arbitrary scene occlusion or multiple light bounces. The deeper scan verified a public UltraMock studio HDR at 2048×1024 and KTX2 texture use in two free models. Its complete shaders, light calibration, broader asset pipeline, AO strategy and paid output quality remain unknown. See the [technical dossier](research/ultramock-technical-dossier.md) for exact metadata and sources. [Three material documentation](https://threejs.org/docs/pages/MeshPhysicalMaterial.html) and [PMREM documentation](https://threejs.org/docs/pages/PMREMGenerator.html) explain the underlying controls.
+
+## Version 0.10.0 workflow verification
+
+The product regression suite adds 11 tests covering migration, per-shot inheritance and reset, duplication/splitting/undo, template reset, padding with every fit mode and browser chrome, focus-area clipping/orientation, paste routing and preserved timing, source-audio split envelopes, decoded-frame changes and tour/preference isolation. That suite and the existing editor/parity suites passed together (30 tests). Targeted TypeScript and ESLint checks passed after the final product edits. Final whole-project checks belong to the [implementation report](research/implementation-2026-09-06.md).
+
+Desktop browser checks verified:
+
+- Per-shot 10% padding leaves the second shot at 0%; effect-stack edits remain independent of project-default changes, and reset resumes inheritance.
+- Timeline practice selection, duration, keyframe creation and reset; Auto-motion practice composition and scrubbing. Exiting the tours preserved the original six-second project and its undo state.
+- The real Auto-motion editor's keyboard add, move, resize and Compose path.
+- Clipboard image replacement, adding shots, remembered paste routing, and paste/capture preference persistence after reload.
+
+No product blocker was observed in those checks. A separate production-browser check on version 0.10.0 also verified the source-audio controls: a synthetic video started silent, the Source audio toggle revealed its controls, and actual UI edits stored 72% volume, 0.2-second fade in and 0.3-second fade out. Four Undo clicks restored those individually settled edits and the original silent state, with no browser errors. Edits were spaced beyond the editor's existing 350ms history-coalescing window. Decoding, split-envelope timing and encoded audio have separate automated coverage. No exhaustive browser, codec or mobile coverage is claimed.
+
+## Historical verification before version 0.10.0
 
 Automated coverage includes orientation transforms and all four image corners, native tablet dimensions, fit-region clipping, video trim/speed/hold boundaries, endpoint migration/trimming/undo, missing-source recovery races, export source scope, HDR gain composition, bounded GPU targets and disposal, plus previous timeline/IO/render regressions. Run `npm test`, `npm run typecheck`, `npm run lint`, and the production build.
 
-Final checks: **84 automated tests passed**, with clean TypeScript, ESLint and production Webpack build. The IO suite includes additional assertions within its single counted test file.
+At that earlier checkpoint, **84 automated tests passed**, with clean TypeScript, ESLint and production Webpack build. The IO suite includes additional assertions within its single counted test file.
 
-Production-browser checks covered:
+Production-browser checks at that checkpoint covered:
 
 - Upright landscape phone and portrait tablet; native keyboard preference restoration; bounded shadow area without the landscape cutoff.
 - RGB grid attached to screen pixels, actual flat thickness, card blur softening and a sharp final title.

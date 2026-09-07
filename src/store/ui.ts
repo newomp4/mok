@@ -1,6 +1,7 @@
 "use client";
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
+import type { PasteMode } from "@/lib/paste";
 import type { AnimProp } from "@/lib/types";
 
 export type Picker = null | "device" | "scene";
@@ -11,6 +12,9 @@ export interface ExportProgress {
   progress: number;
   cancel?: () => void;
 }
+
+export interface PasteRequest { files: File[]; projectId: string; shotId: string | null; mediaId: string | null }
+export type TourKind = "editor" | "timeline" | "autoMotion";
 
 interface UIState {
   time: number;
@@ -45,6 +49,12 @@ interface UIState {
   snapCenter: boolean;
   /** interface sounds (export chime, invalid-action blip) */
   sounds: boolean;
+  captureShortcut: boolean;
+  pasteMode: PasteMode;
+  pasteRequest: PasteRequest | null;
+  setCaptureShortcut: (enabled: boolean) => void;
+  setPasteMode: (mode: PasteMode) => void;
+  setPasteRequest: (request: PasteRequest | null) => void;
   timelineHeight: number;
   /** selected keyframe diamonds on the timeline */
   selectedKeys: { shotId: string; prop: AnimProp; t: number }[];
@@ -57,6 +67,8 @@ interface UIState {
   setCropShot: (id: string | null) => void;
   /** onboarding tour step (null = not running) */
   tourStep: number | null;
+  tourKind: TourKind;
+  startTour: (kind: TourKind) => void;
   setTourStep: (s: number | null) => void;
   setGuides: (g: boolean) => void;
   setSnapCenter: (s: boolean) => void;
@@ -121,6 +133,12 @@ export const useUI = create<UIState>()(subscribeWithSelector((set, get) => ({
   guides: false,
   snapCenter: pref("snapCenter", true),
   sounds: pref("sounds", true),
+  captureShortcut: pref("captureShortcut", true),
+  pasteMode: (() => { try { const value = localStorage.getItem("mok:pasteMode"); return value === "replace" || value === "add" ? value : "ask"; } catch { return "ask"; } })(),
+  pasteRequest: null,
+  setCaptureShortcut: (captureShortcut) => { set({ captureShortcut }); savePref("captureShortcut", captureShortcut); },
+  setPasteMode: (pasteMode) => { set({ pasteMode }); try { localStorage.setItem("mok:pasteMode", pasteMode); } catch {} },
+  setPasteRequest: (pasteRequest) => set({ pasteRequest }),
   timelineHeight: numberPref("timelineHeight", 216, 100, 500),
   selectedKeys: [],
   setSelectedKeys: (selectedKeys) => set({ selectedKeys }),
@@ -129,6 +147,8 @@ export const useUI = create<UIState>()(subscribeWithSelector((set, get) => ({
   cropShot: null,
   setCropShot: (cropShot) => set({ cropShot }),
   tourStep: null,
+  tourKind: "editor",
+  startTour: (tourKind) => set({ tourKind, tourStep: 0, playing: false }),
   setTourStep: (tourStep) => set({ tourStep }),
   setGuides: (guides) => set({ guides }),
   setSnapCenter: (snapCenter) => { set({ snapCenter }); savePref("snapCenter", snapCenter); },

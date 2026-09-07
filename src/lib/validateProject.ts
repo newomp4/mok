@@ -39,6 +39,17 @@ export function validateMediaRef(value: unknown): MediaRef | null {
   return { id: m.id as string, kind, width, height, name: str(m.name, "media"), ...(duration > 0 ? { duration } : {}) };
 }
 
+
+function validateEffects(value: unknown): Project["effects"] {
+  const seen = new Set<string>();
+  return (Array.isArray(value) ? value : []).flatMap((raw) => {
+    const e = object(raw), def = EFFECT_DEFS.find((d) => d.id === e.id);
+    if (!def || seen.has(def.id)) return [];
+    seen.add(def.id);
+    return [{ id: def.id, enabled: e.enabled !== false, params: Object.fromEntries(def.params.map((d) => [d.key, num(object(e.params)[d.key], d.default, d.min, d.max)])) }];
+  });
+}
+
 /** Shared by file imports, autosave, saved projects and replaceProject. Never mutates its input. */
 export function validateProject(value: unknown, defaults: Project): Project {
   const src = object(value);
@@ -51,6 +62,7 @@ export function validateProject(value: unknown, defaults: Project): Project {
   p.scene = fields(src.scene, defaults.scene);
   p.scene.preset = choice(object(src.scene).preset, SCENES.map((x) => x.id), defaults.scene.preset);
   p.scene.lighting = choice(object(src.scene).lighting, LIGHTINGS.map((x) => x.id), defaults.scene.lighting);
+  p.scene.detailShadows = num(object(src.scene).detailShadows, 0, 0, 1);
   p.scene.lightIntensity = num(p.scene.lightIntensity, 1, 0, 10);
   p.scene.background = fields(object(src.scene).background, defaults.scene.background);
   p.scene.background.type = choice(p.scene.background.type, ["color", "preset", "image", "transparent"], "color");
@@ -75,6 +87,7 @@ export function validateProject(value: unknown, defaults: Project): Project {
     if (group === "blur") { const blur = p.blur as unknown as Record<string, number>; blur[key] = animationValue(prop, blur[key]); }
   }
   p.screen = fields(src.screen, defaults.screen);
+  p.screen.padding = num(p.screen.padding, 0, 0, 0.45);
   p.screen.brightness = num(p.screen.brightness, 1, 0, 10);
   p.screen.spill = num(p.screen.spill, 1, 0, 2);
   p.screen.bg = fields(object(src.screen).bg, { type: "color" as const, color: "#000000", image: null, preset: "whisp" });
@@ -91,6 +104,16 @@ export function validateProject(value: unknown, defaults: Project): Project {
     const id = validId(s.id) && !ids.has(s.id as string) ? s.id as string : uid(); ids.add(id);
     const shot: Shot = { id, name: str(s.name, `Shot ${index + 1}`), duration: num(s.duration, 3, 0.1, 86400), media: validateMediaRef(s.media), fit: choice(s.fit, ["cover", "contain", "stretch"], "cover"), kind: choice(s.kind, ["media", "text", "logo"] as const, "media"), keyframes: {}, focusAreas: [] };
     if (shot.media?.kind === "audio") shot.media = null;
+    if (Array.isArray(s.effects)) shot.effects = validateEffects(s.effects);
+    if (typeof s.screenPadding === "number" && Number.isFinite(s.screenPadding)) shot.screenPadding = num(s.screenPadding, 0, 0, 0.45);
+    if (s.audio && typeof s.audio === "object") {
+      const audio = object(s.audio);
+      const rawEnvelope = object(audio.envelope);
+      const envelopeDuration = num(rawEnvelope.duration, shot.duration, 0.1, 86400);
+      const envelope = audio.envelope ? { offset: num(rawEnvelope.offset, 0, 0, envelopeDuration), duration: envelopeDuration } : undefined;
+      const fadeLength = envelope?.duration ?? shot.duration;
+      shot.audio = { enabled: audio.enabled === true, volume: num(audio.volume, 1, 0, 1), fadeIn: num(audio.fadeIn, 0, 0, fadeLength), fadeOut: num(audio.fadeOut, 0, 0, fadeLength), ...(envelope ? { envelope } : {}) };
+    }
     shot.speed = num(s.speed, 1, 0.25, 4);
     shot.trimStart = num(s.trimStart, 0, 0, shot.media?.duration ?? 86400);
     if (typeof s.gap === "number" && s.gap > 0) shot.gap = num(s.gap, 0, 0, 86400);
@@ -133,7 +156,6 @@ export function validateProject(value: unknown, defaults: Project): Project {
   });
   const contentLength = p.shots.reduce((sum, shot) => sum + (shot.gap ?? 0) + shot.duration, 0) || 0.1;
   p.duration = num(src.duration, Math.min(MAX_PROJECT_DURATION, contentLength), 0.1, MAX_PROJECT_DURATION);
-  const effects = Array.isArray(src.effects) ? src.effects : [];
-  p.effects = effects.flatMap((raw) => { const e = object(raw), def = EFFECT_DEFS.find((d) => d.id === e.id); return def ? [{ id: def.id, enabled: e.enabled !== false, params: Object.fromEntries(def.params.map((d) => [d.key, num(object(e.params)[d.key], d.default, d.min, d.max)])) }] : []; });
+  p.effects = validateEffects(src.effects);
   return p;
 }

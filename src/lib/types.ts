@@ -124,6 +124,12 @@ export interface Shot {
   logo?: LogoStyle;
   enter?: EnterExit;
   exit?: EnterExit;
+  /** Undefined inherits project effects; an empty array explicitly disables every effect. */
+  effects?: EffectInstance[];
+  /** Uniform media inset, as a fraction of the shorter screen content edge. */
+  screenPadding?: number;
+  /** Source-video sound stays opt-in so older projects remain silent. Speed changes pitch. */
+  audio?: { enabled: boolean; volume: number; fadeIn?: number; fadeOut?: number; envelope?: { offset: number; duration: number } };
   /** video playback speed (0.25 – 4) */
   speed?: number;
   /** seconds into the video where the shot starts */
@@ -190,6 +196,8 @@ export interface Project {
     lightRotY: number;
     lightIntensity: number;
     contactShadow: boolean;
+    /** Optional crevice shading, independent of ground contact shadows. */
+    detailShadows?: number;
     /** contact shadow blur (0..1) and opacity (0..1) on the custom scene */
     shadowSoft?: number;
     shadowOpacity?: number;
@@ -244,6 +252,8 @@ export interface Project {
     focusY: number;
   };
   screen: {
+    /** Default media inset (0..0.45 of the shorter content edge), overridable per shot. */
+    padding?: number;
     brightness: number;
     /** Strength of display lighting and rough reflections on a laptop keyboard/deck. */
     spill: number;

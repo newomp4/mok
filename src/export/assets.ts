@@ -1,6 +1,6 @@
 import type { MediaRef, Project, Shot } from "@/lib/types";
 import { locate } from "@/lib/animation";
-import { audioLength } from "@/lib/audio";
+import { audioLength } from "@/lib/audioPlan";
 import { resolveShotView } from "@/lib/shotView";
 
 export type ExportScope = { type: "still"; time: number } | { type: "video"; start: number; end: number };

@@ -1,0 +1,39 @@
+{
+  "inputBytes": 263780,
+  "outputBytes": 1452296,
+  "encoder": "Khronos toktx 4.4.2 UASTC quality 3, Zstd 18, full mips; normalized XYZ normals",
+  "textures": [
+    {
+      "image": 0,
+      "width": 1024,
+      "height": 2048,
+      "roles": [
+        "srgb"
+      ],
+      "levels": 12,
+      "sourceBytes": 55414,
+      "ktxBytes": 1150746,
+      "rgbaMipBytes": 11184811,
+      "blockMipBytes": 2796240,
+      "sha256": "2b4607329af2650e54267191d8b3b36799f024840679e887b145d6475969f51d"
+    },
+    {
+      "image": 1,
+      "width": 512,
+      "height": 256,
+      "roles": [
+        "srgb"
+      ],
+      "levels": 10,
+      "sourceBytes": 7890,
+      "ktxBytes": 101036,
+      "rgbaMipBytes": 699051,
+      "blockMipBytes": 174800,
+      "sha256": "0f8b49a88bc0db9f1927d084df820265010b33406a22a6a59e8270582a42fdab"
+    }
+  ],
+  "sourceInvariants": {
+    "structure": "85d524f6b565f8b19a6309bc6b91859a514dce6aac7b45c197fe8881597e6bcc",
+    "geometry": "c1ee1da3953d258f78618c7fd2530d16d65c84bd37d6bdebe4a3637e314b5166"
+  }
+}

@@ -1,8 +1,11 @@
 "use client";
-import { Component, type ReactNode } from "react";
+import { Component, memo, type ReactNode } from "react";
 import { Canvas } from "@react-three/fiber";
 import * as THREE from "three";
 import { SceneRoot } from "@/three/Scene";
+import { RendererMetrics } from "./RendererMetrics";
+import { useRenderFlags } from "./registry";
+import { useUI } from "@/store/ui";
 
 function PreviewUnavailable({ retry }: { retry?: () => void }) {
   return (
@@ -24,15 +27,18 @@ export class PreviewBoundary extends Component<{ children: ReactNode }, { failed
   }
 }
 
-export function Viewport({ dpr = 2 }: { dpr?: number }) {
+// Timeline commits must not reconfigure Canvas back to its CSS size during an exact-size export.
+export const Viewport = memo(function Viewport({ dpr = 2 }: { dpr?: number }) {
+  const exporting = useRenderFlags((s) => s.exporting);
+  const playing = useUI((s) => s.playing);
   return (
     <PreviewBoundary>
     <Canvas
       role="img"
       aria-label="3D mockup preview"
       fallback="Interactive 3D mockup preview. WebGL support is required."
-      dpr={[1, dpr]}
-      frameloop="demand"
+      dpr={exporting ? 1 : [1, dpr]}
+      frameloop={exporting ? "never" : playing ? "always" : "demand"}
       shadows={{ type: THREE.VSMShadowMap }}
       flat={false}
       gl={{
@@ -47,7 +53,8 @@ export function Viewport({ dpr = 2 }: { dpr?: number }) {
       style={{ position: "absolute", inset: 0, background: "transparent" }}
     >
       <SceneRoot />
+      <RendererMetrics />
     </Canvas>
     </PreviewBoundary>
   );
-}
+});

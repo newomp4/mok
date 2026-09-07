@@ -189,9 +189,11 @@ export function HelpMenu() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const setModal = useUI((s) => s.setModal);
-  const setTourStep = useUI((s) => s.setTourStep);
+  const startTour = useUI((s) => s.startTour);
   const items: MenuItem[] = [
-    { label: "Take the tour", icon: "play-circle", onSelect: () => setTourStep(0) },
+    { label: "Take the tour", icon: "play-circle", onSelect: () => startTour("editor") },
+    { label: "Tour the timeline", icon: "film", onSelect: () => startTour("timeline") },
+    { label: "Tour Auto-motion", icon: "sparkles", onSelect: () => startTour("autoMotion") },
     { label: "Keyboard shortcuts", icon: "keyboard", shortcut: "?", onSelect: () => setModal("shortcuts") },
     { label: "How it works", icon: "help-circle", onSelect: () => setModal("info") },
     { label: "What's new", icon: "sparkles", onSelect: () => setModal("whatsnew") },

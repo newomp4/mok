@@ -7,6 +7,7 @@ import type { ScreenMaterial } from "@/three/materials";
 import { readScreenPlane } from "@/three/screenPlane";
 import { useRenderQuality } from "@/three/renderQuality";
 import { clipReflectionCamera, isEffectivelyVisible, withHiddenObjects, withOffscreenPass } from "@/three/renderPass";
+import { reflectionSamples } from "@/three/reflectionSamples";
 
 /**
  * A true planar mirror for the display.
@@ -23,7 +24,9 @@ import { clipReflectionCamera, isEffectivelyVisible, withHiddenObjects, withOffs
  */
 export function ScreenReflection({ material, amount }: { material: ScreenMaterial; amount: number }) {
   const invalidate = useThree((s) => s.invalidate);
+  const gl = useThree((s) => s.gl);
   const quality = useRenderQuality();
+  const samples = reflectionSamples(gl, quality.reflectionSamples);
   const active = amount > 0.002;
   // the mirrored camera borrows the real one's projection, so the buffer has to share its aspect
   const [width, height] = active ? quality.reflection : [0, 0];
@@ -36,10 +39,11 @@ export function ScreenReflection({ material, amount }: { material: ScreenMateria
       minFilter: THREE.LinearFilter,
       magFilter: THREE.LinearFilter,
       generateMipmaps: false,
+      samples,
     });
     rt.texture.name = "screenReflection";
     return rt;
-  }, [active, width, height]);
+  }, [active, width, height, samples]);
   useEffect(() => () => target?.dispose(), [target]);
 
   useEffect(() => {

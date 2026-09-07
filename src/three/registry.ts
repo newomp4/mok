@@ -2,6 +2,15 @@
 import { create } from "zustand";
 import type { RootState } from "@react-three/fiber";
 import type { EffectComposer } from "postprocessing";
+import type { RenderQualityPlan } from "./qualityPlan";
+
+export interface LinearCapture {
+  beginFrame(samples: number): void;
+  /** Arm exactly one deterministic advance; incidental React renders cannot add exposure. */
+  beginSample(): void;
+  endFrame(): void;
+  cancel(): void;
+}
 
 /** Non-reactive handles to the live R3F root, used by the export pipeline. */
 export const viewport = {
@@ -9,11 +18,16 @@ export const viewport = {
   get: null as null | (() => RootState),
   get state(): RootState | null { return viewport.get ? viewport.get() : null; },
   composer: null as EffectComposer | null,
+  linearCapture: null as LinearCapture | null,
+  metrics: null as null | { cpuMs: number; gpuMs: number | null; calls: number; triangles: number; textures: number; geometries: number; frame: number },
   /** debug: mesh inventory of the currently loaded glTF device */
   glbInfo: null as null | (() => unknown),
 };
 
 interface RenderFlags {
+  previewScale: number;
+  qualityPlan: RenderQualityPlan | null;
+  setQualityPlan: (plan: RenderQualityPlan | null) => void;
   /** Use export-quality buffers even when the requested dimensions match the preview. */
   exporting: boolean;
   setExporting: (value: boolean) => void;
@@ -24,6 +38,9 @@ interface RenderFlags {
   setTransparent: (t: boolean) => void;
 }
 export const useRenderFlags = create<RenderFlags>()((set) => ({
+  previewScale: 1,
+  qualityPlan: null,
+  setQualityPlan: (qualityPlan) => set({ qualityPlan }),
   exporting: false,
   setExporting: (exporting) => set({ exporting }),
   transparent: false,

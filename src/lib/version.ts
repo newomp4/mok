@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.9.0";
+export const APP_VERSION = "0.10.0";
 
 export interface ChangelogEntry {
   version: string;
@@ -8,6 +8,18 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.10.0",
+    date: "Sep 6, 2026",
+    title: "Sharper light, reliable exports and controls for each shot",
+    items: [
+      "Device textures now use GPU compression with full mipmaps. Higher-resolution studio lighting, calibrated shadows and smoother reflections preserve surface detail; optional Detail shadows adds shading in small crevices.",
+      "Motion blur integrates light before tone mapping. Final output preserves transparent-edge colors and subtly dithers smooth gradients. Large captures use a memory-aware quality plan, with sharper screen rasterization when the device has room.",
+      "Video sources decode by timestamp, including high-frame-rate and variable-frame-rate clips. Enable source audio per shot, with volume and fades, alongside the soundtrack. Video exports stream to temporary storage and remove encoder timing padding.",
+      "Each shot can own its effect stack and screen padding, or inherit project defaults. Paste can replace the current source or add shots, with a remembered preference; the quick-capture shortcut can be disabled.",
+      "Timeline and Auto-motion practice tours leave your project untouched. Device changes wait for textures and shaders, unused model and lighting caches stay bounded, and playback can adapt its preview resolution while idle editing returns to full detail.",
+    ],
+  },
   {
     version: "0.9.0",
     date: "Sep 6, 2026",

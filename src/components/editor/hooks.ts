@@ -8,7 +8,7 @@ import { loadAutosave, saveAutosave, saveProject, saveProjectIfSaved, exportProj
 import * as persistence from "@/lib/persistence";
 import { setStorageErrorHandler, pruneMedia } from "@/lib/persistence";
 import { extractFiles, onMediaPersistFailed } from "@/lib/media";
-import { importFilesToShot, applyCameraPreset } from "@/lib/actions";
+import { requestPaste, applyCameraPreset } from "@/lib/actions";
 import * as actions from "@/lib/actions";
 import * as capture from "@/export/capture";
 import { viewport as registryViewport } from "@/three/registry";
@@ -51,7 +51,7 @@ export function useBootstrap() {
     try {
       const seen = localStorage.getItem("mok:seen-version");
       const markSeen = () => { try { localStorage.setItem("mok:seen-version", APP_VERSION); } catch {} };
-      if (!seen && !localStorage.getItem("mok:toured")) welcomeTimer = window.setTimeout(() => { if (!hasOpenLayer() && !useUI.getState().exporting) { useUI.getState().setTourStep(0); markSeen(); } }, 1500);
+      if (!seen && !localStorage.getItem("mok:toured")) welcomeTimer = window.setTimeout(() => { if (!hasOpenLayer() && !useUI.getState().exporting) { useUI.getState().startTour("editor"); markSeen(); } }, 1500);
       else if (seen && seen !== APP_VERSION) welcomeTimer = window.setTimeout(() => { if (!hasOpenLayer() && !useUI.getState().exporting) { useUI.getState().setModal("whatsnew"); markSeen(); } }, 1200);
       else markSeen();
     } catch {}
@@ -140,7 +140,7 @@ export function usePasteImport() {
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
       if (hasOpenLayer() || useUI.getState().exporting || useUI.getState().tourStep !== null) return;
       const files = extractFiles(e.clipboardData);
-      if (files.length) { e.preventDefault(); void importFilesToShot(files); return; }
+      if (files.length) { e.preventDefault(); requestPaste(files); return; }
       // Let the native paste event deliver files before considering the editor's internal copy.
       // Otherwise copying a keyframe once makes later clipboard screenshots impossible to paste.
       if (lastCopyWasKeyframes() && hasKeyClipboard()) {
@@ -264,7 +264,7 @@ export function useShortcuts() {
       if (isTyping(e)) return;
       if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); void saveCurrentProject(); return; }
-      if (mod && e.key.toLowerCase() === "e") { e.preventDefault(); void quickCapture(); return; }
+      if (mod && e.key.toLowerCase() === "e" && ui.captureShortcut) { e.preventDefault(); void quickCapture(); return; }
       const ed = useEditor.getState();
       if (mod && e.key.toLowerCase() === "d") {
         e.preventDefault();

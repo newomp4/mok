@@ -1,0 +1,56 @@
+[
+  {
+    "name": "brown_photostudio_04",
+    "url": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/2k/brown_photostudio_04_2k.hdr",
+    "license": "CC0-1.0",
+    "width": 2048,
+    "height": 1024,
+    "bytes": 6477068,
+    "sha256": "64d03f0fcb54e87947f357808659620ffd72830f673d86ec0403b2124d34afbb"
+  },
+  {
+    "name": "studio_small_09",
+    "url": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/2k/studio_small_09_2k.hdr",
+    "license": "CC0-1.0",
+    "width": 2048,
+    "height": 1024,
+    "bytes": 6312947,
+    "sha256": "36724313c0fc66dab126ff90f081b85a0b1ef47be65eda1417bd20b033f0573f"
+  },
+  {
+    "name": "neon_photostudio",
+    "url": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/2k/neon_photostudio_2k.hdr",
+    "license": "CC0-1.0",
+    "width": 2048,
+    "height": 1024,
+    "bytes": 6334365,
+    "sha256": "e6baa610a8e3518177465440777897def354015bf89aac82f1a23ee84b75e116"
+  },
+  {
+    "name": "blue_photo_studio",
+    "url": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/2k/blue_photo_studio_2k.hdr",
+    "license": "CC0-1.0",
+    "width": 2048,
+    "height": 1024,
+    "bytes": 6472197,
+    "sha256": "2c236548680005d1215fef31fdc8c2968cf46250f70c4b56f3e9e4493eb613eb"
+  },
+  {
+    "name": "photo_studio_01",
+    "url": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/2k/photo_studio_01_2k.hdr",
+    "license": "CC0-1.0",
+    "width": 2048,
+    "height": 1024,
+    "bytes": 6375901,
+    "sha256": "b6178cf04ea2ac9390b8794d3088a04c0254905f335f5f30d2b582c57c40f387"
+  },
+  {
+    "name": "studio_small_03",
+    "url": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/2k/studio_small_03_2k.hdr",
+    "license": "CC0-1.0",
+    "width": 2048,
+    "height": 1024,
+    "bytes": 6673807,
+    "sha256": "156c2946a6cd0c1d8b662cd97e8a492436331ec2418a33901a324f4420618076"
+  }
+]

@@ -1,17 +1,19 @@
 "use client";
 import { useEditor, beginInteraction, endInteraction } from "@/store/editor";
-import { useUI } from "@/store/ui";
+import { useUI, type PasteRequest } from "@/store/ui";
 import { CAMERA_PRESETS, MOTION_PRESETS, TEMPLATES, getScene } from "./presets";
 import type { AnimProp, FitMode, FocusArea, Keyframe, MediaRef, Project, Shot } from "./types";
-import { importMedia, mediaType } from "./media";
+import { deleteMedia, importMedia, mediaType } from "./media";
 import { getDevice } from "./devices";
 import { getSampleScreen, sampleScreenBlob } from "./screens";
-import { contentDuration, MAX_PROJECT_DURATION, sampleTrack, shotBase, shotStart } from "./animation";
-import { resolveShotView } from "./shotView";
+import { contentDuration, locate, MAX_PROJECT_DURATION, sampleTrack, shotBase, shotStart } from "./animation";
+import { resolveScreenPadding, resolveShotView } from "./shotView";
 import { orientedScreenMillimeters, orientedScreenPixels } from "./orientation";
 import { createLogoShot, createProject, createShot, createTextShot, defaultLogoStyle, shotKind } from "./defaults";
 import { deviceLayout } from "@/three/devices/layout";
 import { S } from "@/three/geometry";
+import { applyPastedMedia, type PasteMode } from "./paste";
+import { mapScreenFocusArea, type ScreenBounds } from "./screenLayout";
 
 export function applyCameraPreset(id: string) {
   const p = CAMERA_PRESETS.find((c) => c.id === id);
@@ -104,6 +106,7 @@ export function applyTemplate(id: string) {
     p.camera = { ...t.camera };
     if (t.aspect) p.aspect = t.aspect;
     p.blur = { ...createProject().blur, mode: "off", ...(t.blur ?? {}) };
+    p.screen.padding = 0;
     p.effects = t.effects ? t.effects.map((e) => ({ ...e, params: { ...e.params } })) : [];
     p.fade = t.fade ? { ...t.fade } : { in: 0, out: 0, color: "#000000" };
     if (t.sequence) {
@@ -146,6 +149,8 @@ export function applyTemplate(id: string) {
         delete shot.blurMode;
         delete shot.bokeh;
         delete shot.notch;
+        delete shot.effects;
+        delete shot.screenPadding;
       }
     }
   });
@@ -408,24 +413,8 @@ export async function importScreenBackground(file: File) {
 }
 
 /** Map a source-image region to the visible device screen using the same fit as ScreenSurface. */
-export function mapFocusAreaToScreen(area: FocusArea, media: Pick<MediaRef, "width" | "height">, screen: { width: number; height: number; chromeHeight?: number }, fit: FitMode): FocusArea | null {
-  const { width: W, height: H } = screen;
-  const top = screen.chromeHeight ?? 0, contentH = H - top;
-  if (![area.x, area.y, area.w, area.h, media.width, media.height, W, H, top].every(Number.isFinite) || area.w <= 0 || area.h <= 0 || media.width <= 0 || media.height <= 0 || W <= 0 || contentH <= 0 || top < 0) return null;
-  let dw = W, dh = contentH, dx = 0, dy = top;
-  if (fit !== "stretch") {
-    const scale = fit === "contain" ? Math.min(W / media.width, contentH / media.height) : Math.max(W / media.width, contentH / media.height);
-    dw = media.width * scale; dh = media.height * scale;
-    dx = (W - dw) / 2;
-    // Cover aligns tall screenshots to the top so their headers remain visible.
-    if (fit === "contain") dy += (contentH - dh) / 2;
-  }
-  const left = Math.max(0, dx + Math.max(0, area.x) * dw);
-  const right = Math.min(W, dx + Math.min(1, area.x + area.w) * dw);
-  const upper = Math.max(top, dy + Math.max(0, area.y) * dh);
-  const lower = Math.min(H, dy + Math.min(1, area.y + area.h) * dh);
-  if (right <= left || lower <= upper) return null;
-  return { id: area.id, x: left / W, y: upper / H, w: (right - left) / W, h: (lower - upper) / H };
+export function mapFocusAreaToScreen(area: FocusArea, media: Pick<MediaRef, "width" | "height">, screen: ScreenBounds, fit: FitMode): FocusArea | null {
+  return mapScreenFocusArea(area, media, screen, fit);
 }
 
 /** Source frame for a shot, including trim, speed and the same looping used by the renderer. */
@@ -453,7 +442,7 @@ export function composeAutoMotion(shotId: string, shuffleSeed = 0) {
   const [screenMmW, screenMmH] = orientedScreenMillimeters(spec, orientation);
   const [sw, sh] = spec.family === "flat" && layout.flat ? [layout.flat.w * S, layout.flat.h * S] : [screenMmW * S, screenMmH * S];
   const [screenW, screenH] = layout.flat?.px ?? orientedScreenPixels(spec, orientation);
-  const screen = { width: screenW, height: screenH, chromeHeight: spec.id === "browser" ? Math.round(screenW * 0.045) : 0 };
+  const screen = { width: screenW, height: screenH, padding: resolveScreenPadding(p, shot), chromeHeight: spec.id === "browser" ? Math.round(screenW * 0.045) : 0 };
   const areas = shot.focusAreas.map((area) => mapFocusAreaToScreen(area, shot.media!, screen, shot.fit)).filter((area): area is FocusArea => area !== null);
   if (!areas.length) return 0;
   if (shuffleSeed) {
@@ -516,4 +505,46 @@ export function projectSummary(p: Project): string {
 
 export function shotAt(p: Project, id: string | null): Shot | null {
   return p.shots.find((s) => s.id === id) ?? p.shots[0] ?? null;
+}
+
+let pasteGeneration = 0;
+/** Clipboard intent is captured before the chooser/decoder can outlive its target project. */
+export function requestPaste(files: File[]) {
+  if (!files.length) return;
+  const p = useEditor.getState().project, ui = useUI.getState();
+  const shot = locate(p, ui.time).shot;
+  const request: PasteRequest = { files, projectId: p.id, shotId: shot?.id ?? null, mediaId: (shotKind(shot) === "logo" ? shot?.logo?.media?.id : shot?.media?.id) ?? null };
+  if (ui.pasteMode === "ask") ui.setPasteRequest(request);
+  else void executePaste(request, ui.pasteMode);
+}
+
+export async function executePaste(request: PasteRequest, mode: Exclude<PasteMode, "ask">): Promise<void> {
+  const intent = ++pasteGeneration;
+  const ui = useUI.getState();
+  ui.setPasteRequest(null);
+  const current = () => {
+    const p = useEditor.getState().project;
+    const shot = p.shots.find((s) => s.id === request.shotId);
+    const mediaId = (shotKind(shot) === "logo" ? shot?.logo?.media?.id : shot?.media?.id) ?? null;
+    return intent === pasteGeneration && p.id === request.projectId && (!request.shotId || !!shot) && (mode !== "replace" || mediaId === request.mediaId);
+  };
+  if (!current()) { ui.showToast("The paste target changed. Paste again to choose its destination."); return; }
+  const refs: MediaRef[] = [];
+  let committed = false;
+  try {
+    for (const file of request.files) {
+      refs.push(await importMedia(file));
+      if (!current()) { ui.showToast("The paste target changed. Paste again to choose its destination."); return; }
+    }
+    let first: string | null = null;
+    beginInteraction();
+    try { useEditor.getState().update((p) => { first = applyPastedMedia(p, refs, mode, request.shotId); }); }
+    finally { endInteraction(); }
+    committed = true;
+    const p = useEditor.getState().project;
+    if (first) useUI.setState({ activeShotId: first, selectedShots: [first], selectedKeys: [], playing: false, time: shotStart(p, first) });
+    if (refs.some((r) => r.kind === "video" || r.kind === "audio")) ui.setTimelineOpen(true);
+    ui.showToast(mode === "replace" ? "Pasted media · existing clip timing preserved" : "Pasted media as new shots");
+  } catch (e) { ui.showToast(`Could not paste media: ${(e as Error).message}`); }
+  finally { if (!committed) await Promise.all(refs.map((ref) => deleteMedia(ref.id))); }
 }

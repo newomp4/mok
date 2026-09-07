@@ -8,12 +8,13 @@ import { Icon } from "@/components/icons";
 import { deleteProject, deleteTemplate, listProjects, listTemplates, loadProject, listingFailed, projectFromTemplate, saveTemplate, templateListingFailed, type TemplateMeta } from "@/lib/persistence";
 import type { Project, ProjectMeta } from "@/lib/types";
 import { getDevice } from "@/lib/devices";
-import { blobToDataURL } from "@/lib/media";
+import { blobToDataURL, mediaType } from "@/lib/media";
 import { captureImage } from "@/export/capture";
 import { MOD } from "@/lib/cn";
 import { exportProjectToFile, exportSizeFor, importProjectFromFile, saveCurrentProject } from "./hooks";
-import { newProject } from "@/lib/actions";
+import { executePaste, newProject } from "@/lib/actions";
 import { REPO_URL } from "./Menus";
+import { canReplacePastedMedia } from "@/lib/paste";
 import { CropModal } from "./CropModal";
 
 const SHORTCUTS: [string, string][] = [
@@ -50,10 +51,11 @@ const SHORTCUTS: [string, string][] = [
 function ShortcutsModal() {
   const modal = useUI((s) => s.modal);
   const setModal = useUI((s) => s.setModal);
+  const captureShortcut = useUI((s) => s.captureShortcut);
   return (
     <Modal open={modal === "shortcuts"} onClose={() => setModal(null)} title="Keyboard shortcuts" width={440}>
       <div className="scroll grid max-h-[60vh] grid-cols-[auto_1fr] gap-x-4 gap-y-2 overflow-auto p-4">
-        {SHORTCUTS.map(([k, d]) => (
+        {SHORTCUTS.filter(([, description]) => captureShortcut || description !== "Quick capture PNG").map(([k, d]) => (
           <div key={k} className="contents">
             <span className="flex items-center gap-1">{k.split(" ").map((p, i) => <Kbd key={i}>{p}</Kbd>)}</span>
             <span className="text-[11px] text-fg-2">{d}</span>
@@ -361,6 +363,10 @@ function PreferencesModal() {
   const setSnapCenter = useUI((s) => s.setSnapCenter);
   const timelineMode = useUI((s) => s.timelineMode);
   const setTimelineMode = useUI((s) => s.setTimelineMode);
+  const captureShortcut = useUI((s) => s.captureShortcut);
+  const setCaptureShortcut = useUI((s) => s.setCaptureShortcut);
+  const pasteMode = useUI((s) => s.pasteMode);
+  const setPasteMode = useUI((s) => s.setPasteMode);
   const fps = useEditor((s) => s.project.fps);
   const update = useEditor((s) => s.update);
   return (
@@ -370,6 +376,8 @@ function PreferencesModal() {
         <Pref label="Render quality" sub="Viewport pixel ratio. Exports always render at full resolution."><Segmented size="sm" value={String(dpr)} onChange={(v) => setDpr(Number(v))} options={[{ value: "1", label: "1×" }, { value: "1.5", label: "1.5×" }, { value: "2", label: "2×" }]} /></Pref>
         <Pref label="Timeline frame rate"><Segmented size="sm" value={String(fps)} onChange={(v) => update((p) => { p.fps = Number(v); })} options={[{ value: "24", label: "24" }, { value: "30", label: "30" }, { value: "60", label: "60" }]} /></Pref>
         <Pref label="Timeline" sub="Simple hides the keyframe lanes; Advanced shows every animated property."><Segmented size="sm" value={timelineMode} onChange={setTimelineMode} options={[{ value: "simple", label: "Simple" }, { value: "advanced", label: "Advanced" }]} /></Pref>
+        <Pref label="Pasted media" sub="Choose where clipboard images and videos go. Replacing keeps clip timing and camera settings."><Segmented size="sm" value={pasteMode} onChange={setPasteMode} options={[{ value: "ask", label: "Ask" }, { value: "replace", label: "Replace" }, { value: "add", label: "New shot" }]} /></Pref>
+        <ToggleRow label="Quick capture shortcut" checked={captureShortcut} onChange={setCaptureShortcut} hint={`${MOD}E`} />
         <ToggleRow label="Snap pan to centre" checked={snapCenter} onChange={setSnapCenter} />
         <ToggleRow label="Interface sounds" checked={sounds} onChange={setSounds} hint="chime · blip" />
       </div>
@@ -421,6 +429,32 @@ export function Modals() {
       <PreferencesModal />
       <WhatsNewModal />
       <CropModal />
+      <PasteChoiceModal />
     </>
   );
+}
+
+function PasteChoiceModal() {
+  const request = useUI((s) => s.pasteRequest);
+  const close = useUI((s) => s.setPasteRequest);
+  const project = useEditor((s) => s.project);
+  const [remember, setRemember] = useState(false);
+  const shot = project.shots.find((s) => s.id === request?.shotId);
+  const types = request?.files.map((file) => ({ kind: mediaType(file).startsWith("audio/") ? "audio" as const : mediaType(file).startsWith("video/") ? "video" as const : "image" as const }));
+  const replace = canReplacePastedMedia(shot, types);
+  const choose = (mode: "replace" | "add") => {
+    if (!request) return;
+    if (remember) useUI.getState().setPasteMode(mode);
+    void executePaste(request, mode);
+  };
+  return <Modal open={!!request} onClose={() => close(null)} title="Paste media" width={400}>
+    <div className="flex flex-col gap-3 p-4">
+      <p className="text-[12px] text-fg-2">{request?.files.length} file{request?.files.length === 1 ? "" : "s"} from your clipboard. Choose where to put them.</p>
+      <p className="label-sm text-muted">Replace keeps the current clip&apos;s duration, trim, fit and camera. Additional images or videos become following shots. Audio files use the soundtrack lane.</p>
+      <Button variant="soft" onClick={() => choose("replace")} disabled={!replace}>Replace {shot?.name ?? "current shot"}</Button>
+      <Button variant="accent" onClick={() => choose("add")}>Add as new shot{(request?.files.length ?? 0) > 1 ? "s" : ""}</Button>
+      <ToggleRow label="Remember this choice" checked={remember} onChange={setRemember} />
+      <Button variant="ghost" onClick={() => close(null)}>Cancel paste</Button>
+    </div>
+  </Modal>;
 }

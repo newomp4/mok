@@ -386,14 +386,19 @@ export async function hasAnyProjects(): Promise<boolean> {
   return ks.some((k) => typeof k === "string" && k.startsWith(PROJECT_PREFIX));
 }
 
-export function downloadBlob(blob: Blob, filename: string) {
+export function downloadBlob(blob: Blob, filename: string, cleanup?: () => Promise<void>) {
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => {
-    URL.revokeObjectURL(a.href);
+  let url: string | null = null;
+  const release = () => {
+    if (url) URL.revokeObjectURL(url);
     a.remove();
-  }, 1000);
+    void cleanup?.().catch(() => {});
+  };
+  try {
+    a.href = url = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(release, cleanup ? 60_000 : 1000);
+  } catch (error) { release(); throw error; }
 }

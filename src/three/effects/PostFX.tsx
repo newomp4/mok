@@ -1,9 +1,9 @@
 "use client";
 import { useEffect, useMemo, useRef } from "react";
-import { useShotView } from "@/three/Device";
+import { useRenderShot, useShotView } from "@/three/Device";
 import { useFrame, useThree } from "@react-three/fiber";
-import { EffectComposer, Bloom, ChromaticAberration, DepthOfField, Noise, SMAA, ToneMapping, Vignette } from "@react-three/postprocessing";
-import { BlendFunction, ToneMappingMode, type DepthOfFieldEffect, type EffectComposer as EffectComposerImpl } from "postprocessing";
+import { EffectComposer, Bloom, ChromaticAberration, Noise, SMAA, ToneMapping, Vignette } from "@react-three/postprocessing";
+import { BlendFunction, ToneMappingMode, type EffectComposer as EffectComposerImpl } from "postprocessing";
 import * as THREE from "three";
 import { useEditor } from "@/store/editor";
 import { anim } from "@/three/anim";
@@ -14,17 +14,28 @@ import { getEffectDef } from "@/lib/presets";
 import { CARD_Z } from "@/three/CardLayer";
 import { getDevice } from "@/lib/devices";
 import { effectiveKeyboardCase } from "@/lib/orientation";
+import { useRenderQuality } from "@/three/renderQuality";
+import { DitheredOutputPass, LinearCapturePass, StraightColorPass } from "./LinearCapturePass";
+import { resolveShotEffects } from "@/lib/shotView";
+import { DetailShadowPass } from "./DetailShadowPass";
+import { LinearDepthOfFieldEffect } from "./LinearDepthOfFieldEffect";
 
 export function PostFX() {
   const view = useShotView();
   const blurMode = view.blurMode;
   const bokeh = view.bokeh;
-  const effects = useEditor((s) => s.project.effects);
+  const shot = useRenderShot();
+  const effects = useEditor((s) => resolveShotEffects(s.project, shot));
   const borderRadius = useEditor((s) => s.project.mockup.borderRadius);
   const casePreference = useEditor((s) => s.project.mockup.caseKeyboard ?? true);
+  const detailStrength = useEditor((s) => s.project.scene.detailShadows ?? 0);
   const shownDevice = useShownDevice((s) => s.id);
   const caseKeyboard = effectiveKeyboardCase(getDevice(shownDevice ?? view.device), view.orientation, casePreference);
   const composerRef = useRef<EffectComposerImpl>(null);
+  const quality = useRenderQuality();
+  const capture = useMemo(() => new LinearCapturePass(), []);
+  const output = useMemo(() => new DitheredOutputPass(), []);
+  const straight = useMemo(() => new StraightColorPass(), []);
 
   const focus = useMemo(() => new FocusBlurEffect(), []);
   const sharpen = useMemo(() => new SharpenEffect(), []);
@@ -32,8 +43,12 @@ export function PostFX() {
   const lens = useMemo(() => createLensDistortion(), []);
   const ghost = useMemo(() => new GhostEffect(), []);
   const liquid = useMemo(() => new LiquidGlassEffect(), []);
-  const dofRef = useRef<DepthOfFieldEffect>(null);
   const scene = useThree((s) => s.scene);
+  const camera = useThree((s) => s.camera);
+  const depth = useMemo(() => new LinearDepthOfFieldEffect(camera), [camera]);
+  useEffect(() => () => depth.dispose(), [depth]);
+  const detail = useMemo(() => new DetailShadowPass(scene, camera), [scene, camera]);
+  useEffect(() => () => detail.dispose(), [detail]);
   const raycaster = useMemo(() => new THREE.Raycaster(), []);
   const coverFor = useRef<THREE.Object3D | null>(null);
   const coverKey = useRef("");
@@ -52,6 +67,10 @@ export function PostFX() {
     viewport.composer = composerRef.current;
     return () => { viewport.composer = null; };
   });
+  useEffect(() => {
+    viewport.linearCapture = capture;
+    return () => { if (viewport.linearCapture === capture) viewport.linearCapture = null; capture.dispose(); output.dispose(); straight.dispose(); };
+  }, [capture, output, straight]);
 
   // the composer only resizes when the CSS size changes, so a pixel-ratio change (a different
   // monitor, browser zoom) would otherwise leave every pass at the old buffer resolution
@@ -85,8 +104,10 @@ export function PostFX() {
   useFrame((state) => {
     const v = anim.values;
     if (!v) return;
+    detail.strength = anim.card ? 0 : detailStrength;
+    detail.radius = Math.max(0.008, anim.camDist * 0.006);
     focus.setParams(v["blur.focusX"], 1 - v["blur.focusY"], v["blur.focusSize"], v["blur.falloff"], blurMode === "linear" ? "linear" : blurMode === "directional" ? "directional" : "radial", v["blur.strength"], bokeh, v["blur.angle"]);
-    const dof = dofRef.current;
+    const dof = blurMode === "depth" ? depth : null;
     if (dof) {
       // focal point: the surface under the focus position (autofocus), smoothed so it never pops
       const cam = state.camera;
@@ -191,9 +212,10 @@ export function PostFX() {
   const liquidOn = !!on("liquidGlass");
 
   return (
-    <EffectComposer ref={composerRef} mergeMode={EFFECT_MERGE_MODE} multisampling={blurMode === "depth" ? 0 : 4} frameBufferType={THREE.HalfFloatType}>
-      {blurMode === "depth" ? <SMAA /> : <></>}
-      {blurMode === "depth" ? <DepthOfField ref={dofRef} worldFocusDistance={5} worldFocusRange={1} bokehScale={4} resolutionScale={0.75} /> : <></>}
+    <EffectComposer ref={composerRef} mergeMode={EFFECT_MERGE_MODE} multisampling={blurMode === "depth" ? 0 : quality.samples} frameBufferType={THREE.HalfFloatType}>
+      {detailStrength > 0 ? <primitive object={detail} /> : <></>}
+      {blurMode === "depth" || quality.samples === 0 ? <SMAA /> : <></>}
+      {blurMode === "depth" ? <primitive object={depth} /> : <></>}
       {blurMode === "radial" || blurMode === "linear" || blurMode === "directional" ? <primitive object={focus} /> : <></>}
       {chromaOn ? <ChromaticAberration offset={new THREE.Vector2(chromaAmt, chromaAmt)} radialModulation modulationOffset={0.3} /> : <></>}
       {fisheyeOn ? <primitive object={lens} /> : <></>}
@@ -201,10 +223,13 @@ export function PostFX() {
       {ghostOn ? <primitive object={ghost} /> : <></>}
       {liquidOn ? <primitive object={liquid} /> : <></>}
       {bloomOn ? <Bloom mipmapBlur intensity={param("bloom", "intensity")} luminanceThreshold={param("bloom", "threshold")} radius={param("bloom", "radius")} levels={6} /> : <></>}
+      <primitive object={capture} />
+      <primitive object={straight} />
       <ToneMapping mode={ToneMappingMode.NEUTRAL} />
       {glassOn ? <primitive object={glass} /> : <></>}
       {grainOn ? <Noise premultiply blendFunction={BlendFunction.SCREEN} opacity={param("grain", "amount") * 0.9} /> : <></>}
       {vignetteOn ? <Vignette darkness={param("vignette", "darkness")} offset={param("vignette", "offset")} eskil={false} /> : <></>}
+      <primitive object={output} />
     </EffectComposer>
   );
 }

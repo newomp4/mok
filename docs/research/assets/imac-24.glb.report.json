@@ -1,0 +1,95 @@
+{
+  "inputBytes": 1593696,
+  "outputBytes": 3595864,
+  "encoder": "Khronos toktx 4.4.2 UASTC quality 3, Zstd 18, full mips; normalized XYZ normals",
+  "textures": [
+    {
+      "image": 0,
+      "width": 2048,
+      "height": 2048,
+      "roles": [
+        "srgb"
+      ],
+      "levels": 12,
+      "sourceBytes": 352890,
+      "ktxBytes": 1035291,
+      "rgbaMipBytes": 22369621,
+      "blockMipBytes": 5592432,
+      "sha256": "702c7898a97d79f9e2ffdcbba6a8ea54679d8acaf56f031ef3c8ffe575e0d634"
+    },
+    {
+      "image": 1,
+      "width": 512,
+      "height": 512,
+      "roles": [
+        "srgb"
+      ],
+      "levels": 10,
+      "sourceBytes": 17968,
+      "ktxBytes": 218173,
+      "rgbaMipBytes": 1398101,
+      "blockMipBytes": 349552,
+      "sha256": "5d80ffe5b080ac7f098f750ba23b36776e846ceb0679694482d850d115dbc011"
+    },
+    {
+      "image": 2,
+      "width": 512,
+      "height": 512,
+      "roles": [
+        "srgb"
+      ],
+      "levels": 10,
+      "sourceBytes": 31644,
+      "ktxBytes": 262139,
+      "rgbaMipBytes": 1398101,
+      "blockMipBytes": 349552,
+      "sha256": "f0e8b79942202e8a64fa06dc4ae00f363de388858c394a396d47749b12f352f3"
+    },
+    {
+      "image": 3,
+      "width": 512,
+      "height": 512,
+      "roles": [
+        "normal"
+      ],
+      "levels": 10,
+      "sourceBytes": 19808,
+      "ktxBytes": 267505,
+      "rgbaMipBytes": 1398101,
+      "blockMipBytes": 349552,
+      "sha256": "11bc730d6031b1c3ff9c06a5c82b6871976c38e6e706683ac3a926aa806f0acf"
+    },
+    {
+      "image": 4,
+      "width": 2048,
+      "height": 1024,
+      "roles": [
+        "srgb"
+      ],
+      "levels": 12,
+      "sourceBytes": 30334,
+      "ktxBytes": 665742,
+      "rgbaMipBytes": 11184811,
+      "blockMipBytes": 2796240,
+      "sha256": "cd1bd0dd25086078a59273e649e86614c8dcc1170026f58f871a6e124376f0d1"
+    },
+    {
+      "image": 5,
+      "width": 256,
+      "height": 256,
+      "roles": [
+        "srgb"
+      ],
+      "levels": 9,
+      "sourceBytes": 412,
+      "ktxBytes": 6171,
+      "rgbaMipBytes": 349525,
+      "blockMipBytes": 87408,
+      "sha256": "ca9423ec5af4d6d5d0d5558de2126f027a10b6c23733ad3654602838907818bf"
+    }
+  ],
+  "sourceInvariants": {
+    "structure": "e880cd8cd7bc4c673f4398ae2aa7582c66d1a4648f52f8613a08b538500e4edb",
+    "geometry": "79c0c77108e641d6823cfd9093f4379424ff892f36b54fc2ebd00ad5b06783d7"
+  }
+}

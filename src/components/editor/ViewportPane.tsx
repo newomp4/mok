@@ -120,8 +120,10 @@ export function ViewportPane() {
   const scenePreset = useEditor((s) => s.project.scene.preset);
   const dprPref = useUI((s) => s.dpr);
   const interacting = useUI((s) => s.interacting);
+  const playing = useUI((s) => s.playing);
+  const previewScale = useRenderFlags((s) => s.previewScale);
   // ease the GPU while the user is dragging or zooming; full resolution settles back 250 ms later
-  const dpr = interacting && dprPref > 1.5 ? 1.5 : dprPref;
+  const dpr = interacting || playing ? Math.max(1, Math.min(interacting ? 1.5 : dprPref, dprPref * previewScale)) : dprPref;
   const dragging = useUI((s) => s.dragging);
   const setDragging = useUI((s) => s.setDragging);
   const setViewport = useUI((s) => s.setViewport);

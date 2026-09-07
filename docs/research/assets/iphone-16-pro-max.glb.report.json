@@ -1,0 +1,67 @@
+{
+  "inputBytes": 568976,
+  "outputBytes": 3414904,
+  "encoder": "Khronos toktx 4.4.2 UASTC quality 3, Zstd 18, full mips; normalized XYZ normals",
+  "textures": [
+    {
+      "image": 0,
+      "width": 2048,
+      "height": 2048,
+      "roles": [
+        "normal"
+      ],
+      "levels": 12,
+      "sourceBytes": 119356,
+      "ktxBytes": 2293436,
+      "rgbaMipBytes": 22369621,
+      "blockMipBytes": 5592432,
+      "sha256": "4f1e6fb1de2d075700b67498e8af6ad7ab253ea82afde21bd20443bb8af865fc"
+    },
+    {
+      "image": 1,
+      "width": 512,
+      "height": 2048,
+      "roles": [
+        "srgb"
+      ],
+      "levels": 12,
+      "sourceBytes": 20434,
+      "ktxBytes": 373230,
+      "rgbaMipBytes": 5592405,
+      "blockMipBytes": 1398160,
+      "sha256": "4dc8db80343347e46d20973decc3d3385886999a050476b8985eee88de9f3b57"
+    },
+    {
+      "image": 2,
+      "width": 512,
+      "height": 256,
+      "roles": [
+        "srgb"
+      ],
+      "levels": 10,
+      "sourceBytes": 7866,
+      "ktxBytes": 100560,
+      "rgbaMipBytes": 699051,
+      "blockMipBytes": 174800,
+      "sha256": "b3f0b562bb42c1eee43ca32a7b50c09145d92f50193193dce0fe5b6a39c28e5f"
+    },
+    {
+      "image": 3,
+      "width": 512,
+      "height": 512,
+      "roles": [
+        "normal"
+      ],
+      "levels": 10,
+      "sourceBytes": 18174,
+      "ktxBytes": 244442,
+      "rgbaMipBytes": 1398101,
+      "blockMipBytes": 349552,
+      "sha256": "005efef742a148f99bd0f561f79f65a655b3a36bc623e8a6ad995e91f4859994"
+    }
+  ],
+  "sourceInvariants": {
+    "structure": "563ad4158a6e1fb7f5d1bc87052659628eaab49b111b5e7841289d0e3b0382c8",
+    "geometry": "416fd59c3f33f61118c08d6d3c58019df9948ae8576be86e6afb26aad8a10d22"
+  }
+}

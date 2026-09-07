@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useUI } from "@/store/ui";
 import { Button } from "@/components/ui";
+import { WorkflowTour } from "./WorkflowTour";
 import { clamp } from "@/lib/cn";
 
 interface Step {
@@ -26,13 +27,29 @@ const STEPS: Step[] = [
 
 /** Coach-mark tour: dims everything except the current target and explains it. */
 export function Tour() {
+  const kind = useUI((s) => s.tourKind);
+  const step = useUI((s) => s.tourStep);
+  if (step === null) return null;
+  return kind === "editor" ? <EditorTour /> : <WorkflowTour key={kind} kind={kind} />;
+}
+function EditorTour() {
   const step = useUI((s) => s.tourStep);
   const setStep = useUI((s) => s.setTourStep);
+  const panel = useRef<HTMLDivElement>(null);
+  const originalInspector = useRef(useUI.getState().inspectorOpen);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const current = step === null ? null : STEPS[step];
 
+  useEffect(() => {
+    const focused = document.activeElement as HTMLElement | null;
+    const inspectorOpen = originalInspector.current;
+    panel.current?.focus();
+    return () => { useUI.setState({ inspectorOpen }); focused?.focus(); };
+  }, []);
+
   useLayoutEffect(() => {
     if (!current) { setRect(null); return; }
+    if (current.target && ["source", "mockup", "scene"].includes(current.target)) useUI.setState({ inspectorOpen: true });
     const compute = () => {
       if (!current.target) { setRect(null); return; }
       const el = document.querySelector(`[data-tour="${current.target}"]`) as HTMLElement | null;
@@ -50,7 +67,13 @@ export function Tour() {
     if (step === null) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") finish();
-      if (e.key === "ArrowRight" || e.key === "Enter") next();
+      if (e.key === "ArrowRight" || (e.key === "Enter" && !(e.target as HTMLElement)?.closest("button"))) { e.preventDefault(); next(); }
+      if (e.key === "Tab") {
+        const buttons = [...(panel.current?.querySelectorAll<HTMLButtonElement>("button") ?? [])];
+        const first = buttons[0], last = buttons[buttons.length - 1];
+        if (e.shiftKey && (document.activeElement === first || document.activeElement === panel.current)) { e.preventDefault(); last?.focus(); }
+        else if (!e.shiftKey && (document.activeElement === last || document.activeElement === panel.current)) { e.preventDefault(); first?.focus(); }
+      }
       if (e.key === "ArrowLeft") setStep(Math.max(0, (step ?? 0) - 1));
     };
     document.addEventListener("keydown", onKey);
@@ -88,7 +111,7 @@ export function Tour() {
         <rect width="100%" height="100%" fill="rgba(0,0,0,0.55)" mask="url(#mok-tour-mask)" />
         {hole && <rect x={hole.x} y={hole.y} width={hole.w} height={hole.h} rx="10" fill="none" stroke="var(--accent)" strokeWidth="1.5" />}
       </svg>
-      <div className="fade-in absolute flex flex-col gap-2 rounded-xl border border-line bg-panel p-4 shadow-2xl" style={{ ...card, width: W }}>
+      <div ref={panel} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Editor tour" className="fade-in absolute flex flex-col gap-2 rounded-xl border border-line bg-panel p-4 shadow-2xl" style={{ ...card, width: W }}>
         <div className="flex items-center justify-between">
           <span className="label text-fg">{current.title}</span>
           <span className="num text-[10px] text-muted">{step + 1} / {STEPS.length}</span>

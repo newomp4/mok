@@ -3,7 +3,7 @@
 Turn product screens into premium 3D mockups and videos, entirely in the browser.
 
 mok is a self-hosted device-mockup editor: drop a screenshot or a screen recording onto a
-procedurally built iPhone, iPad, MacBook, Apple Watch, Studio Display, iMac or flat card,
+detailed iPhone, iPad, MacBook, Apple Watch, display, iMac or generated flat card,
 light it with studio HDRIs, animate the camera on a keyframe timeline and export stills up to
 8K or frame-exact MP4 / WebM video up to 4K 60 fps with motion blur. Nothing is uploaded — all
 rendering and encoding happens locally with WebGL and WebCodecs.
@@ -50,7 +50,7 @@ rendering and encoding happens locally with WebGL and WebCodecs.
 - **Effects**: vignette, grain, bloom, chromatic aberration, sharpen, pixel grid, fish eye, glass border,
   screen fade, ghost, liquid glass
 - **Per-shot everything**: a shot owns its framing, its lens (focus point, strength, range, angle, mode, bokeh),
-  its device, finish, environment and lighting. Move the camera on one shot and the rest stay where they were,
+  its device, finish, environment, lighting, effect stack and screen padding. Effects inherit project defaults until edited on a shot, and can be reset to inherit again. Move the camera on one shot and the rest stay where they were,
   or push one framing across the sequence with **Apply to all shots**
 - **Timeline**: media, **text** and **logo** shots placed anywhere on the ruler — drag one to open a **gap**, shown
   as a band that names the shots it sits between and holds the previous frame through it, right-click to close it;
@@ -65,9 +65,9 @@ rendering and encoding happens locally with WebGL and WebCodecs.
 - **Text shots** in Geist or 20 Google fonts (weight, size, colour, alignment, line height, tracking) and
   **logo shots** (PNG / SVG on a colour, with Liquid metal, Gem smoke and Heatmap shader looks), both with enter /
   exit animations
-- **Audio lane**: music or voiceover with volume, fades, trim and drag-to-offset; mixed into the exported video
+- **Audio**: a music/voiceover lane with volume, fades, trim and drag-to-offset, plus opt-in source-video audio on each shot. Clip audio follows trim, speed, loops and independent audio fades; speed changes pitch in both preview and export.
 - **Source tools**: crop, cover / contain / stretch, playback speed and trim start for video shots, per-shot media;
-  dropping a file offers to replace the shot, add a new shot, or become the audio track
+  padding per shot or project, and a remembered paste choice to replace the current source or add shots
 - **Six built-in sample screens** (Finance dark / light, Music, Messages, Analytics, Landing page) drawn
   procedurally at any resolution, so a mockup looks finished before you upload anything and every starter
   template opens with content already on the device
@@ -76,7 +76,7 @@ rendering and encoding happens locally with WebGL and WebCodecs.
 - **24 starter templates** with hover previews, including multi-shot sequences (title → device → logo), each
   opening with a sample screen already on the device
 - **Projects**: autosave, local project library (IndexedDB), portable `.mok.json` files, undo / redo
-- Light and dark UI in Geist Sans + Geist Mono, keyboard shortcuts (`?`), onboarding tour, what's new, preferences
+- Light and dark UI in Geist Sans + Geist Mono, keyboard shortcuts (`?`), onboarding plus isolated Timeline/Auto-motion practice tours, capture-shortcut preference and what's new
 
 ## Run it
 
@@ -94,17 +94,14 @@ Open http://localhost:3000. Production build: `pnpm build && pnpm start`. Deploy
   whose emissive map is the uploaded media, with a clear coat so the HDRI reflects across the glass
   like real cover glass. The renderer uses Khronos Neutral tone mapping; lighting and glass can affect displayed screenshot colors.
 - **Speed** — the scene only re-renders on demand (state changes, playback, export), textures are
-  uploaded at native screen resolution once, HDRIs are 1k and pre-filtered with PMREM, and MSAA runs
-  inside the post-processing composer.
+  uploaded before model promotion, HDRIs have licensed 2K and 1K tiers, and PMREM/model caches keep at most two/three unused-or-active entries except temporarily pinned work. All ten detailed models use KTX2 UASTC textures with complete mip chains. Memory planning selects actual GPU-supported MSAA counts; busy previews adapt resolution and idle frames restore the user's quality preference.
 - **Screen resolution** — preview screen canvases use up to 2560 pixels on the long edge. Exports
-  increase this to match the output, bounded by a 4096-pixel edge, 12 megapixels and the GPU texture
-  limit. This improves display detail in large captures; it cannot recover detail absent from the
+  increase this to match the output: normally a 4096-pixel edge and 12 megapixels, or up to an 8192-pixel edge and 24 megapixels for larger captures when the memory plan permits, always bounded by the GPU texture limit. This improves display detail in large captures; it cannot recover detail absent from the
   uploaded image. Darkroom reflection buffers are released when the scene is closed.
 - **Video** — every frame is rendered deterministically at the requested time, optionally
-  super-sampled in time for motion blur, and pushed through `VideoEncoder` with
-  [mediabunny](https://github.com/Vanilagy/mediabunny) muxing into MP4 or WebM.
+  sampled in linear HDR for motion blur before tone mapping and final dithering. Mediabunny decodes source frames by their timestamps, with a visible DOM-video fallback for unsupported inputs, and muxes WebCodecs output into MP4/WebM. Exports stream to private temporary browser storage (up to 4 GiB and available quota); browsers without that support use a bounded 128 MiB fallback. Cancellation and download completion clean up temporary files.
 - **State** — a single undoable project document (zustand + zundo); the timeline evaluates keyframes
-  into a shared per-frame object that scene components read imperatively, so playback never re-renders React.
+  into a shared per-frame object that scene components read imperatively; shot and effect changes also update their React consumers.
 
 ## Ultramock calibration
 
@@ -124,7 +121,7 @@ framing constant across FOV and pans in screen space, so their values are conver
    `SKETCHFAB_TOKEN=… node scripts/fetch-sketchfab.mjs <uid>=<name>` downloads, converts and credits
    a Sketchfab model in one go.
 2. Or convert a file you already have: `scripts/optimize-model.sh input.glb public/models/name.glb`
-   (meshopt geometry + WebP textures; a 25 MB export becomes 1–8 MB).
+   (Meshopt geometry + 2K PNG preparation + KTX2 textures with full mipmaps). See `docs/research/asset-render-preparation.md` for pinned tool versions and the measured download-size/texture-memory tradeoff.
 3. Add a spec with a `model` block in `src/lib/devices.ts`. `screenMesh` takes a mesh or material name
    (comma-separated list allowed); leave it empty to let mok pick the largest thin, non-horizontal
    surface. In the running app, `window.__mok.registry.glbInfo()` lists every mesh with its size,
@@ -155,6 +152,13 @@ node scripts/use-central-icons.mjs --revert                       # back to the 
 - `scripts/qa-shot.mjs out.png "<js>"` — headless screenshot of the editor for visual QA
   (needs Playwright's Chromium; `window.__mok` exposes the stores, actions and export API in the page)
 - `scripts/optimize-model.sh in.glb out.glb` — compress a glTF for the web
+- `MOK_QA_URL=http://localhost:3000 node scripts/render-regression.mjs /tmp/mok-renders` — actual PNG fixtures and frame/resource counters
+- `MOK_QA_URL=http://localhost:3000 node scripts/test-render-gpu.mjs` — numerical GPU checks for linear motion blur and transparent color
+- `node scripts/test-media-browser.mjs` — real CFR/VFR/rotated decode, sample-accurate audio and OPFS cleanup (requires Playwright and ffmpeg)
+  Set `MOK_QA_NODE_MODULES` if Playwright is installed outside this project.
+
+The implementation status and remaining licensed-model dependencies are recorded in
+`docs/research/implementation-2026-09-06.md` and `docs/research/missing-hardware-assets.md`.
 
 ## Credits
 

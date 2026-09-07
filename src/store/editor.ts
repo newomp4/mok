@@ -307,6 +307,11 @@ export const useEditor = create<EditorState>()(
           const b = clone(a);
           b.id = uid();
           b.name = `${a.name} b`;
+          if (a.audio) {
+            const envelope = a.audio.envelope ?? { offset: 0, duration: a.duration };
+            a.audio.envelope = { ...envelope };
+            b.audio = { ...b.audio!, envelope: { ...envelope, offset: envelope.offset + t } };
+          }
           b.duration = Math.round((a.duration - t) * 100) / 100;
           a.duration = t;
           b.trimStart = (a.trimStart ?? 0) + t * (a.speed ?? 1);

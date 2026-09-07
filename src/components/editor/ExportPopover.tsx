@@ -4,13 +4,15 @@ import { useEditor } from "@/store/editor";
 import { useUI } from "@/store/ui";
 import { Button, IconButton, NumberRow, Popover, Segmented, SelectRow, ToggleRow } from "@/components/ui";
 import { EXPORT_SIZES, getAspect } from "@/lib/presets";
-import { useRenderFlags } from "@/three/registry";
+import { useRenderFlags, viewport } from "@/three/registry";
+import { availableSampleCounts, deviceMemoryGB, planRenderQuality } from "@/three/qualityPlan";
 import { captureImage, estimateBitrate, exportVideo, type ImageFormat, type VideoQuality } from "@/export/capture";
 import { downloadBlob } from "@/lib/persistence";
 import { exportAssets } from "@/export/assets";
 import { totalDuration } from "@/lib/animation";
 import { exportSizeFor, quickCapture, slug } from "./hooks";
 import { chime } from "@/lib/sounds";
+import { MOD } from "@/lib/cn";
 
 type Orientation = "landscape" | "square" | "portrait";
 const imageState = { format: "png" as ImageFormat, transparent: false, size: "1080", orientation: "landscape" as Orientation, customW: 1920, customH: 1080 };
@@ -20,8 +22,9 @@ const even = (n: number, max: number) => Math.round(pixels(n, max) / 2) * 2;
 const BLUR_SAMPLES = { off: 1, low: 4, med: 8, high: 16 };
 
 export function CaptureButton() {
+  const shortcut = useUI((s) => s.captureShortcut);
   return (
-    <IconButton icon="camera" label="Quick capture (⌘E)" onClick={() => void quickCapture()} className="border border-accent/50 bg-accent-soft text-accent hover:bg-accent-soft hover:text-accent" />
+    <IconButton icon="camera" label={shortcut ? `Quick capture (${MOD}E)` : "Quick capture"} onClick={() => void quickCapture()} className="border border-accent/50 bg-accent-soft text-accent hover:bg-accent-soft hover:text-accent" />
   );
 }
 
@@ -68,6 +71,7 @@ export function ExportButton() {
 
   const runImage = async () => {
     if (useUI.getState().exporting) return;
+    if (!imageQuality.supported) { ui.showToast(imageQuality.reason!); return; }
     setOpen(false);
     const ctrl = new AbortController();
     ui.setExporting({ label: "Rendering image…", progress: 0.4, cancel: () => ctrl.abort() });
@@ -85,17 +89,19 @@ export function ExportButton() {
 
   const runVideo = async () => {
     if (useUI.getState().exporting) return;
+    if (!videoQuality.supported) { ui.showToast(videoQuality.reason!); return; }
     setOpen(false);
     const ctrl = new AbortController();
     ui.setExporting({ label: "Preparing…", progress: 0, cancel: () => ctrl.abort() });
     try {
-      const { blob, ext } = await exportVideo({
+      const result = await exportVideo({
         width: vidDims[0], height: vidDims[1], fps: videoState.fps, quality: videoState.quality,
         samples: BLUR_SAMPLES[videoState.blur], transparent: videoState.transparent, format: videoState.transparent ? "webm" : videoState.format,
         signal: ctrl.signal,
         onProgress: (p, label) => ui.setExporting({ label, progress: p, cancel: () => ctrl.abort() }),
       });
-      downloadBlob(blob, `${slug(project.name)}-${vidDims[0]}x${vidDims[1]}-${videoState.fps}fps.${ext}`);
+      const { blob, ext } = result;
+      downloadBlob(blob, `${slug(project.name)}-${vidDims[0]}x${vidDims[1]}-${videoState.fps}fps.${ext}`, result.cleanup);
       ui.showToast(`Exported ${vidDims[0]} × ${vidDims[1]} ${ext.toUpperCase()}`);
       chime();
     } catch (e) {
@@ -109,6 +115,20 @@ export function ExportButton() {
   const duration = totalDuration(project);
   const exportPlan = exportAssets(project, { type: "video", start: 0, end: duration }, videoState.transparent);
   const mbps = estimateBitrate(vidDims[0], vidDims[1], videoState.fps, videoState.quality) / 1e6;
+  const renderer = viewport.state?.gl;
+  const capabilities = renderer?.capabilities;
+  const supportedSamples = useMemo(() => renderer ? availableSampleCounts(renderer.getContext() as WebGL2RenderingContext) : [0], [renderer]);
+  const qualityOptions = {
+    maxTextureSize: capabilities?.maxTextureSize ?? 8192,
+    maxSamples: capabilities?.maxSamples ?? 4,
+    supportedSamples,
+    detailShadows: (project.scene.detailShadows ?? 0) > 0,
+    deviceMemoryGB: deviceMemoryGB(),
+    effectCount: Math.max(project.effects.length, ...project.shots.map((shot) => shot.effects?.length ?? project.effects.length)),
+    depth: project.blur.mode === "depth" || project.shots.some((shot) => shot.blurMode === "depth"),
+  };
+  const imageQuality = planRenderQuality({ ...qualityOptions, width: imgDims[0], height: imgDims[1] });
+  const videoQuality = planRenderQuality({ ...qualityOptions, width: vidDims[0], height: vidDims[1], motionSamples: BLUR_SAMPLES[videoState.blur] });
   const orientationOptions = [
     { value: "landscape" as Orientation, label: "Landscape", icon: "landscape" },
     { value: "square" as Orientation, label: "Square", icon: "square-outline" },
@@ -142,7 +162,8 @@ export function ExportButton() {
               </div>
             )}
             <Summary title={`${imgDims[0]} × ${imgDims[1]}`} tag={imageState.format.toUpperCase()} sub={imageState.transparent ? "Transparent background." : "Opaque background."} />
-            <Button variant="solid" size="lg" onClick={() => void runImage()} className="mt-1 w-full">Export image</Button>
+            {(imageQuality.reason || imageQuality.note) && <p role="status" className="px-0.5 text-[11px] leading-relaxed text-muted">{imageQuality.reason ?? imageQuality.note}</p>}
+            <Button variant="solid" size="lg" disabled={!imageQuality.supported} onClick={() => void runImage()} className="mt-1 w-full">Export image</Button>
           </div>
         ) : (
           <div className="flex flex-col gap-1.5">
@@ -166,7 +187,8 @@ export function ExportButton() {
             <Segmented size="sm" value={videoState.transparent ? "webm" : videoState.format} onChange={(v) => { videoState.format = v; rerender(); }} options={[{ value: "mp4", label: "MP4 · H.264", disabled: videoState.transparent }, { value: "webm", label: "WebM · VP9" }]} />
             <ToggleRow label="Transparent background" checked={videoState.transparent} onChange={(v) => { videoState.transparent = v; rerender(); }} hint="WebM" />
             <Summary title={`${vidDims[0]} × ${vidDims[1]}`} tag={`${videoState.fps} fps · ~${mbps.toFixed(0)} Mbps`} sub={`${duration.toFixed(1)}s · ${exportPlan.shots.length} shot${exportPlan.shots.length === 1 ? "" : "s"} in range${exportPlan.audio ? " · audio" : ""}${videoState.blur !== "off" ? ` · ${BLUR_SAMPLES[videoState.blur]}× motion blur` : ""}`} />
-            <Button variant="solid" size="lg" onClick={() => void runVideo()} className="mt-1 w-full">Export video</Button>
+            {(videoQuality.reason || videoQuality.note) && <p role="status" className="px-0.5 text-[11px] leading-relaxed text-muted">{videoQuality.reason ?? videoQuality.note}</p>}
+            <Button variant="solid" size="lg" disabled={!videoQuality.supported} onClick={() => void runVideo()} className="mt-1 w-full">Export video</Button>
             <p className="px-0.5 pt-1 text-[10px] leading-relaxed text-muted">Frames are rendered one by one and encoded with WebCodecs, so the export is deterministic at any frame rate.</p>
           </div>
         )}

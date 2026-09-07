@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
+import { useRenderShot } from "../Device";
+import { resolveShotEffects } from "@/lib/shotView";
 import { useEditor } from "@/store/editor";
 import type { DeviceSpec } from "@/lib/devices";
 import { S, roundedPlaneGeometry } from "@/three/geometry";
@@ -12,7 +14,8 @@ export function FlatModel({ spec, mats, screen, size, radius, finish }: {
 }) {
   const { w, h } = size;
   const rMm = Math.min(w, h) * radius;
-  const depth = useEditor((s) => { const fx = s.project.effects.find((e) => e.id === "depth" && e.enabled); return fx ? Math.max(0, Math.min(1, fx.params.amount ?? 0.2)) : 0; });
+  const shot = useRenderShot();
+  const depth = useEditor((s) => { const fx = resolveShotEffects(s.project, shot).find((e) => e.id === "depth" && e.enabled); return fx ? Math.max(0, Math.min(1, fx.params.amount ?? 0.2)) : 0; });
   const edge = finish !== "none" || depth > 0;
   const thickness = spec.body.d + Math.min(w, h) * depth * 0.15;
   const geos = useMemo(() => {

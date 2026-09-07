@@ -1,0 +1,123 @@
+{
+  "inputBytes": 7721992,
+  "outputBytes": 17162852,
+  "encoder": "Khronos toktx 4.4.2 UASTC quality 3, Zstd 18, full mips; normalized XYZ normals",
+  "textures": [
+    {
+      "image": 0,
+      "width": 2048,
+      "height": 2048,
+      "roles": [
+        "normal"
+      ],
+      "levels": 12,
+      "sourceBytes": 2426388,
+      "ktxBytes": 5147649,
+      "rgbaMipBytes": 22369621,
+      "blockMipBytes": 5592432,
+      "sha256": "4ddd9e001baac6851fd42318e2129adcd0e782fde512958361fbb918a6aa579e"
+    },
+    {
+      "image": 1,
+      "width": 2048,
+      "height": 2048,
+      "roles": [
+        "linear"
+      ],
+      "levels": 12,
+      "sourceBytes": 4070026,
+      "ktxBytes": 3874605,
+      "rgbaMipBytes": 22369621,
+      "blockMipBytes": 5592432,
+      "sha256": "30f2c017120f76e1c1e4b1c7b6fd94e182e286772a2dbf5b230bb61dad586052"
+    },
+    {
+      "image": 2,
+      "width": 2048,
+      "height": 2048,
+      "roles": [
+        "normal"
+      ],
+      "levels": 12,
+      "sourceBytes": 303798,
+      "ktxBytes": 3943068,
+      "rgbaMipBytes": 22369621,
+      "blockMipBytes": 5592432,
+      "sha256": "a92d57164b6149d18fceb1945f0490d8b4b0c3416b5c6651d07a77c7a6e4b40c"
+    },
+    {
+      "image": 3,
+      "width": 1024,
+      "height": 1024,
+      "roles": [
+        "normal"
+      ],
+      "levels": 11,
+      "sourceBytes": 135434,
+      "ktxBytes": 884635,
+      "rgbaMipBytes": 5592405,
+      "blockMipBytes": 1398128,
+      "sha256": "70e30456bae3dabfdb6c8e602b7d4ad06e48d48930173f773d62ee07ceb66621"
+    },
+    {
+      "image": 4,
+      "width": 1024,
+      "height": 1024,
+      "roles": [
+        "normal"
+      ],
+      "levels": 11,
+      "sourceBytes": 87822,
+      "ktxBytes": 846215,
+      "rgbaMipBytes": 5592405,
+      "blockMipBytes": 1398128,
+      "sha256": "5196e762581eaa94a5f032e191aff69fa119a7133a758148424820bd31479e48"
+    },
+    {
+      "image": 5,
+      "width": 1024,
+      "height": 1024,
+      "roles": [
+        "srgb"
+      ],
+      "levels": 11,
+      "sourceBytes": 101396,
+      "ktxBytes": 244705,
+      "rgbaMipBytes": 5592405,
+      "blockMipBytes": 1398128,
+      "sha256": "19f4cbe7e316f7b3b9fda4dfc0addb5f8ecbff77eae38a51566217d55adb9b36"
+    },
+    {
+      "image": 6,
+      "width": 1024,
+      "height": 1024,
+      "roles": [
+        "normal"
+      ],
+      "levels": 11,
+      "sourceBytes": 136082,
+      "ktxBytes": 888138,
+      "rgbaMipBytes": 5592405,
+      "blockMipBytes": 1398128,
+      "sha256": "4a408173fe23573ea58277acd19e8aab0e4ee9ca645133af9a202af27b881ce6"
+    },
+    {
+      "image": 7,
+      "width": 1024,
+      "height": 2048,
+      "roles": [
+        "srgb"
+      ],
+      "levels": 12,
+      "sourceBytes": 43588,
+      "ktxBytes": 916313,
+      "rgbaMipBytes": 11184811,
+      "blockMipBytes": 2796240,
+      "sha256": "e39af5e8f3ed6ba0a2b993a0408948842c17743d0814e4316fe7644a3d55ae7e"
+    }
+  ],
+  "sourceInvariants": {
+    "structure": "f7a0854b0a6cbc6cd65c55c30b900977575483fc4ef39215bbb2a7629e498372",
+    "geometry": "a56ea0cbc506464854ed4100f0aa689072c66a892060717f9e822f2fa9fe1dde"
+  }
+}

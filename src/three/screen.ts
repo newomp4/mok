@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import type { LoadedMedia } from "@/lib/media";
+import { fitScreenMedia } from "@/lib/screenLayout";
+import { getVideoFrame } from "@/lib/videoFrames";
 import type { FitMode } from "@/lib/types";
 
 export interface ScreenChrome {
@@ -25,6 +27,8 @@ export class ScreenSurface {
   private placeholderKey = "";
   bg: { color: string; image: HTMLImageElement | HTMLCanvasElement | null } = { color: "#000000", image: null };
   statusBar = false;
+  padding = 0;
+  private lastDecodedVersion: number | null = null;
   quarterTurn: -1 | 0 | 1 = 0;
   private probe: HTMLCanvasElement | null = null;
   private avg: HTMLCanvasElement | null = null;
@@ -43,12 +47,12 @@ export class ScreenSurface {
     this.texture.flipY = true;
   }
 
-  setSize(w: number, h: number, maxEdge = 2560, upscale = false) {
+  setSize(w: number, h: number, maxEdge = 2560, upscale = false, rasterLimits: { maxEdge?: number; maxPixels?: number } = {}) {
     // Preview stays economical. Export can use a larger raster for source images and browser
     // chrome, with both edge and area limits so an 8K export cannot allocate a huge screen canvas.
-    const max = Math.max(1, Math.min(4096, maxEdge));
+    const max = Math.max(1, Math.min(rasterLimits.maxEdge ?? 4096, maxEdge));
     const edgeScale = max / Math.max(1, w, h);
-    const scale = Math.min(upscale ? edgeScale : Math.min(1, edgeScale), Math.sqrt(12_000_000 / Math.max(1, w * h)));
+    const scale = Math.min(upscale ? edgeScale : Math.min(1, edgeScale), Math.sqrt((rasterLimits.maxPixels ?? 12_000_000) / Math.max(1, w * h)));
     const nw = Math.max(1, Math.floor(w * scale)), nh = Math.max(1, Math.floor(h * scale));
     if (nw === this.width && nh === this.height) return;
     this.width = nw; this.height = nh;
@@ -82,6 +86,13 @@ export class ScreenSurface {
     this.draw(true);
   }
 
+  setPadding(value: number) {
+    const padding = Number.isFinite(value) ? Math.max(0, Math.min(0.45, value)) : 0;
+    if (padding === this.padding) return;
+    this.padding = padding;
+    this.draw(true);
+  }
+
   setQuarterTurn(turn: -1 | 0 | 1) {
     if (this.quarterTurn === turn) return;
     this.quarterTurn = turn;
@@ -111,25 +122,21 @@ export class ScreenSurface {
   private drawContent(force: boolean): boolean {
     const ctx = this.ctx, width = this.contentWidth, height = this.contentHeight;
     const m = this.media;
+    const decoded = m?.kind === "video" ? getVideoFrame(m.ref.id) : null;
     if (!m) {
-      const key = `${width}x${height}:${this.chrome.kind}`;
+      const key = `${width}x${height}:${this.chrome.kind}:${this.padding}:${this.fit}`;
       if (!force && key === this.placeholderKey) return false;
       this.placeholderKey = key;
-      this.drawPlaceholder();
-      this.drawChrome();
-      if (this.statusBar) this.drawStatusBar();
-      this.texture.needsUpdate = true;
-      return true;
-    }
-    const el = m.element;
-    if (m.kind === "video") {
-      const v = el as HTMLVideoElement;
-      if (!force && v.currentTime === this.lastVideoTime) return false;
+    } else if (m.kind === "video") {
+      const v = m.element as HTMLVideoElement;
+      const version = decoded?.version ?? null;
+      if (!force && version === this.lastDecodedVersion && (decoded || v.currentTime === this.lastVideoTime)) return false;
+      this.lastDecodedVersion = version;
       this.lastVideoTime = v.currentTime;
     }
     const top = this.chromeHeight;
     const areaH = height - top;
-    const mw = m.width, mh = m.height;
+    const mw = decoded?.width ?? m?.width ?? width, mh = decoded?.height ?? m?.height ?? areaH;
     ctx.fillStyle = this.bg.color;
     ctx.fillRect(0, top, width, areaH);
     if (this.bg.image) {
@@ -140,21 +147,18 @@ export class ScreenSurface {
       const bw = iw * bs, bh = ih * bs;
       ctx.drawImage(bi, (width - bw) / 2, top + (areaH - bh) / 2, bw, bh);
     }
-    let dw = width, dh = areaH, dx = 0, dy = top;
-    if (this.fit === "cover") {
-      const s = Math.max(width / mw, areaH / mh);
-      dw = mw * s; dh = mh * s; dx = (width - dw) / 2; dy = top;
-      // top-align tall content (screenshots) so headers stay visible
-      if (dh > areaH) dy = top;
-    } else if (this.fit === "contain") {
-      const s = Math.min(width / mw, areaH / mh);
-      dw = mw * s; dh = mh * s; dx = (width - dw) / 2; dy = top + (areaH - dh) / 2;
-    }
+    const { clip, draw } = fitScreenMedia({ width: mw, height: mh }, { width, height, chromeHeight: top, padding: this.padding }, this.fit);
     ctx.save();
     ctx.beginPath();
-    ctx.rect(0, top, width, areaH);
+    ctx.rect(clip.x, clip.y, clip.width, clip.height);
     ctx.clip();
-    ctx.drawImage(el as CanvasImageSource, dx, dy, dw, dh);
+    if (m) ctx.drawImage((decoded?.image ?? m.element) as CanvasImageSource, draw.x, draw.y, draw.width, draw.height);
+    else {
+      ctx.translate(draw.x, draw.y);
+      ctx.scale(draw.width / width, draw.height / areaH);
+      ctx.translate(0, -top);
+      this.drawPlaceholder();
+    }
     ctx.restore();
     this.drawChrome();
     if (this.statusBar) this.drawStatusBar();
@@ -378,7 +382,7 @@ export class ScreenSurface {
         if (yy > cy0 + chH - u) return;
         ctx.fillStyle = `hsl(${(i * 65 + 20) % 360} 55% 55%)`; roundRect(ctx, lx + u * 0.9, yy - u * 0.5, u, u, u * 0.3); ctx.fill();
         text(n, lx + u * 2.3, yy, u * 0.65, "rgba(255,255,255,0.85)");
-        text(`$${(9 - i) * 1.7}k`, W - u * 2.5, yy, u * 0.65, "rgba(255,255,255,0.5)", 500, "right");
+        text(`$${((9 - i) * 1.7).toFixed(1)}k`, W - u * 2.5, yy, u * 0.65, "rgba(255,255,255,0.5)", 500, "right");
       });
     }
     ctx.textAlign = "left";

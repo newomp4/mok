@@ -21,9 +21,10 @@ import { DesktopModel } from "@/three/devices/Desktop";
 import { FlatModel } from "@/three/devices/Flat";
 import { GlbDevice } from "@/three/devices/GlbModel";
 import { useModelBounds, useShownDevice } from "@/three/registry";
+import { useRenderQuality } from "@/three/renderQuality";
 import { useShallow } from "zustand/react/shallow";
 import { locate } from "@/lib/animation";
-import { resolveShotView, type ShotView } from "@/lib/shotView";
+import { resolveShotEffects, resolveScreenPadding, resolveShotView, type ShotView } from "@/lib/shotView";
 import { orientationFitSize, orientationQuarterTurn, orientedBounds, orientedScreenPixels, supportsOrientation } from "@/lib/orientation";
 import { Suspense } from "react";
 import type { Project } from "@/lib/types";
@@ -57,6 +58,7 @@ export function useShotView(): ShotView {
 }
 
 export function Device({ layout }: { layout: DeviceLayout }) {
+  const quality = useRenderQuality();
   const view = useShotView();
   const deviceId = view.device;
   const finishId = view.finish;
@@ -68,6 +70,7 @@ export function Device({ layout }: { layout: DeviceLayout }) {
   const shot = useRenderShot() ?? null;
   const media = useMedia(shot?.media);
   const screenCfg = useEditor((s) => s.project.screen);
+  const padding = useEditor((s) => resolveScreenPadding(s.project, shot));
   const screenBgImage = useMedia(screenCfg.bg?.type === "image" ? screenCfg.bg.image : null);
   const invalidate = useThree((s) => s.invalidate);
   const maxAniso = useThree((s) => s.gl.capabilities.getMaxAnisotropy());
@@ -92,7 +95,7 @@ export function Device({ layout }: { layout: DeviceLayout }) {
   const applied = useRef<{ media: LoadedMedia | null; fit: string } | null>(null);
   const lastSample = useRef(-1);
   // re-sample the screen colour whenever the picture or the scene changes
-  useEffect(() => { lastSample.current = -1; invalidate(); }, [media, scenePreset, shot?.fit, screenCfg.bg?.type, screenCfg.bg?.color, screenCfg.bg?.preset, screenBgImage, invalidate]);
+  useEffect(() => { lastSample.current = -1; invalidate(); }, [media, scenePreset, shot?.fit, padding, screenCfg.bg?.type, screenCfg.bg?.color, screenCfg.bg?.preset, screenBgImage, invalidate]);
   const screenMat = useMemo(() => createScreenMaterial(surface.texture), [surface]);
   useEffect(() => () => screenMat.dispose(), [screenMat]);
 
@@ -107,6 +110,7 @@ export function Device({ layout }: { layout: DeviceLayout }) {
   }, [layout.spec, surface, layout.flat, layout.quarterTurn, invalidate]);
 
   useEffect(() => {
+    surface.setPadding(padding);
     surface.setMedia(media, shot?.fit ?? "cover", { kind: spec.id === "browser" ? "browser" : "none", dark: finish.id === "dark" });
     applied.current = { media, fit: shot?.fit ?? "cover" };
     invalidate();
@@ -117,7 +121,7 @@ export function Device({ layout }: { layout: DeviceLayout }) {
       v.addEventListener("seeked", onSeeked);
       return () => v.removeEventListener("seeked", onSeeked);
     }
-  }, [media, shot?.fit, spec.id, finish.id, surface, invalidate]);
+  }, [media, shot?.fit, padding, spec.id, finish.id, surface, invalidate]);
 
   // a gradient screen background is painted once into its own canvas and handed over like an upload
   const gradientCanvas = useMemo(() => document.createElement("canvas"), []);
@@ -159,12 +163,14 @@ export function Device({ layout }: { layout: DeviceLayout }) {
     const quarterTurn = orientationQuarterTurn(layout.spec, currentView.orientation);
     if (orientationGroup.current) orientationGroup.current.rotation.z = quarterTurn * Math.PI / 2;
     surface.setQuarterTurn(quarterTurn);
+    surface.setPadding(resolveScreenPadding(anim.project ?? useEditor.getState().project, anim.shot));
     const pixels = layout.spec.family === "flat" && layout.flat ? layout.flat.px : layout.spec.screenPx;
     const exportEdge = Math.min(state.gl.capabilities.maxTextureSize, Math.max(state.size.width, state.size.height));
-    surface.setSize(pixels[0], pixels[1], anim.exporting ? exportEdge : 2560, anim.exporting);
+    surface.setSize(pixels[0], pixels[1], anim.exporting ? exportEdge : 2560, anim.exporting,
+      anim.exporting ? { maxEdge: quality.screenMaxEdge, maxPixels: quality.screenMaxPixels } : undefined);
     const screenGrid = screenMat.userData.screenGrid;
     if (screenGrid) {
-      const pixel = (anim.project ?? useEditor.getState().project).effects.find((effect) => effect.id === "pixel" && effect.enabled);
+      const pixel = resolveShotEffects(anim.project ?? useEditor.getState().project, anim.shot).find((effect) => effect.id === "pixel" && effect.enabled);
       screenGrid.strength.value = pixel ? (pixel.params.amount ?? 0.6) : 0;
       screenGrid.pitch.value = pixel?.params.size ?? 4;
       screenGrid.resolution.value.set(pixels[0], pixels[1]);

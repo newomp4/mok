@@ -1,9 +1,8 @@
 "use client";
 import { Suspense, useCallback, useEffect, useMemo, useRef } from "react";
-import { useFrame, useLoader, useThree } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import { PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
-import { HDRLoader } from "three/examples/jsm/loaders/HDRLoader.js";
 import { useEditor } from "@/store/editor";
 import { useShallow } from "zustand/react/shallow";
 import { useUI } from "@/store/ui";
@@ -21,12 +20,14 @@ import { CARD_Z, CardLayer, FadeOverlay, setToneMapped } from "@/three/CardLayer
 import { rasterSize } from "@/three/raster";
 import { ContactShadow } from "@/three/ContactShadow";
 import { resizeShadowMap, useRenderQuality } from "@/three/renderQuality";
+import { acquireEnvironment } from "@/three/environmentAssets";
+import { resolveShotEffects } from "@/lib/shotView";
+import { calibrateShadow } from "@/three/shadowCalibration";
 
 const DEG = Math.PI / 180;
 
 /** Evaluates the timeline into `anim` once per frame and drives playback. */
 function Driver() {
-  const setFrameloop = useThree((s) => s.setFrameloop);
   const invalidate = useThree((s) => s.invalidate);
   const get = useThree((s) => s.get);
 
@@ -35,12 +36,12 @@ function Driver() {
     const unsubs = [
       useEditor.subscribe((s) => s.project, () => invalidate()),
       useUI.subscribe((s) => s.time, () => invalidate()),
-      useUI.subscribe((s) => s.playing, (playing) => { setFrameloop(playing ? "always" : "demand"); invalidate(); }),
+      useUI.subscribe((s) => s.playing, () => invalidate()),
       useRenderFlags.subscribe(() => invalidate()),
     ];
     invalidate();
     return () => { unsubs.forEach((u) => u()); viewport.get = null; };
-  }, [get, invalidate, setFrameloop]);
+  }, [get, invalidate]);
 
   useFrame((_, delta) => {
     const ui = useUI.getState();
@@ -65,7 +66,7 @@ function Driver() {
     anim.values = evaluate(p, loc.shot, loc.localT);
     if (loc.shot && ui.activeShotId !== loc.shot.id && anim.exportTime === null) useUI.setState({ activeShotId: loc.shot.id });
     // screen fade effect
-    const fade = p.effects.find((e) => e.id === "screenFade" && e.enabled);
+    const fade = resolveShotEffects(p, loc.shot).find((e) => e.id === "screenFade" && e.enabled);
     if (fade && loc.shot) {
       const fin = fade.params.in ?? 0.6, fout = fade.params.out ?? 0.6;
       const a = fin > 0 ? Math.min(1, loc.localT / fin) : 1;
@@ -152,16 +153,27 @@ function Lighting() {
   const scene = useThree((s) => s.scene);
   const gl = useThree((s) => s.gl);
   const invalidate = useThree((s) => s.invalidate);
-  const hdr = useLoader(HDRLoader, preset.file);
+  const tier = useRenderQuality().hdrTier;
+  const displayed = useRef<{ texture: THREE.Texture; release: () => void } | null>(null);
   useEffect(() => {
-    const pmrem = new THREE.PMREMGenerator(gl);
-    pmrem.compileEquirectangularShader();
-    const rt = pmrem.fromEquirectangular(hdr);
-    scene.environment = rt.texture;
-    pmrem.dispose();
-    invalidate();
-    return () => { if (scene.environment === rt.texture) scene.environment = null; rt.dispose(); };
-  }, [hdr, gl, scene, invalidate]);
+    const incoming = acquireEnvironment(gl, preset.file, tier);
+    let cancelled = false, promoted = false;
+    void incoming.promise.then((rt) => {
+      if (cancelled) return;
+      const previous = displayed.current;
+      displayed.current = { texture: rt.texture, release: incoming.release };
+      scene.environment = rt.texture;
+      promoted = true;
+      previous?.release();
+      invalidate();
+    }, () => { if (!cancelled) useUI.getState().showToast("Lighting could not load. The previous lighting is still in use."); });
+    return () => { cancelled = true; if (!promoted) incoming.release(); };
+  }, [preset.file, tier, gl, scene, invalidate]);
+  useEffect(() => () => {
+    const current = displayed.current;
+    if (scene.environment === current?.texture) scene.environment = null;
+    current?.release(); displayed.current = null;
+  }, [scene]);
   useFrame(() => {
     const v = anim.values;
     if (!v) return;
@@ -310,6 +322,20 @@ function SceneLightRig({ preset, floorY, children }: { preset: ScenePresetId; fl
   return <group ref={group}>{children}</group>;
 }
 
+function ShadowCalibration({ floorY, fitSize }: { floorY: number; fitSize: number }) {
+  const resolution = useRenderQuality().shadow;
+  useFrame(({ scene }) => {
+    const device = scene.getObjectByName("device");
+    if (!device || anim.card) return;
+    device.updateWorldMatrix(true, true);
+    scene.traverseVisible((object) => {
+      const light = object as THREE.DirectionalLight;
+      if (light.castShadow && (light.isDirectionalLight || (object as THREE.SpotLight).isSpotLight)) calibrateShadow(light, device, floorY, fitSize, resolution);
+    });
+  }, -16);
+  return null;
+}
+
 /**
  * The studio backdrop ships with no room at all, so the Light controls had nothing analytic to
  * turn: the HDRI swung but nothing cast anything. This is its key — authored at the pose the
@@ -389,6 +415,7 @@ export function SceneRoot() {
         </SceneLightRig>
       </Suspense>
       <Device layout={layout} />
+      <ShadowCalibration floorY={layout.floorY} fitSize={sceneSize} />
       {shadowsOn && (
         // A key light alone leaves the device looking like it hovers. This is the tight occlusion
         // right under it, which is what actually sits it on the ground.

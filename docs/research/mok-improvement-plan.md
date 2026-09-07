@@ -1,6 +1,6 @@
 # mok improvement backlog after UltraMock research
 
-September 6, 2026. Implementation plan based on **mok c316d05**. The documentation correction D01 is complete. All renderer, asset and product changes below remain proposed work.
+September 6, 2026. Implementation plan based on **mok c316d05**. This document preserves the original proposal. The subsequent implementation of Q01–Q07, R01–R04, A01–A02 and P01–P04 is recorded in [the implementation report](implementation-2026-09-06.md); detailed hardware additions still depend on suitable original licensed assets.
 
 Inputs: the companion [renderer audit](mok-rendering-audit.md), [technical dossier](ultramock-technical-dossier.md), [asset metadata](ultramock-asset-metadata.json), and the [mok c316d05 source snapshot](https://github.com/newomp4/mok/tree/c316d05c3c5fc1aa3abbc307ccb41775af1adf5f). Source paths are relative to that repository.
 
@@ -17,7 +17,7 @@ The aim is measurable visual quality, stable exports and responsive editing. Mat
 - Scoped media/font preload, shot-boundary settling, exact timeline/sample stepping, alpha image/WebM options, encoder startup fallback, cancellation and editor restoration.
 - A separate soundtrack lane with volume, trim, fades and start offset.
 
-Existing test/docs record production checks and 100 tests. That is a useful baseline, not proof that all GPU/browser/source-codec combinations work. The proposed implementation items below are **not yet shipped**; only D01 changes documentation in this research pass.
+Existing test/docs record production checks and 100 tests. That is a useful baseline, not proof that all GPU/browser/source-codec combinations work. The sections below describe the original acceptance criteria and evidence at the research baseline; consult the implementation report for current status and validation limits.
 
 ## Priority and effort conventions
 

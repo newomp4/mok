@@ -1,11 +1,9 @@
 "use client";
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useShotView } from "@/three/Device";
 import * as THREE from "three";
 import { useFrame, useThree } from "@react-three/fiber";
 import { anim } from "@/three/anim";
-import { useGLTF } from "@react-three/drei";
-import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 import type { DeviceSpec, Finish } from "@/lib/devices";
 import { S } from "@/three/geometry";
 import { useModelBounds, viewport, type ModelFeatures, useShownDevice } from "@/three/registry";
@@ -16,19 +14,10 @@ import { addMetalSurfaceDetail } from "@/three/surfaceDetail";
 import { addEnvironmentGain } from "@/three/environmentGain";
 import { effectiveKeyboardCase } from "@/lib/orientation";
 import { installScreenSpill, laptopReceivers, updateScreenReceiver } from "@/three/screenSpill";
-
-let ktx2: KTX2Loader | null = null;
-
-/**
- * The loader setup these models need. Preloading and rendering share it so both land on the same
- * entry in drei's cache, which is what lets a preloaded model render without suspending again.
- */
-function ktx2Support(gl: THREE.WebGLRenderer): NonNullable<Parameters<typeof useGLTF.preload>[3]> {
-  return (loader) => {
-    if (!ktx2) ktx2 = new KTX2Loader().setTranscoderPath("/basis/").detectSupport(gl);
-    loader.setKTX2Loader(ktx2 as never);
-  };
-}
+import { acquireModel, readModel, retainModel } from "@/three/modelAssets";
+import { prepareModelGpu } from "@/three/gpuPreparation";
+import { applyMaterialProfile } from "@/three/materialProfiles";
+import { useUI } from "@/store/ui";
 
 const SCREEN_RE = /screen|display|wallpaper|lcd|oled|panel|glass_front|front_glass/i;
 
@@ -460,15 +449,15 @@ interface GlbProps {
  * While it is the incoming half of a device swap it is mounted `hidden`, and reports through
  * `onReady` once it is not merely loaded but prepared.
  */
-/** Device ids whose model has been fully prepared at least once, so a return trip needs no hold. */
-const prepared = new Set<string>();
-
 function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: GlbProps & { hidden?: boolean; onReady?: () => void }) {
   const gl = useThree((s) => s.gl);
   const maxAniso = gl.capabilities.getMaxAnisotropy();
   const invalidate = useThree((s) => s.invalidate);
   const model = spec.model!;
-  const gltf = useGLTF(model.url, true, true, ktx2Support(gl));
+  const asset = readModel(gl, model.url);
+  const gltf = asset.gltf;
+  const camera = useThree((s) => s.camera);
+  useLayoutEffect(() => retainModel(gl, model.url, asset), [gl, model.url, asset]);
   const root = useMemo(() => {
     const clone = gltf.scene.clone(true);
     clone.updateWorldMatrix(true, true);
@@ -488,11 +477,18 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
     holder.scale.setScalar(scale);
     return holder;
   }, [gltf.scene, model.scale, model.size, spec.body.h, spec.body.w]);
+  const mounts = useMemo(() => ({ count: 0, root }), [root]);
+  const compiling = useMemo(() => ({ tasks: new Set<Promise<unknown>>(), root }), [root]);
 
-  useEffect(() => () => {
-    disposeModelResources(root);
-    if (viewport.glbInfo === root.userData.glbInfo) viewport.glbInfo = null;
-  }, [root]);
+  useEffect(() => {
+    mounts.count++;
+    return () => {
+      mounts.count--;
+      // Three's compileAsync polls live material programs. Never dispose them under that poll.
+      void Promise.allSettled([...compiling.tasks]).then(() => { if (!mounts.count) disposeModelResources(root); });
+      if (viewport.glbInfo === root.userData.glbInfo) viewport.glbInfo = null;
+    };
+  }, [root, mounts, compiling]);
 
   const view = useShotView();
   const notch = view.notch;
@@ -659,7 +655,7 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
               map.needsUpdate = true;
             }
           }
-          if (t.normalMap) t.normalScale = t.normalScale.clone().multiplyScalar(0.65);
+          applyMaterialProfile(spec.id, t);
           addMetalSurfaceDetail(t);
           addEnvironmentGain(t);
           if (receivers?.meshes.has(mesh)) installScreenSpill(t, receivers.receiver);
@@ -706,7 +702,16 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
 
   // Declared after both effects above, so a model is only ever announced once its screen, its
   // movable parts and its materials are in place — never as a frame of raw geometry.
-  useEffect(() => { prepared.add(spec.id); onReady?.(); }, [onReady, spec.id]);
+  useEffect(() => {
+    const controller = new AbortController();
+    const release = retainModel(gl, model.url, asset);
+    const task = prepareModelGpu(gl, root, camera, scene, controller.signal);
+    compiling.tasks.add(task);
+    void task.then(() => { if (!controller.signal.aborted) { onReady?.(); invalidate(); } }, (error: unknown) => {
+      if (!controller.signal.aborted) useUI.getState().showToast(`Could not prepare ${spec.name}: ${error instanceof Error ? error.message : "GPU preparation failed"}`);
+    }).finally(() => { compiling.tasks.delete(task); release(); });
+    return () => controller.abort();
+  }, [root, gl, camera, scene, asset, model.url, spec.name, onReady, invalidate, compiling]);
 
   return <primitive object={root} visible={!hidden} rotation={model.rotation ?? [0, 0, 0]} position={model.position ?? [0, 0, 0]} />;
 }
@@ -722,24 +727,29 @@ export function GlbDevice({ spec, finish, screen, gloss = 1.3 }: GlbProps) {
   // for as long as a newly picked device takes to load
   const [shown, setShown] = useState(spec);
   const [staged, setStaged] = useState(spec);
-  const promote = useCallback(() => { if (staged === spec) setShown(staged); }, [staged, spec]);
+  const requested = useRef(spec);
+  useLayoutEffect(() => { requested.current = spec; }, [spec]);
+  const promote = useCallback(() => { if (staged === requested.current) setShown(staged); }, [staged]);
   // the rest of the scene frames and sizes itself to whatever is actually on screen
   useEffect(() => { useShownDevice.getState().set(shown.id); }, [shown.id]);
   useEffect(() => () => useShownDevice.getState().set(null), []);
 
   useEffect(() => {
     if (staged === spec) return;
-    // a model that has already been prepared this session is in the cache, so holding the old one
-    // in front of it only adds a wait the viewport does not need
-    if (prepared.has(spec.id)) { setStaged(spec); setShown(spec); return; }
     // Start the download here rather than leaving it to the render below, so the loading manager —
     // which drives the viewport's pill and the wait an export does before it encodes — knows the
     // model is on its way the moment the device changes.
-    useGLTF.preload(spec.model!.url, true, true, ktx2Support(gl));
+    const incoming = acquireModel(gl, spec.model!.url);
     // The incoming model suspends while it loads. Inside a transition React leaves the committed
     // scene alone until it resolves, instead of swapping in the empty Suspense fallback above us,
     // and that is what keeps the editor from going blank.
-    startTransition(() => setStaged(spec));
+    let cancelled = false;
+    void incoming.asset.promise.then(() => {
+      if (cancelled) return;
+      if (incoming.asset.error) { useUI.getState().showToast(`Could not load ${spec.name}. The previous device is still shown.`); return; }
+      startTransition(() => setStaged(spec));
+    });
+    return () => { cancelled = true; incoming.release(); };
   }, [spec, staged, gl]);
 
   // The finish and gloss the visible model keeps on its way out. A newly picked device brings its
