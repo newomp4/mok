@@ -1,0 +1,300 @@
+[
+  {
+    "url": "https://www.ultramock.io/models/v1/iphone-17-p-sim.glb",
+    "rangeStatus": 206,
+    "totalBytes": 4794104,
+    "jsonBytes": 116812,
+    "asset": {
+      "generator": "glTF-Transform v4.3.0",
+      "version": "2.0"
+    },
+    "extensionsUsed": [
+      "EXT_meshopt_compression",
+      "KHR_materials_clearcoat",
+      "KHR_materials_specular",
+      "KHR_mesh_quantization",
+      "KHR_texture_basisu"
+    ],
+    "extensionsRequired": [
+      "EXT_meshopt_compression",
+      "KHR_mesh_quantization",
+      "KHR_texture_basisu"
+    ],
+    "meshes": 76,
+    "materials": 34,
+    "images": [
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/png",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/png",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      }
+    ],
+    "textureExtensions": [
+      "KHR_texture_basisu"
+    ],
+    "headers": {
+      "Cache-Control": "public, max-age=31536000, immutable",
+      "Content-Length": "20",
+      "Content-Range": "bytes 0-19/4794104",
+      "Content-Type": "model/gltf-binary"
+    }
+  },
+  {
+    "url": "https://www.ultramock.io/models/v1/macbook-neo.glb",
+    "rangeStatus": 206,
+    "totalBytes": 7407352,
+    "jsonBytes": 81700,
+    "asset": {
+      "generator": "glTF-Transform v4.3.0",
+      "version": "2.0"
+    },
+    "extensionsUsed": [
+      "EXT_meshopt_compression",
+      "KHR_materials_clearcoat",
+      "KHR_materials_specular",
+      "KHR_mesh_quantization",
+      "KHR_texture_basisu"
+    ],
+    "extensionsRequired": [
+      "EXT_meshopt_compression",
+      "KHR_mesh_quantization",
+      "KHR_texture_basisu"
+    ],
+    "meshes": 56,
+    "materials": 26,
+    "images": [
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/png",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/ktx2",
+        "uri": null
+      },
+      {
+        "mimeType": "image/png",
+        "uri": null
+      }
+    ],
+    "textureExtensions": [
+      "KHR_texture_basisu"
+    ],
+    "headers": {
+      "Cache-Control": "public, max-age=31536000, immutable",
+      "Content-Length": "20",
+      "Content-Range": "bytes 0-19/7407352",
+      "Content-Type": "model/gltf-binary"
+    }
+  },
+  {
+    "url": "https://www.ultramock.io/hdri/brown_photostudio_04_2k.hdr",
+    "rangeStatus": 206,
+    "headers": {
+      "Cache-Control": "public, max-age=0, must-revalidate",
+      "Content-Length": "1024",
+      "Content-Range": "bytes 0-1023/6477068",
+      "Content-Type": "application/octet-stream"
+    },
+    "header": "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n",
+    "resolution": "-Y 1024 +X 2048"
+  },
+  {
+    "url": "https://www.ultramock.io/textures/concrete-layers/concrete_layers_02_diff_2k.ktx2",
+    "rangeStatus": 206,
+    "headers": {
+      "Cache-Control": "public, max-age=0, must-revalidate",
+      "Content-Length": "1024",
+      "Content-Range": "bytes 0-1023/4195186",
+      "Content-Type": "image/ktx2"
+    },
+    "ktx2": {
+      "vkFormat": 0,
+      "typeSize": 1,
+      "width": 2048,
+      "height": 2048,
+      "depth": 0,
+      "layerCount": 0,
+      "faceCount": 1,
+      "levelCount": 12,
+      "supercompressionScheme": 2,
+      "dfd": {
+        "colorModel": 166,
+        "colorPrimaries": 1,
+        "transferFunction": 2,
+        "flags": 0
+      },
+      "metadata": {
+        "KTXwriter": "Basis Universal 2.10"
+      }
+    }
+  },
+  {
+    "url": "https://www.ultramock.io/textures/concrete-layers/concrete_layers_02_nor_dx_2k.ktx2",
+    "rangeStatus": 206,
+    "headers": {
+      "Cache-Control": "public, max-age=0, must-revalidate",
+      "Content-Length": "1024",
+      "Content-Range": "bytes 0-1023/4194361",
+      "Content-Type": "image/ktx2"
+    },
+    "ktx2": {
+      "vkFormat": 0,
+      "typeSize": 1,
+      "width": 2048,
+      "height": 2048,
+      "depth": 0,
+      "layerCount": 0,
+      "faceCount": 1,
+      "levelCount": 12,
+      "supercompressionScheme": 2,
+      "dfd": {
+        "colorModel": 166,
+        "colorPrimaries": 1,
+        "transferFunction": 1,
+        "flags": 0
+      },
+      "metadata": {
+        "KTXwriter": "Basis Universal 2.10"
+      }
+    }
+  }
+]

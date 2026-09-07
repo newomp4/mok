@@ -1,0 +1,157 @@
+{
+  "observedDateEDT": "2026-09-06",
+  "ultramockVersion": "2.45.0",
+  "mokApplicationCommit": "c316d05c3c5fc1aa3abbc307ccb41775af1adf5f",
+  "scope": "Public delivery/library fingerprints, live UI, and metadata-only free-asset inspection. No proprietary implementation or account data included.",
+  "findings": [
+    {
+      "component": "Hosting",
+      "value": "Vercel",
+      "confidence": "response headers",
+      "source": "https://www.ultramock.io/"
+    },
+    {
+      "component": "Next.js",
+      "value": "15.5.18",
+      "confidence": "explicit version declaration",
+      "source": "https://www.ultramock.io/_next/static/chunks/3284-cc45182ed8151748.js"
+    },
+    {
+      "component": "React and React DOM",
+      "value": "19.2.0-canary-0bdb9206-20250818",
+      "confidence": "explicit version declarations",
+      "source": "https://www.ultramock.io/_next/static/chunks/4bd1b696-fa6862eda8c97680.js"
+    },
+    {
+      "component": "Webpack",
+      "value": "version unknown",
+      "confidence": "runtime fingerprint",
+      "source": "https://www.ultramock.io/_next/static/chunks/webpack-697db5c1b2015331.js"
+    },
+    {
+      "component": "Tailwind CSS",
+      "value": "4.2.2",
+      "confidence": "license/version banner",
+      "source": "https://www.ultramock.io/_next/static/css/ac59162871453ad5.css"
+    },
+    {
+      "component": "Fonts",
+      "value": "Geist and Geist Mono",
+      "confidence": "font stylesheet",
+      "source": "https://www.ultramock.io/_next/static/css/e0c1431de24f285e.css"
+    },
+    {
+      "component": "Three.js",
+      "value": "r183",
+      "confidence": "explicit revision",
+      "source": "https://www.ultramock.io/_next/static/chunks/bd904a5c-c0c46d22e132d7c7.js"
+    },
+    {
+      "component": "Renderer",
+      "value": "WebGL2 / WebGLRenderer",
+      "confidence": "renderer construction",
+      "source": "https://www.ultramock.io/_next/static/chunks/5915-0ba40912bb6e7295.js"
+    },
+    {
+      "component": "Asset loaders",
+      "value": "GLTFLoader / KTX2Loader / Meshopt",
+      "confidence": "active loader configuration",
+      "source": "https://www.ultramock.io/_next/static/chunks/5915-0ba40912bb6e7295.js"
+    },
+    {
+      "component": "HDR and postprocessing",
+      "value": "HDRLoader / Three EffectComposer",
+      "confidence": "shipped component fingerprints",
+      "source": "https://www.ultramock.io/_next/static/chunks/3527-5a5911df1c67f966.js"
+    },
+    {
+      "component": "Mediabunny",
+      "value": "version unknown",
+      "confidence": "distinctive library fingerprint",
+      "source": "https://www.ultramock.io/_next/static/chunks/3242.e424b3ad7aeb1525.js"
+    },
+    {
+      "component": "WebCodecs",
+      "value": "VideoEncoder / VideoDecoder / AudioEncoder / AudioDecoder",
+      "confidence": "shipped codec orchestration",
+      "source": "https://www.ultramock.io/_next/static/chunks/2308-397f44d6c24e6c04.js"
+    },
+    {
+      "component": "Web Audio",
+      "value": "AudioContext / OfflineAudioContext",
+      "confidence": "browser API use",
+      "source": "https://www.ultramock.io/_next/static/chunks/337-0ce31169de093697.js"
+    },
+    {
+      "component": "Local storage",
+      "value": "IndexedDB",
+      "confidence": "browser API use",
+      "source": "https://www.ultramock.io/_next/static/chunks/7503-a51ae6cfe166093e.js"
+    },
+    {
+      "component": "Lucide / Radix context menu / Motion family",
+      "value": "exact versions unknown",
+      "confidence": "distinctive UI fingerprints",
+      "source": "https://www.ultramock.io/_next/static/chunks/3242.e424b3ad7aeb1525.js"
+    },
+    {
+      "component": "Sentry",
+      "value": "10.47.0",
+      "confidence": "SDK declaration",
+      "source": "https://www.ultramock.io/_next/static/chunks/3284-cc45182ed8151748.js"
+    },
+    {
+      "component": "Vercel Analytics",
+      "value": "2.0.1",
+      "confidence": "SDK declaration",
+      "source": "https://www.ultramock.io/_next/static/chunks/app/layout-4c549d060f5be9fb.js"
+    },
+    {
+      "component": "DataFast",
+      "value": "cookieless script",
+      "confidence": "script inclusion",
+      "source": "https://www.ultramock.io/_next/static/chunks/app/layout-4c549d060f5be9fb.js"
+    },
+    {
+      "component": "Stripe",
+      "value": "billing portal",
+      "confidence": "UI copy / portal integration fingerprint",
+      "source": "https://www.ultramock.io/_next/static/chunks/5403.f354d869e0797891.js"
+    },
+    {
+      "component": "glTF-Transform",
+      "value": "4.3.0",
+      "confidence": "free-model generator metadata",
+      "source": "https://www.ultramock.io/models/v1/macbook-neo.glb"
+    },
+    {
+      "component": "Basis Universal",
+      "value": "2.10",
+      "confidence": "KTX2 writer metadata",
+      "source": "https://www.ultramock.io/textures/concrete-layers/concrete_layers_02_diff_2k.ktx2"
+    }
+  ],
+  "notEstablished": [
+    "backend database",
+    "ORM",
+    "object-storage provider",
+    "auth SDK",
+    "email service",
+    "queues",
+    "CI provider",
+    "package manager",
+    "internal test framework",
+    "development editor or AI tools",
+    "3D authoring DCC",
+    "complete light/shadow/blur algorithms",
+    "paid render quality"
+  ],
+  "rejectedInferences": [
+    "WebGPU renderer from generic loader support",
+    "Draco assets from generic loader API",
+    "Supabase from diagnostic substring",
+    "Prisma from prismatic text",
+    "enabled session replay solely from bundled Sentry support",
+    "official MCP schema from an unofficial session-token bridge"
+  ]
+}

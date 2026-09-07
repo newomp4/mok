@@ -167,3 +167,5 @@ Device names are used descriptively; this project is not affiliated with Apple.
 ## September 2026 comparison pass
 
 See [the UltraMock comparison](docs/ultramock-comparison.md) for observed functionality, rendering findings and remaining hardware gaps. New features include upright phone/tablet orientation, independent project length, named missing-file recovery, RGB screen detail and flat extrusion. Reflection gains and export buffer quality are corrected; card Blur transitions now blur.
+
+The follow-up [technical dossier](docs/research/ultramock-technical-dossier.md) identifies UltraMock's public stack, asset formats and editor controls. The [renderer audit](docs/research/mok-rendering-audit.md) and [implementation plan](docs/research/mok-improvement-plan.md) distinguish shipped behavior from proposed quality, export and workflow improvements.

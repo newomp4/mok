@@ -2,6 +2,8 @@
 
 Research date: September 6, 2026. This is a functionality comparison, not a claim of identical rendering or exhaustive paid-feature access.
 
+The subsequent [technical dossier](research/ultramock-technical-dossier.md) adds current stack fingerprints, free-asset metadata, deeper control inspection and a prioritized improvement plan. The verification section below records the earlier 84-test pass; the later renderer pass is documented separately in [screen lighting verification](renderer-screen-lighting.md) with 100 tests.
+
 ## Evidence and method
 
 I inspected the [requested UltraMock editor/template](https://www.ultramock.io/?template=cmsi44fcq00006upexg689pgn) directly: device and scene pickers, lighting/background libraries, camera controls, effects, templates, source upload, orientation, auto-motion, timeline and image/video export panels. A synthetic quadrant image was uploaded to check upright landscape content. I compared those observations with mok's actual code and exercised mok locally.
@@ -18,10 +20,10 @@ The [official changelog](https://www.ultramock.io/changelog) identifies Three.js
 | Device orientation | Landscape/portrait observed on iPhone 17; ideal dimensions swap and media stays upright | Added independent portrait/landscape to phones/tablets, per-shot overrides, native-layout migration, upright re-fitting and rotated bounds; incompatible tablet keyboard cases hide and restore with orientation |
 | Device details | Finish, reflection, notch and status-bar controls observed | Finish/reflection, notch, adaptive status bar, laptop lid, supported tablet keyboard and watch band; actual available hardware depends on asset |
 | Camera | Five presets observed: Hero, Angled, Flat, Bottom, Detail; orbit, roll, FOV, zoom and pan | Nine presets plus manual/keyframed controls, center framing and guides |
-| Lighting | Five choices observed: Default, Studio Soft, Dark Rim, Two Tone, Warm Glow; light rotation | Eight independent HDR rigs and four studio looks; intensity/rotation animation |
+| Lighting | Five choices observed: Default, Studio Soft, Dark Rim, Two Tone, Warm Glow; light rotation | Eight lighting presets using six HDR sources, plus four studio looks; intensity/rotation animation |
 | Scene environments | Custom plus three Pro entries observed: Dark Room MacBook, Concrete Dark, Studio | Custom, studio, concrete, darkroom and gallery; independently authored scenes, not exact environments |
 | Background | 19 preset entries and custom image upload observed | 28 independent presets, color/image/transparent backgrounds, blur; preset artwork differs |
-| Screen background | Not fully characterized in the reference UI | Color/image/gradient backing for contain-fit media |
+| Screen background | Color backing and a separate Screen Padding control observed on MacBook Neo in the deeper scan | Color/image/gradient backing for contain-fit media; no explicit media-padding control |
 | Screen texture | Pixel Grid observed | Replaced whole-frame pixelation with RGB subpixels attached to the screen UVs, with minification filtering |
 | Flat thickness | Depth effect observed on Flat | Added real flat/browser extrusion geometry with a depth control |
 | Effects | 12 entries observed: Depth, Glass Border, Sharpen, Vignette, Grain, Fish Eye, Pixel Grid, Chromatic Abb., Bloom, Screen Fade, Ghost, Liquid Glass | All 12 corresponding categories now available; independently implemented visual algorithms |
@@ -32,7 +34,7 @@ The [official changelog](https://www.ultramock.io/changelog) identifies Three.js
 | Text and logo | Maker/public context, not a complete live editing comparison | Text cards, typography, three logo shaders and enter/exit animations; Blur now actually blurs instead of changing opacity/scale |
 | Templates | 17 entries plus Starter observed in the opened collection; animation indicators visible | 24 starter templates with hover previews and personal template saving. Presets use mok's own scene/assets and may not visually match |
 | Still export | JPG/PNG/WebP, transparency, orientation, dimensions observed | All three formats, transparent PNG/WebP, preset/custom sizes and high-resolution output |
-| Video export | Four quality levels, 30/60 fps, four motion-blur levels, transparent option observed | MP4 and alpha WebM, quality/frame-rate/motion-blur options, soundtrack/source audio, deterministic sampling and cancellation |
+| Video export | Four quality levels, 30/60 fps, four motion-blur levels, transparent option observed | MP4 and alpha WebM, quality/frame-rate/motion-blur options, one music/voiceover track with volume, trim and fades, deterministic sampling and cancellation. Audio embedded in source video clips is not currently mixed |
 | Export scope | Reference behavior not tested behind paid options | Still/video export only loads sources actually used in its time range; an unused missing clip cannot block an earlier output |
 | Project workflow | Save project and Pro gating observed | Local autosave, project library and portable files; missing files retain named placeholders and can be re-linked without losing timing or animation |
 | Cloud/account features | Paid controls visible; execution unverified | No UltraMock account system, subscription or cloud collaboration; local portable projects are the personal-tool workflow |
@@ -68,7 +70,7 @@ Pixel detail now belongs to the display surface, rather than the background and 
 
 MacBook keyboards now receive screen-image lighting and rough, view-dependent display reflections. A live rectangular emitter follows the actual screen UVs and lid transform; receiver materials retain their authored PBR textures. The display texture is shared without adding reflection render targets. Brightness, video and screen fades update the effect in preview and export. The separate floor glow still uses average screen color.
 
-Remaining visual limits are explicit: imported asset detail varies; several models lack authored normal/roughness/AO maps. HDRIs are currently 1024×512. There is no general global-illumination or path-tracing renderer; laptop screen lighting uses sampled direct illumination and an approximate rough reflection restricted to deck surfaces. It does not solve arbitrary scene occlusion or multiple light bounces. The precise UltraMock shader code, light calibration, textures, HDR resolution, AO strategy and paid output quality remain unknown. A public Three.js claim cannot establish those internals. [Three material documentation](https://threejs.org/docs/pages/MeshPhysicalMaterial.html) and [PMREM documentation](https://threejs.org/docs/pages/PMREMGenerator.html) explain the underlying controls.
+Remaining visual limits are explicit: imported asset detail varies; several models lack authored normal/roughness/AO maps. mok's HDRIs are currently 1024×512. There is no general global-illumination or path-tracing renderer; laptop screen lighting uses sampled direct illumination and an approximate rough reflection restricted to deck surfaces. It does not solve arbitrary scene occlusion or multiple light bounces. The deeper scan verified a public UltraMock studio HDR at 2048×1024 and KTX2 texture use in two free models. Its complete shaders, light calibration, broader asset pipeline, AO strategy and paid output quality remain unknown. See the [technical dossier](research/ultramock-technical-dossier.md) for exact metadata and sources. [Three material documentation](https://threejs.org/docs/pages/MeshPhysicalMaterial.html) and [PMREM documentation](https://threejs.org/docs/pages/PMREMGenerator.html) explain the underlying controls.
 
 ## Verification
 
