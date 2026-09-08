@@ -88,8 +88,25 @@ export function calibrateShadow(light: THREE.DirectionalLight | THREE.SpotLight,
     c.near = Math.max(0.01, -lightBounds.max.z - pad); c.far = Math.max(c.near + 0.1, -lightBounds.min.z + pad);
     c.updateProjectionMatrix(); span = Math.max(width, height);
   } else {
+    const c = camera as THREE.PerspectiveCamera, spot = light as THREE.SpotLight;
     const distance = position.distanceTo(target);
-    span = 2 * Math.tan((camera as THREE.PerspectiveCamera).fov * Math.PI / 360) * distance;
+    // Perspective VSM loses useful depth precision when a tiny default near plane reserves most
+    // of its range for empty space next to the light. On the laptop deck that produced broad
+    // stepped self-shadows. Reserve the nearest half of the light-to-subject distance, bounded
+    // by the actual closest caster plus padding. This improves moments without moving receivers
+    // away from the keys or disabling their shadows. Keep the light's authored distance/falloff.
+    visibleBounds(device, identity, bounds);
+    if (bounds.isEmpty()) return;
+    lightBounds.copy(bounds).applyMatrix4(camera.matrixWorldInverse);
+    c.far = spot.distance || c.far;
+    const closest = -lightBounds.max.z;
+    c.near = Math.max(Math.min(0.01, fitSize * 0.005), Math.min(distance * 0.5, closest - fitSize * 0.2, c.far * 0.5));
+    // Match SpotLightShadow.updateMatrices before the first draw, rather than calibrating span
+    // from its default 50-degree camera and changing the bias/blur on the following frame.
+    c.fov = THREE.MathUtils.radToDeg(2 * spot.angle * spot.shadow.focus);
+    c.aspect = shadow.mapSize.width / shadow.mapSize.height * spot.shadow.aspect;
+    c.updateProjectionMatrix();
+    span = 2 * Math.tan(c.fov * Math.PI / 360) * distance;
   }
   Object.assign(shadow, shadowBias(span, camera.far - camera.near, resolution));
   radius.applied = radius.authored * fitSize * 3.2 / Math.max(span, 0.01);

@@ -17,8 +17,8 @@ import { reflectionSamples } from "@/three/reflectionSamples";
  * bezel — falls off the near plane, so what lands in the reflection is only what actually sits in
  * front of the display: the keyboard deck, the floor under it and the room beyond, each occluding
  * the next exactly as the depth buffer says it should. The result is projected back onto the glass
- * at the fragment's own screen position and added on top of the clear coat's environment
- * reflection, so turning Reflection up reads as more mirror.
+ * at the fragment's own screen position. Its alpha occludes the environment in those directions,
+ * then the combined radiance receives the same physical glass response as the environment alone.
  *
  * At Reflection 0 no render target is allocated and the second pass never runs.
  */

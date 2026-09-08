@@ -1,6 +1,7 @@
 import type { MediaRef, Project, Shot } from "@/lib/types";
 import { locate } from "@/lib/animation";
 import { audioLength } from "@/lib/audioPlan";
+import { textOverlaysInRange } from "@/lib/textOverlays";
 import { resolveShotView } from "@/lib/shotView";
 
 export type ExportScope = { type: "still"; time: number } | { type: "video"; start: number; end: number };
@@ -46,6 +47,7 @@ export function exportAssets(project: Project, scope: ExportScope, transparent: 
   if (audio) add(audio.media);
   const fonts = shots.filter((s) => s.kind === "text" && s.text).map((s) => s.text!);
   for (const shot of mediaShots) if (shot.caption?.enabled) fonts.push(shot.caption.text);
+  for (const t of textOverlaysInRange(project, scope.type === "still" ? scope.time : scope.start, scope.type === "still" ? scope.time : scope.end)) fonts.push(t.text);
   return { shots, media: [...media.values()], fonts, audio };
 }
 

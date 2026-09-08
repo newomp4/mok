@@ -7,6 +7,25 @@ import { loadModelGeometry } from './model-geometry.mjs';
 const { meshFrame, stabilizeScreenNormals, planarizeScreenUVs, hideScreenOverlays, hideInvisibleModelMeshes, findScreenMeshes } = await import('../src/three/devices/GlbModel.tsx');
 const { DEVICES } = await import('../src/lib/devices.ts');
 const { disposeModelResources } = await import('../src/three/resources.ts');
+const { createScreenMaterial, applyScreenGlassProfile } = await import('../src/three/materials.ts');
+
+test('display coating follows the shown device using stable uniforms and preserves borrowed media', () => {
+  const source = new THREE.Texture(), mat = createScreenMaterial(source), uniform = mat.glassF0;
+  let sourceDisposed = false; source.addEventListener('dispose', () => { sourceDisposed = true; });
+  for (const [device, f0] of [['pro-display-xdr-glb', .0165], ['ipad-pro-13-glb', .02], ['iphone-17-pro-glb', .04], ['unknown', .04]]) {
+    applyScreenGlassProfile(mat, device);
+    assert.equal(mat.glassF0, uniform); assert.equal(mat.glassF0.value, f0);
+    assert.equal(mat.clearcoatRoughness, .04, 'AR coating does not simulate the nano-texture finish');
+    assert.equal(mat.emissiveMap, source); assert.equal(mat.specularIntensity, 0, 'the display has one physical glass interface');
+  }
+  const shader = { uniforms: {}, vertexShader: THREE.ShaderLib.physical.vertexShader, fragmentShader: THREE.ShaderLib.physical.fragmentShader };
+  mat.onBeforeCompile(shader, {});
+  assert.equal(shader.uniforms.mokGlassF0, uniform); assert.equal(shader.uniforms.reflectAmount, mat.reflection.amount);
+  const replacement = shader.fragmentShader.indexOf('clearcoatRadiance = clearcoatRadiance * (1.0 - coverage) + localRadiance');
+  assert.ok(replacement > shader.fragmentShader.indexOf('#include <lights_fragment_maps>'));
+  assert.ok(replacement < shader.fragmentShader.indexOf('#include <lights_fragment_end>'), 'local radiance must enter the existing BRDF');
+  mat.dispose(); assert.equal(sourceDisposed, false, 'display material does not own the uploaded texture'); source.dispose();
+});
 
 function normalRange(mesh) {
   const normals = mesh.geometry.getAttribute('normal'), first = new THREE.Vector3().fromBufferAttribute(normals, 0);

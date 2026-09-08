@@ -22,6 +22,8 @@ interface UIState {
   loop: boolean;
   recording: boolean;
   activeShotId: string | null;
+  activeTextOverlayId: string | null;
+  cameraPose: { shotId: string; index: number } | null;
   theme: Theme;
   timelineOpen: boolean;
   timelineMode: "simple" | "advanced";
@@ -65,7 +67,7 @@ interface UIState {
   /** shot whose image is being cropped */
   cropShot: string | null;
   /** Explicit canvas positioning mode; project identity prevents a stale mode after switching. */
-  captionPosition: { projectId: string; shotId: string } | null;
+  captionPosition: { projectId: string; shotId?: string; overlayId?: string } | null;
   setCropShot: (id: string | null) => void;
   /** onboarding tour step (null = not running) */
   tourStep: number | null;
@@ -82,6 +84,7 @@ interface UIState {
   toggleLoop: () => void;
   setRecording: (r: boolean) => void;
   setActiveShot: (id: string | null) => void;
+  setActiveTextOverlay: (id: string | null) => void;
   setTheme: (t: Theme) => void;
   toggleTheme: () => void;
   setTimelineOpen: (o: boolean) => void;
@@ -112,6 +115,8 @@ export const useUI = create<UIState>()(subscribeWithSelector((set, get) => ({
   loop: true,
   recording: false,
   activeShotId: null,
+  activeTextOverlayId: null,
+  cameraPose: null,
   theme: "light",
   timelineOpen: true,
   timelineMode: (() => {
@@ -143,9 +148,9 @@ export const useUI = create<UIState>()(subscribeWithSelector((set, get) => ({
   setPasteRequest: (pasteRequest) => set({ pasteRequest }),
   timelineHeight: numberPref("timelineHeight", 216, 100, 500),
   selectedKeys: [],
-  setSelectedKeys: (selectedKeys) => set({ selectedKeys }),
+  setSelectedKeys: (selectedKeys) => set({ selectedKeys, ...(selectedKeys.length ? { activeTextOverlayId: null, cameraPose: null } : {}) }),
   selectedShots: [],
-  setSelectedShots: (selectedShots) => set({ selectedShots }),
+  setSelectedShots: (selectedShots) => set({ selectedShots, ...(selectedShots.length ? { activeTextOverlayId: null } : {}) }),
   cropShot: null,
   captionPosition: null,
   setCropShot: (cropShot) => set({ cropShot }),
@@ -159,11 +164,12 @@ export const useUI = create<UIState>()(subscribeWithSelector((set, get) => ({
   setTimelineHeight: (v) => { const timelineHeight = bounded(v, 216, 100, 500); set({ timelineHeight }); try { localStorage.setItem("mok:timelineHeight", String(timelineHeight)); } catch {} },
   setDpr: (v) => { const dpr = bounded(v, 2, 1, 3); set({ dpr }); try { localStorage.setItem("mok:dpr", String(dpr)); } catch {} },
 
-  setTime: (time) => set({ time: bounded(time, 0, 0, Number.MAX_SAFE_INTEGER) }),
-  setPlaying: (playing) => set({ playing: playing && !get().recording }),
+  setTime: (time) => set({ time: bounded(time, 0, 0, Number.MAX_SAFE_INTEGER), cameraPose: null }),
+  setPlaying: (playing) => set({ playing: playing && !get().recording, ...(playing ? { cameraPose: null } : {}) }),
   toggleLoop: () => set({ loop: !get().loop }),
   setRecording: (recording) => set({ recording, ...(recording ? { playing: false } : {}) }),
-  setActiveShot: (activeShotId) => set({ activeShotId }),
+  setActiveShot: (activeShotId) => set({ activeShotId, activeTextOverlayId: null, cameraPose: null }),
+  setActiveTextOverlay: (activeTextOverlayId) => set({ activeTextOverlayId, selectedKeys: [], selectedShots: [], cameraPose: null }),
   setTheme: (theme) => {
     set({ theme });
     try {
@@ -173,7 +179,7 @@ export const useUI = create<UIState>()(subscribeWithSelector((set, get) => ({
   },
   toggleTheme: () => get().setTheme(get().theme === "dark" ? "light" : "dark"),
   setTimelineOpen: (timelineOpen) => set({ timelineOpen }),
-  setTimelineMode: (timelineMode) => { set({ timelineMode }); try { localStorage.setItem("mok:timelineMode", timelineMode); } catch {} },
+  setTimelineMode: (timelineMode) => { set({ timelineMode, cameraPose: null }); try { localStorage.setItem("mok:timelineMode", timelineMode); } catch {} },
   setTimelineZoom: (timelineZoom) => set({ timelineZoom: bounded(timelineZoom, 1, 0.25, 8) }),
   setPicker: (picker) => set({ picker }),
   setCameraTab: (cameraTab) => set({ cameraTab }),

@@ -1,9 +1,10 @@
+import { nativeDecode } from "./native-decode-validation.mjs";
 // End-to-end capture of the actual editor. Generates its own timecoded/audio source.
 // MOK_QA_URL=http://127.0.0.1:35361 MOK_QA_NODE_MODULES=... node scripts/export-regression.mjs /tmp/mok-exports [--source source.mp4]
 import { createRequire } from 'node:module';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 const require = createRequire(process.env.MOK_QA_NODE_MODULES ? join(process.env.MOK_QA_NODE_MODULES, 'package.json') : import.meta.url);
 const { chromium } = require('playwright');
 const destination = resolve(process.argv[2] ?? '../media-e2e'); await mkdir(destination, { recursive: true });
@@ -111,7 +112,7 @@ try {
       if (Number(probe.streams.find((stream) => stream.codec_type === 'video').nb_read_frames) !== 8) throw new Error(`${file.name} does not contain all 8 expected frames`);
     }
     const { bytes, ...summary } = file;
-    const decoded = spawnSync('ffmpeg', ['-v', 'error', ...(file.name.endsWith('.webm') ? ['-c:v', 'libvpx-vp9'] : []), '-i', join(destination, file.name), '-an', '-fps_mode', 'passthrough', '-f', 'rawvideo', '-pix_fmt', 'rgba', 'pipe:1'], { maxBuffer: 16 * 1024 * 1024 });
+    const decoded = nativeDecode( ['-v', 'error', ...(file.name.endsWith('.webm') ? ['-c:v', 'libvpx-vp9'] : []), '-i', join(destination, file.name), '-an', '-fps_mode', 'passthrough', '-f', 'rawvideo', '-pix_fmt', 'rgba', 'pipe:1'], { maxBuffer: 16 * 1024 * 1024, label: `Native frame decode for ${file.name}`, opus: probe.streams.some((s) => s.codec_name === 'opus') });
     if (decoded.status !== 0) throw new Error(`Native frame decode failed for ${file.name}: ${decoded.stderr}`);
     let minAlpha = 255, maxAlpha = 0, transparentPixels = 0, opaquePixels = 0;
     for (let i = 3; i < decoded.stdout.length; i += 4) { const alpha = decoded.stdout[i]; minAlpha = Math.min(minAlpha, alpha); maxAlpha = Math.max(maxAlpha, alpha); if (!alpha) transparentPixels++; if (alpha === 255) opaquePixels++; }
@@ -123,14 +124,14 @@ try {
       frameAlpha.push({ min, max, opaque });
       if (file.name.endsWith('.mp4') ? min !== 255 : min !== 0 || max < 250 || opaque < 100) throw new Error(`${file.name} frame${frameAlpha.length} lost alpha/coverage: ${JSON.stringify(frameAlpha.at(-1))}`);
     }
-    const validation = { minAlpha, maxAlpha, transparentPixels, opaquePixels, frameAlpha, decodeWarning: decoded.stderr.toString() };
+    const validation = { minAlpha, maxAlpha, transparentPixels, opaquePixels, frameAlpha, decodeWarning: decoded.stderr.toString(), probeWarning: decoded.probeWarning };
     if (!file.name.endsWith('.png') && frameAlpha.length !== 8) throw new Error(`${file.name} native decode did not return every frame`);
     if (!file.name.endsWith('.png')) {
-      const audio = spawnSync('ffmpeg', ['-v', 'error', '-i', join(destination, file.name), '-map', '0:a:0', '-ac', '2', '-ar', '48000', '-f', 'f32le', 'pipe:1'], { maxBuffer: 2 * 1024 * 1024 });
+      const audio = nativeDecode( ['-v', 'error', '-i', join(destination, file.name), '-map', '0:a:0', '-ac', '2', '-ar', '48000', '-f', 'f32le', 'pipe:1'], { maxBuffer: 2 * 1024 * 1024, label: `Native PCM decode for ${file.name}`, opus: probe.streams.some((s) => s.codec_name === 'opus') });
       if (audio.status !== 0) throw new Error(`Native PCM decode failed for ${file.name}: ${audio.stderr}`);
       const floats = new Float32Array(audio.stdout.buffer, audio.stdout.byteOffset, audio.stdout.length / 4);
       const rms = (start, end) => { let sum = 0, n = 0; for (let i = Math.ceil(start * 48000) * 2; i < Math.min(floats.length, end * 48000 * 2); i++) { sum += floats[i] ** 2; n++; } return Math.sqrt(sum / n); };
-      validation.audio = { frames: floats.length / 2, firstClipRms: rms(.1, .2), gapRms: rms(.34, .38), secondClipRms: rms(.5, .6), decodeWarning: audio.stderr.toString() };
+      validation.audio = { frames: floats.length / 2, firstClipRms: rms(.1, .2), gapRms: rms(.34, .38), secondClipRms: rms(.5, .6), decodeWarning: audio.stderr.toString(), probeWarning: audio.probeWarning };
       if (validation.audio.firstClipRms < .001 || validation.audio.secondClipRms < .001 || validation.audio.gapRms > .01) throw new Error(`Audio clip/gap validation failed: ${JSON.stringify(validation.audio)}`);
     }
     report.files.push({ ...summary, bytes: bytes.length, probe, validation });

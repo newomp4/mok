@@ -1,0 +1,11 @@
+# WebM Opus warning audit — 2026-09-07
+
+The final mixed WebM export decodes all eight video frames and 33 audio packets. FFmpeg 8.0 nevertheless reports `Error parsing Opus packet header.` during stream probing. This is reproducible with the installed FFmpeg's own freshly encoded Opus/WebM and with Mok 0.12.0 exports, so it is not a 0.13.0 packet regression.
+
+The cause was isolated independently of any media file: create a fresh Opus parser, set `PARSER_FLAG_COMPLETE_FRAMES`, and call `av_parser_parse2` with a null buffer and zero bytes. FFmpeg emits the same message. Its [8.0 parser source](https://ffmpeg.org/doxygen/8.0/opus_2parser_8c_source.html) invokes frame-duration parsing in that branch without first excluding the zero-byte EOF flush. The normal framing branch explicitly checks for zero bytes.
+
+Evidence in `work/opus-audit/` beside the repository includes the small C flush probe, its source and verification output. The current and previous Mok files each contain 33 nonempty audio packets. Parser-disabled decoding (`-fflags +noparse+nofillin`) returns exactly the same PCM bytes and all eight alpha video frames, with no real decoder errors. A fresh FFmpeg reference also reproduces the warning and decodes identically after the same recheck.
+
+No runtime encoding change was warranted. Instead, `scripts/native-decode-validation.mjs` strengthens `scripts/export-regression.mjs`: any decoder diagnostic fails validation, except the exact Opus probe message. That case requires a second decode with the redundant parser disabled, no error/status failure, and byte-identical output. The original diagnostic is retained as `probeWarning`; `decodeWarning` describes the clean decoder result. A different warning, decode error or changed output still fails.
+
+`node scripts/verify-opus-export.mjs ../export-013-final/mixed-alpha.webm ../export-0.12-final-stress/mixed-alpha.webm` verifies the current export, prior export and an independently generated FFmpeg reference. It also checks that malformed input is rejected. The VP9 alpha decode was separately checked through the same helper: eight complete frames and identical bytes, with empty decoder stderr. ESLint passes for the new verifier/helper and modified export regression.

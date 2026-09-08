@@ -2,7 +2,7 @@
 import { useEffect, useRef } from "react";
 import { beginInteraction, endInteraction, useEditor } from "@/store/editor";
 import { useUI } from "@/store/ui";
-import { canPositionCaption } from "@/lib/captionPosition";
+import { canPositionCaption, positionedCaption, updateCaptionPosition } from "@/lib/captionPosition";
 import { captureEditIntent } from "@/lib/editIntent";
 import { useProjectOwnership } from "@/lib/projectOwnership";
 import { clamp } from "@/lib/cn";
@@ -11,14 +11,14 @@ import { Button } from "@/components/ui";
 /** An explicit DOM tool keeps caption dragging separate from device orbit and from exported pixels. */
 export function CaptionPositionOverlay() {
   const mode = useUI((s) => s.captionPosition);
-  const shot = useEditor((s) => s.project.shots.find((shot) => shot.id === mode?.shotId));
+  const caption = useEditor((s) => positionedCaption(s.project, mode));
   const ref = useRef<HTMLDivElement>(null);
   const drag = useRef<{ pointerId: number; x: number; y: number; fromX: number; fromY: number; intent: ReturnType<typeof captureEditIntent> } | null>(null);
   const finish = (restore = false) => {
     const d = drag.current;
     if (!d) return;
     drag.current = null;
-    if (restore && mode && d.intent.current()) useEditor.getState().updateShot(mode.shotId, (s) => { if (s.caption) { s.caption.x = d.fromX; s.caption.y = d.fromY; } });
+    if (restore && mode && d.intent.current()) updateCaptionPosition(mode, d.fromX, d.fromY);
     d.intent.dispose(); endInteraction();
   };
   const finishRef = useRef(finish); finishRef.current = finish;
@@ -42,8 +42,7 @@ export function CaptionPositionOverlay() {
     el.addEventListener("wheel", stop, { passive: false });
     return () => el.removeEventListener("wheel", stop);
   }, [mode]);
-  if (!mode || !shot?.caption || !canPositionCaption()) return null;
-  const caption = shot.caption;
+  if (!mode || !caption || !canPositionCaption()) return null;
   return <div ref={ref} data-caption-position="" role="region" aria-label="Position caption on canvas" className="absolute inset-0 z-20 cursor-move touch-none outline outline-2 -outline-offset-2 outline-accent/60"
     onPointerDown={(e) => {
       e.stopPropagation();
@@ -59,7 +58,7 @@ export function CaptionPositionOverlay() {
       const rect = e.currentTarget.getBoundingClientRect();
       let x = clamp(d.fromX + (e.clientX - d.x) / Math.max(1, rect.width), -.5, .5), y = clamp(d.fromY - (e.clientY - d.y) / Math.max(1, rect.height), -.5, .5);
       if (useUI.getState().snapCenter) { if (Math.abs(x) < .01) x = 0; if (Math.abs(y) < .01) y = 0; }
-      useEditor.getState().updateShot(mode.shotId, (s) => { if (s.caption) { s.caption.x = Math.round(x * 1000) / 1000; s.caption.y = Math.round(y * 1000) / 1000; } });
+      updateCaptionPosition(mode, Math.round(x * 1000) / 1000, Math.round(y * 1000) / 1000);
     }}
     onPointerUp={(e) => { e.stopPropagation(); if (drag.current?.pointerId === e.pointerId) finish(); }} onPointerCancel={(e) => { e.stopPropagation(); if (drag.current?.pointerId === e.pointerId) finish(true); }} onLostPointerCapture={(e) => { e.stopPropagation(); if (drag.current?.pointerId === e.pointerId) finish(); }}
     onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}>

@@ -1,21 +1,32 @@
 "use client";
+import { clampTextAnimation } from "@/lib/textOverlays";
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import { temporal } from "zundo";
-import type { AnimProp, AudioTrack, Keyframe, Project, Shot, ShotKind, Transition } from "@/lib/types";
-import { createLogoShot, createProject, createShot, createTextShot, normalizeProject } from "@/lib/defaults";
+import type { AnimProp, AudioTrack, Keyframe, Project, Shot, ShotKind, Transition, TextOverlay } from "@/lib/types";
+import { createLogoShot, createProject, createShot, createTextShot, createTextOverlay, normalizeProject } from "@/lib/defaults";
 import { hasKeyframeAt, inHandleOf, locate, removeKeyframe, reverseTrack, sampleTrack, setInHandle, shotBase, splitTrack, totalDuration, editableDuration, preserveProjectDuration, upsertKeyframe, shotStart } from "@/lib/animation";
 import { uid } from "@/lib/ids";
 import { useUI } from "./ui";
 import { getDevice } from "@/lib/devices";
 import { getLighting, getScene } from "@/lib/presets";
 import { canEditProject } from "@/lib/projectOwnership";
+import { CAMERA_POSE_PROPS, cameraPoseTimes, MAX_PROJECT_DURATION } from "@/lib/animation";
 
 interface EditorState {
   project: Project;
   replaceProject: (p: Project, restoreStored?: boolean) => void;
   /** Mutate a cloned copy of the project. */
   update: (mut: (p: Project) => void) => void;
+  addTextOverlay: (start?: number, duration?: number) => string;
+  updateTextOverlay: (id: string, mut: (t: TextOverlay) => void) => void;
+  removeTextOverlay: (id: string) => void;
+  duplicateTextOverlay: (id: string) => void;
+  copyTextOverlay: (id: string) => void;
+  pasteTextOverlay: () => void;
+  reorderTextOverlay: (id: string, direction: -1 | 1) => void;
+  convertCaption: (shotId: string) => string;
+  selectCameraPose: (shotId: string, index: number) => void;
   /** Set an animatable value, writing a keyframe when recording or when the track already exists. */
   setValue: (prop: AnimProp, v: number) => void;
   setValues: (values: Partial<Record<AnimProp, number>>) => void;
@@ -74,6 +85,8 @@ export const isShotScoped = (prop: AnimProp) => SHOT_SCOPED.has(prop);
 let shotClipboard: Shot | null = null;
 let keyClipboard: { prop: AnimProp; k: Keyframe; offset?: number }[] = [];
 let keyframesCopiedLast = false;
+let textOverlayClipboard: TextOverlay | null = null, textCopiedLast = false;
+export const lastCopyWasTextOverlay = () => textCopiedLast && !!textOverlayClipboard;
 export const hasShotClipboard = () => shotClipboard !== null;
 export const hasKeyClipboard = () => keyClipboard.length > 0;
 export const lastCopyWasKeyframes = () => keyframesCopiedLast;
@@ -90,7 +103,11 @@ function commitProject(p: Project, set: (state: { project: Project }) => void) {
 }
 
 function selectAt(p: Project, shot: Shot, localT = 0) {
-  useUI.setState({ activeShotId: shot.id, selectedShots: [shot.id], selectedKeys: [], playing: false, time: shotStart(p, shot.id) + Math.max(0, Math.min(shot.duration, localT)) });
+  useUI.setState({ activeShotId: shot.id, activeTextOverlayId: null, cameraPose: null, selectedShots: [shot.id], selectedKeys: [], playing: false, time: shotStart(p, shot.id) + Math.max(0, Math.min(shot.duration, localT)) });
+}
+
+function selectText(t: TextOverlay) {
+  useUI.setState({ activeTextOverlayId: t.id, cameraPose: null, selectedShots: [], selectedKeys: [], playing: false, timelineOpen: true, time: t.start + Math.min(t.duration / 2, t.enter?.duration ?? 0) });
 }
 
 /** Keep the same shot and local playhead position when a reorder changes its absolute time. */
@@ -104,6 +121,8 @@ function preservePlayhead(before: Project, after: Project) {
 /** Drops selected keys whose shot, track or time no longer exists in the project. */
 function pruneSelectedKeys(p: Project) {
   const ui = useUI.getState();
+  if (ui.activeTextOverlayId && !p.textOverlays?.some((t) => t.id === ui.activeTextOverlayId)) useUI.setState({ activeTextOverlayId: null, captionPosition: null });
+  if (ui.cameraPose && !p.shots.some((s) => s.id === ui.cameraPose?.shotId)) useUI.setState({ cameraPose: null });
   if (!ui.selectedKeys.length) return;
   const live = ui.selectedKeys.filter((k) => {
     const shot = p.shots.find((s) => s.id === k.shotId);
@@ -142,7 +161,7 @@ export const useEditor = create<EditorState>()(
         project: createProject(),
         replaceProject: (project, restoreStored = false) => {
           if (!restoreStored && project.id === get().project.id && !canEditProject(project.id)) return;
-          if (restoreStored || project.id !== get().project.id) cancelInteraction();
+          if (restoreStored || project.id !== get().project.id) { cancelInteraction(); useUI.setState({ activeTextOverlayId: null, cameraPose: null, captionPosition: null }); }
           const p = normalizeProject(project);
           rawSet({ project: p });
           pruneSelectedKeys(p);
@@ -167,6 +186,44 @@ export const useEditor = create<EditorState>()(
           p.updatedAt = Date.now();
           set({ project: p });
         },
+        addTextOverlay: (start, duration) => {
+          const p = clone(get().project), loc = locate(p, useUI.getState().time);
+          const at = Math.max(0, Math.min(MAX_PROJECT_DURATION - .1, start ?? loc.start));
+          const t = createTextOverlay(`Text ${(p.textOverlays?.length ?? 0) + 1}`, at, Math.max(.1, Math.min(MAX_PROJECT_DURATION - at, duration ?? loc.shot?.duration ?? 3)));
+          (p.textOverlays ??= []).push(t); commitProject(p, set); selectText(t); return t.id;
+        },
+        updateTextOverlay: (id, mut) => get().update((p) => { const t = p.textOverlays?.find((x) => x.id === id); if (t) { mut(t); clampTextAnimation(t); } }),
+        removeTextOverlay: (id) => {
+          const p = clone(get().project); if (!p.textOverlays?.some((t) => t.id === id)) return;
+          p.textOverlays = p.textOverlays.filter((t) => t.id !== id); commitProject(p, set); pruneSelectedKeys(p);
+        },
+        duplicateTextOverlay: (id) => {
+          const p = clone(get().project), t = p.textOverlays?.find((x) => x.id === id); if (!t) return;
+          const copy = { ...clone(t), id: uid(), name: `${t.name} copy` }; p.textOverlays!.push(copy); commitProject(p, set); selectText(copy);
+        },
+        copyTextOverlay: (id) => { const t = get().project.textOverlays?.find((x) => x.id === id); if (t) { textOverlayClipboard = clone(t); textCopiedLast = true; keyframesCopiedLast = false; } },
+        pasteTextOverlay: () => {
+          if (!textOverlayClipboard) return;
+          const p = clone(get().project), start = Math.max(0, Math.min(MAX_PROJECT_DURATION - .1, useUI.getState().time));
+          const t = { ...clone(textOverlayClipboard), id: uid(), start, duration: Math.min(textOverlayClipboard.duration, MAX_PROJECT_DURATION - start) };
+          clampTextAnimation(t); (p.textOverlays ??= []).push(t); commitProject(p, set); selectText(t);
+        },
+        reorderTextOverlay: (id, direction) => {
+          const p = clone(get().project), tracks = p.textOverlays ?? [], i = tracks.findIndex((t) => t.id === id); if (i < 0) return;
+          let j = i + direction; while (j >= 0 && j < tracks.length && tracks[j].layer !== tracks[i].layer) j += direction;
+          if (j < 0 || j >= tracks.length) return;
+          [tracks[i], tracks[j]] = [tracks[j], tracks[i]]; commitProject(p, set);
+        },
+        convertCaption: (shotId) => {
+          const p = clone(get().project), s = p.shots.find((s) => s.id === shotId); if (!s?.caption) return "";
+          const t: TextOverlay = { ...clone(s.caption), id: uid(), name: `${s.name} caption`, start: shotStart(p, shotId), duration: s.duration };
+          (p.textOverlays ??= []).push(t); delete s.caption; commitProject(p, set); selectText(t); return t.id;
+        },
+        selectCameraPose: (shotId, index) => {
+          const p = get().project, s = p.shots.find((s) => s.id === shotId); if (!s || (s.kind ?? "media") !== "media") return;
+          const times = cameraPoseTimes(s), slot = Math.max(0, Math.min(times.length - 1, Math.round(index)));
+          useUI.setState({ activeTextOverlayId: null, activeShotId: s.id, cameraPose: { shotId, index: slot }, selectedKeys: [], selectedShots: [s.id], playing: false, time: shotStart(p, s.id) + Math.min(s.duration - 1e-6, times[slot]) });
+        },
         setValue: (prop, v) => get().setValues({ [prop]: v }),
         setValues: (values) => {
           if (!Object.values(values).some((v) => typeof v === "number" && Number.isFinite(v))) return;
@@ -187,7 +244,12 @@ export const useEditor = create<EditorState>()(
             if (v === undefined || !Number.isFinite(v)) continue;
             const track = nextShot?.keyframes[prop];
             const animated = !!track && track.length > 0;
-            if (nextShot && (ui.recording || (animated && hasKeyframeAt(track!, localT)))) {
+            if (nextShot && ui.timelineMode === "simple" && ui.cameraPose?.shotId === nextShot.id && CAMERA_POSE_PROPS.includes(prop) && !ui.recording) {
+              const times = cameraPoseTimes(nextShot), at = times[Math.min(times.length - 1, ui.cameraPose.index)];
+              const base = shotBase(prev, shot, prop);
+              const keys = track?.length ? track : [{ t: 0, v: base, ease: "smooth" as const }, { t: nextShot.duration, v: base, ease: "smooth" as const }];
+              nextShot.keyframes[prop] = upsertKeyframe(keys, at, v); shotTouched = true;
+            } else if (nextShot && (ui.recording || (animated && hasKeyframeAt(track!, localT)))) {
               // recording stamps as you go, and landing on an existing keyframe edits that keyframe
               nextShot.keyframes[prop] = upsertKeyframe(track, localT, v);
               shotTouched = true;
@@ -375,7 +437,7 @@ export const useEditor = create<EditorState>()(
         },
         copyShot: (id) => {
           const s = get().project.shots.find((x) => x.id === id);
-          if (s) { shotClipboard = clone(s); keyframesCopiedLast = false; }
+          if (s) { shotClipboard = clone(s); keyframesCopiedLast = false; textCopiedLast = false; }
         },
         pasteShot: (afterId) => {
           if (!shotClipboard) return;
@@ -413,6 +475,7 @@ export const useEditor = create<EditorState>()(
         copyKeyframes: (keys) => {
           const p = get().project;
           keyframesCopiedLast = true;
+          textCopiedLast = false;
           keyClipboard = [];
           // remember each keyframe's offset from the earliest one, so a paste keeps the shape
           const starts = new Map(p.shots.map((s) => [s.id, shotStart(p, s.id)]));
@@ -625,9 +688,9 @@ export const useEditor = create<EditorState>()(
       });
       for (const name of Object.keys(state) as (keyof EditorState)[]) {
         const action = state[name];
-        if (typeof action !== "function" || name === "replaceProject" || name === "copyShot" || name === "copyKeyframes") continue;
+        if (typeof action !== "function" || name === "replaceProject" || name === "copyShot" || name === "copyKeyframes" || name === "copyTextOverlay" || name === "selectCameraPose") continue;
         Object.assign(state, { [name]: (...args: unknown[]) => {
-          if (!canEditProject(get().project.id)) return name === "addShot" ? "" : undefined;
+          if (!canEditProject(get().project.id)) return ["addShot", "addTextOverlay", "convertCaption"].includes(name) ? "" : undefined;
           return (action as (...args: unknown[]) => unknown)(...args);
         } });
       }

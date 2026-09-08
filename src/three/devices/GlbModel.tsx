@@ -18,6 +18,7 @@ import { acquireModel, readModel, retainModel } from "@/three/modelAssets";
 import { prepareModelGpu } from "@/three/gpuPreparation";
 import { applyMaterialProfile } from "@/three/materialProfiles";
 import { useUI } from "@/store/ui";
+import { addDisplaySeamBacking } from "@/three/displaySeams";
 
 const SCREEN_RE = /screen|display|wallpaper|lcd|oled|panel|glass_front|front_glass/i;
 
@@ -644,6 +645,11 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
       }
       const features = detectFeatures(root, screens[0] ?? null, spec, scene);
       root.userData.features = features;
+      if (screens[0]) {
+        const frame = screenFrame(screens[0]);
+        const world = frame.inv.clone().invert().multiply(new THREE.Matrix4().makeBasis(frame.right, frame.up, frame.n).setPosition(frame.center));
+        addDisplaySeamBacking(root, spec.id, screens[0], world);
+      }
       if (spec.family === "laptop" && screens[0]) {
         let frame: THREE.Object3D = root;
         while (frame.parent && frame.name !== "device-orientation" && frame.name !== "device") frame = frame.parent;
@@ -681,6 +687,7 @@ function GlbInstance({ spec, finish, screen, gloss = 1.3, hidden, onReady }: Glb
     root.traverse((o) => {
       const mesh = o as THREE.Mesh;
       if (!mesh.isMesh) return;
+      if (mesh.userData.displaySeamBacking) return;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       if (!mesh.userData.originalMaterial) mesh.userData.originalMaterial = mesh.material;

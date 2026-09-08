@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "node --test scripts/test-editor.mjs scripts/test-timeline.mjs scripts/test-io.mjs scripts/test-renderer.mjs scripts/test-parity.mjs scripts/test-renderpasses.mjs scripts/test-screen-settings.mjs scripts/test-screen-light.mjs scripts/test-lids.mjs scripts/test-assets.mjs scripts/test-export-media.mjs scripts/test-product.mjs scripts/test-render-quality.mjs scripts/test-workflow.mjs scripts/test-visual.mjs scripts/test-device-fidelity.mjs scripts/test-shadow-boundary.mjs"
+    "test": "node --test scripts/test-editor.mjs scripts/test-timeline.mjs scripts/test-io.mjs scripts/test-renderer.mjs scripts/test-parity.mjs scripts/test-renderpasses.mjs scripts/test-screen-settings.mjs scripts/test-screen-light.mjs scripts/test-lids.mjs scripts/test-assets.mjs scripts/test-export-media.mjs scripts/test-product.mjs scripts/test-render-quality.mjs scripts/test-workflow.mjs scripts/test-visual.mjs scripts/test-device-fidelity.mjs scripts/test-shadow-boundary.mjs scripts/test-scene-lighting.mjs scripts/test-text-tracks.mjs scripts/test-media-retention.mjs scripts/test-display-seams.mjs"
   },
   "dependencies": {
     "@central-icons-react/round-outlined-radius-2-stroke-1.5": "1.1.317",

@@ -151,7 +151,7 @@ function CameraRig({ fitSize }: { fitSize: number }) {
 }
 
 function Lighting() {
-  const lighting = useShotView().lighting;
+  const { lighting, scene: scenePreset } = useShotView();
   const preset = getLighting(lighting);
   const scene = useThree((s) => s.scene);
   const gl = useThree((s) => s.gl);
@@ -182,7 +182,10 @@ function Lighting() {
     if (!v) return;
     // each rig has an authored orientation; the scene's Light rotation turns it from there
     scene.environmentRotation.set(v["scene.lightRotX"] * DEG, (preset.rotY + v["scene.lightRotY"]) * DEG, 0);
-    scene.environmentIntensity = v["scene.lightIntensity"] * preset.intensity;
+    // Lit rooms already have a photographic key/fill rig. Keep the HDR as reflection and bounce
+    // support, instead of adding another full-strength lighting setup on top of those sources.
+    const roomGain = scenePreset === "custom" ? 1 : scenePreset === "gallery" ? 0.55 : scenePreset === "studio" ? 0.45 : 0.65;
+    scene.environmentIntensity = v["scene.lightIntensity"] * preset.intensity * roomGain;
   }, -40);
   return null;
 }
@@ -299,9 +302,7 @@ function SceneLightRig({ preset, floorY, children }: { preset: ScenePresetId; fl
     const g = group.current, v = anim.values;
     if (!g || !v) return;
     aim.set(v["scene.lightRotX"] * DEG, (v["scene.lightRotY"] - authored.lightRotY) * DEG, 0);
-    // at zero the control means "no rig of my own", not "no light at all", so the analytic lights
-    // keep a floor and the device stays readable on the HDRI alone
-    const gain = Math.max(0.15, v["scene.lightIntensity"] / Math.max(0.05, authored.lightIntensity));
+    const gain = Math.max(0, v["scene.lightIntensity"] / Math.max(0.05, authored.lightIntensity));
     g.traverse((o) => {
       const light = o as THREE.Light;
       // the screen glow is the one point light, and it places and dims itself from the display
@@ -317,6 +318,8 @@ function SceneLightRig({ preset, floorY, children }: { preset: ScenePresetId; fl
       // taken in world space and put back into the group's frame afterwards
       swing.copy(b.pos).setY(b.pos.y + floorY).applyEuler(aim);
       light.position.set(swing.x, swing.y - floorY, swing.z);
+      // Area sources have an emitting face, so their orientation must follow the orbit too.
+      if ((light as THREE.RectAreaLight).isRectAreaLight) light.lookAt(0, 0, 0);
       light.intensity = b.intensity * gain;
       b.setPos.copy(light.position);
       b.setIntensity = light.intensity;

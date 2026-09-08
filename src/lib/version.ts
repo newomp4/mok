@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.12.0";
+export const APP_VERSION = "0.13.0";
 
 export interface ChangelogEntry {
   version: string;
@@ -8,6 +8,18 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.13.0",
+    date: "Sep 7, 2026",
+    title: "Shaped studio light and independent text tracks",
+    items: [
+      "Studio, Gallery and Concrete use area lights to shape metal highlights. Room lighting has a more restrained HDR fill, clean sweep transitions and an intensity control that reaches zero. Fitted spotlight depth removes stepped dark patches from MacBook decks.",
+      "Screen reflections share the glass material response instead of adding a second highlight over it. Local objects can occlude the environment reflection, and anti-reflective displays have individual glass profiles. MacBook screen lighting still follows your media and lid. Tiny gaps around the 16-inch MacBook display are sealed behind its original bezel.",
+      "Add independent text tracks with their own timing, typography, front or behind placement, layer order and enter/exit animation. Move and trim them on the timeline, position them on the canvas, and include overlapping text in image and video exports. Existing shot captions can be converted with one undoable action.",
+      "Simple mode offers evenly spaced camera pose slots for each scene. Select a slot and adjust the camera; changing the slot count or switching modes preserves existing Advanced keys. Both views keep gaps on the same time ruler.",
+      "Unused new media can be reclaimed after a week of quarantine. Open tabs, pending imports, saved projects, drafts and undo history protect their sources. Older media is retained during migration.",
+    ],
+  },
   {
     version: "0.12.0",
     date: "Sep 7, 2026",

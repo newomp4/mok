@@ -1,6 +1,6 @@
 import { uid } from "./ids";
 import { validateProject } from "./validateProject";
-import type { CaptionStyle, EnterExit, Project, Shot, TextStyle, LogoStyle } from "./types";
+import type { TextOverlay, CaptionStyle, EnterExit, Project, Shot, TextStyle, LogoStyle } from "./types";
 
 export function createShot(name: string, duration = 3): Shot {
   return { id: uid(), name, duration, media: null, fit: "cover", keyframes: {}, focusAreas: [] };
@@ -19,6 +19,10 @@ export function defaultLogoStyle(): LogoStyle {
 
 export function defaultCaptionStyle(): CaptionStyle {
   return { enabled: true, text: { ...defaultTextStyle(), text: "Your caption", size: .065 }, x: 0, y: .3, layer: "front", enter: { effect: "fade", duration: .3 }, exit: { effect: "fade", duration: .3 } };
+}
+
+export function createTextOverlay(name = "Text", start = 0, duration = 3): TextOverlay {
+  return { ...defaultCaptionStyle(), id: uid(), name, start, duration };
 }
 
 export function createTextShot(name = "Text", duration = 3): Shot {

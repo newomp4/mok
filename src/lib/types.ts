@@ -107,6 +107,13 @@ export interface CaptionStyle {
   /** Preserve the original animation phase when a caption's media shot is split or head-trimmed. */
   timing?: { offset: number; duration: number };
 }
+/** An independent text track. Array order is back-to-front within each side of the device. */
+export interface TextOverlay extends CaptionStyle {
+  id: string;
+  name: string;
+  start: number;
+  duration: number;
+}
 export type LogoEffect = "none" | "liquidMetal" | "gemSmoke" | "heatmap";
 export interface LogoStyle {
   media: MediaRef | null;
@@ -133,8 +140,10 @@ export interface Shot {
   /** media (default), text card or logo card */
   kind?: ShotKind;
   text?: TextStyle;
-  /** One caption overlapping a media shot; independent text tracks are not implied. */
+  /** Legacy attached caption; may be converted into a project text overlay without changing pixels. */
   caption?: CaptionStyle;
+  /** Equal-time camera editing slots; changing this does not rewrite any Advanced keyframes. */
+  cameraPoseCount?: number;
   logo?: LogoStyle;
   enter?: EnterExit;
   exit?: EnterExit;
@@ -203,6 +212,7 @@ export interface Project {
   createdAt: number;
   updatedAt: number;
   aspect: AspectId;
+  textOverlays?: TextOverlay[];
   scene: {
     preset: ScenePresetId;
     lighting: LightingId;

@@ -8,7 +8,7 @@ import { getDevice, getFinish } from "@/lib/devices";
 import { getMedia, useMedia, type LoadedMedia } from "@/lib/media";
 import { shotKind } from "@/lib/defaults";
 import { ScreenSurface } from "@/three/screen";
-import { createFinishMaterials, createScreenMaterial, disposeMaterials } from "@/three/materials";
+import { applyScreenGlassProfile, createFinishMaterials, createScreenMaterial, disposeMaterials } from "@/three/materials";
 import { ScreenReflection } from "@/three/ScreenReflection";
 import { anim } from "@/three/anim";
 import { paintPreset } from "@/three/background";
@@ -144,11 +144,12 @@ export function Device({ layout }: { layout: DeviceLayout }) {
   }, [screenCfg.bg?.type, screenCfg.bg?.color, screenCfg.bg?.preset, screenCfg.statusBar, screenBgImage, spec.family, layout.spec, layout.orientation, surface, gradientCanvas, invalidate]);
 
   useEffect(() => {
+    applyScreenGlassProfile(screenMat, layout.spec.id);
     screenMat.clearcoat = reflection;
     screenMat.envMapIntensity = reflection;
     screenMat.needsUpdate = true;
     invalidate();
-  }, [reflection, screenMat, invalidate]);
+  }, [reflection, screenMat, layout.spec.id, invalidate]);
 
   const group = useRef<THREE.Group>(null);
   const orientationGroup = useRef<THREE.Group>(null);

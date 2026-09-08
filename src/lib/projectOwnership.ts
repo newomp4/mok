@@ -2,6 +2,7 @@
 import { create } from "zustand";
 import { createStore } from "idb-keyval";
 import type { Project } from "./types";
+import { referencedMediaIds, retainMedia } from "./mediaRetention";
 
 export const LEASE_MS = 30_000;
 export const leaseKey = (id: string) => `ownership:${id}`;
@@ -125,6 +126,9 @@ async function claim(project: Project, force: boolean): Promise<boolean> {
   const request = ++generation, token = crypto.randomUUID();
   useProjectOwnership.setState({ mode: "checking", reason: "Opening the latest saved draft…" });
   try {
+    // Publishing the future token before its lease commits lets cleanup distinguish this tab
+    // from a pre-manifest writer. This does not grant access; the transaction below still does.
+    await retainMedia(referencedMediaIds(project), token);
     const result = await db("readwrite", (store) => new Promise<{ owned: boolean; lease: ProjectLease; draft: Project }>((resolve, reject) => {
       const tx = store.transaction;
       let result: { owned: boolean; lease: ProjectLease; draft: Project };
@@ -149,6 +153,8 @@ async function claim(project: Project, force: boolean): Promise<boolean> {
       };
       lease.onsuccess = draft.onsuccess = saved.onsuccess = done;
     }));
+    if (request !== generation || callbacks?.current().id !== project.id) return false;
+    await retainMedia(referencedMediaIds(result.draft));
     if (request !== generation || callbacks?.current().id !== project.id) return false;
     callbacks?.restore(result.draft);
     useProjectOwnership.setState({ projectId: project.id, mode: result.owned ? "editing" : "readonly", token: result.owned ? token : null, expires: result.owned ? result.lease.expires : 0, reason: result.owned ? "" : "Another tab is editing this project." });
@@ -201,6 +207,7 @@ export async function refreshProjectOwnership() {
 
 export function startProjectOwnership(handlers: NonNullable<typeof callbacks>) {
   callbacks = handlers;
+  void retainMedia(referencedMediaIds(handlers.current()));
   useProjectOwnership.setState({ enabled: true });
   try { channel = new BroadcastChannel("mok-project-ownership"); } catch {}
   if (channel) channel.onmessage = (event) => {

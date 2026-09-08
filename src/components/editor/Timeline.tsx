@@ -3,7 +3,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "
 import { useEditor, beginInteraction, endInteraction, hasShotClipboard, clampKeyTime } from "@/store/editor";
 import { useUI } from "@/store/ui";
 import { ANIM_LABELS, type AnimProp, type Keyframe, type Shot, type Transition, type AudioTrack } from "@/lib/types";
-import { EASES, formatTime, shotStart, totalDuration, editableDuration, contentDuration, parseDuration, timelineTickStep, inHandleOf, setInHandle } from "@/lib/animation";
+import { EASES, formatTime, shotStart, totalDuration, editableDuration, parseDuration, timelineTickStep, cameraPoseTimes, inHandleOf, setInHandle } from "@/lib/animation";
 import { MOTION_PRESETS } from "@/lib/presets";
 import { Button, IconButton, Popover, Segmented, MenuList, ContextMenu, NumberRow, ColorRow, type MenuItem } from "@/components/ui";
 import { Icon } from "@/components/icons";
@@ -18,6 +18,7 @@ import { shotKind } from "@/lib/defaults";
 import { blip } from "@/lib/sounds";
 import { EasingButton, SelectionCount } from "./EasingEditor";
 import { insertLogoFromPicker } from "@/lib/logoInsertion";
+import { TextLayerLabel, TextTrackLabel, TextTrackBar } from "./TextTrackTimeline";
 import { trimShotHead } from "@/lib/trimShot";
 
 const LEFT_W = 184;
@@ -95,7 +96,7 @@ export function Timeline() {
   // playhead is left out of the selection and read in leaves (or from getState in handlers),
   // so a 60 Hz tick never reconciles the shot and keyframe tree
   const ui = useUI(useShallow((s) => ({
-    playing: s.playing, loop: s.loop, recording: s.recording, activeShotId: s.activeShotId,
+    activeTextOverlayId: s.activeTextOverlayId, cameraPose: s.cameraPose, playing: s.playing, loop: s.loop, recording: s.recording, activeShotId: s.activeShotId,
     timelineMode: s.timelineMode, timelineZoom: s.timelineZoom, timelineHeight: s.timelineHeight,
     autoMotion: s.autoMotion, guides: s.guides, selectedKeys: s.selectedKeys, selectedShots: s.selectedShots,
     setTime: s.setTime, setPlaying: s.setPlaying, toggleLoop: s.toggleLoop, setRecording: s.setRecording,
@@ -134,40 +135,26 @@ export function Timeline() {
   const [shotDrag, setShotDrag] = useState<{ ids: string[]; dx: number } | null>(null);
   const [gapMenu, setGapMenu] = useState<{ at: { x: number; y: number }; shotId: string } | null>(null);
 
-  // Simple mode packs the sequence — a gap neither shows nor offsets anything — so the blocks, the
-  // keyframes and the playhead all share one mapping between project time and where it is drawn.
+  // Both modes retain gaps and use the same project clock. Simple consolidates scene rows.
   const packed = useMemo(() => {
     const starts = new Map<string, { real: number; disp: number }>();
     let real = 0, disp = 0;
     for (const s of project.shots) {
       real += Math.max(0, s.gap ?? 0);
+      disp = real;
       starts.set(s.id, { real, disp });
       real += s.duration;
-      disp += s.duration;
+      disp = real;
     }
     return { starts, total: disp };
   }, [project.shots]);
-  const toDisplayTime = (t: number) => {
-    if (advanced) return t;
-    for (const s of project.shots) {
-      const st = packed.starts.get(s.id)!;
-      if (t < st.real) return st.disp;
-      if (t < st.real + s.duration) return st.disp + (t - st.real);
-    }
-    return packed.total + Math.max(0, t - contentDuration(project));
-  };
-  const toRealTime = (d: number) => {
-    if (advanced) return d;
-    for (const s of project.shots) {
-      const st = packed.starts.get(s.id)!;
-      if (d < st.disp + s.duration) return st.real + Math.max(0, d - st.disp);
-    }
-    const last = project.shots[project.shots.length - 1];
-    const st = last && packed.starts.get(last.id);
-    return (st ? st.real + last.duration : 0) + Math.max(0, d - packed.total);
-  };
+  // Text and audio can span scene gaps, so both modes share the real project clock.
+  const toDisplayTime = (t: number) => t;
+  const toRealTime = (t: number) => t;
   const displayEnd = toDisplayTime(total);
-  const dispTotal = Math.max(displayEnd, advanced ? contentDuration(project) : packed.total);
+  const dispTotal = editEnd;
+  const textTracks = [...(project.textOverlays ?? [])].reverse();
+  const frontText = textTracks.filter((t) => t.layer !== "behind"), behindText = textTracks.filter((t) => t.layer === "behind");
 
   const seekFromEvent = (e: React.PointerEvent | PointerEvent) => {
     const el = scrollRef.current;
@@ -250,6 +237,7 @@ export function Timeline() {
   const groupIds = (id: string) => (selectedShots.length > 1 && selectedShots.includes(id) ? selectedShots : [id]);
 
   const selectShot = (id: string, additive: boolean) => {
+    useUI.setState({ activeTextOverlayId: null, cameraPose: null });
     ui.setPlaying(false);
     ui.setActiveShot(id);
     if (additive) { setSelectedShots((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id])); return; }
@@ -371,7 +359,8 @@ export function Timeline() {
       { label: "Copy", icon: "clipboard", shortcut: "⌘C", onSelect: () => copyShot(shotId) },
       { label: "Paste after", icon: "clipboard", shortcut: "⌘V", disabled: !hasShotClipboard(), onSelect: () => pasteShot(shotId) },
       { divider: true, label: "" },
-      { label: "Add text shot", icon: "type", onSelect: () => addShot("text", shotId) },
+      { label: "Add text track", icon: "type", onSelect: () => useEditor.getState().addTextOverlay(shotStart(project, shotId), project.shots.find((s) => s.id === shotId)?.duration) },
+      { label: "Add text scene", icon: "type", onSelect: () => addShot("text", shotId) },
       { label: "Add logo shot", icon: "logo", onSelect: () => void insertLogoFromPicker(async () => (await pickFiles(ACCEPTED_IMAGES))[0], shotId) },
       { label: "Set transition-out…", icon: "transition", disabled: project.shots[project.shots.length - 1]?.id === shotId, onSelect: () => setTransitionFor(shotId) },
       { divider: true, label: "" },
@@ -438,7 +427,8 @@ export function Timeline() {
             items={[
               { label: "Media", sub: "New shot from image or video", icon: "image", onSelect: () => void addTrack("media") },
               { label: "Shot from camera", sub: "Animates from where the sequence ends", icon: "camera", onSelect: () => { addShotFromCamera(); setAddOpen(false); } },
-              { label: "Text", sub: "Title or caption shot", icon: "type", onSelect: () => void addTrack("text") },
+              { label: "Text", sub: "Independent overlay track", icon: "type", onSelect: () => { setAddOpen(false); useEditor.getState().addTextOverlay(); } },
+              { label: "Text scene", sub: "Full-frame title card", icon: "type", onSelect: () => void addTrack("text") },
               { label: "Logo", sub: "Brand mark shot", icon: "logo", onSelect: () => void addTrack("logo") },
               { label: "Audio", sub: project.audio ? "Replace the music or voiceover" : "Music or voiceover track", icon: "audio", onSelect: () => void addTrack("audio") },
             ]}
@@ -457,6 +447,8 @@ export function Timeline() {
         <div className="scroll flex shrink-0 flex-col overflow-hidden border-r border-line" style={{ width: LEFT_W }}>
           <div className="shrink-0 border-b border-line" style={{ height: RULER_H }} />
           <div ref={labelsRef} className="scroll min-h-0 flex-1 overflow-y-auto" onScroll={(e) => { if (scrollRef.current && scrollRef.current.scrollTop !== e.currentTarget.scrollTop) scrollRef.current.scrollTop = e.currentTarget.scrollTop; }}>
+            {!!textTracks.length && <TextLayerLabel layer="front" />}
+            {frontText.map((t) => <TextTrackLabel key={t.id} track={t} active={ui.activeTextOverlayId === t.id} />)}
             {!advanced && (
               <>
                 <div className="flex items-center gap-1.5 border-b border-line px-2" style={{ height: ROW_H }}>
@@ -464,9 +456,10 @@ export function Timeline() {
                   <span className="label text-fg">Shots</span>
                   <span className="num ml-auto text-[10px] text-muted">{project.shots.length}</span>
                 </div>
+                <div className="label-sm flex items-center border-b border-line pl-8 text-fg-2" style={{ height: ROW_H }}>Camera poses</div>
                 <div className="flex items-center gap-1.5 border-b border-line pl-8 pr-2" style={{ height: LANE_H }}>
                   <Icon name="diamond" size={8} className="text-accent" />
-                  <span className="label-sm text-fg-2">Keyframes</span>
+                  <span className="label-sm text-fg-2">Advanced keys</span>
                 </div>
               </>
             )}
@@ -497,6 +490,8 @@ export function Timeline() {
                 </div>
               );
             })}
+            {!!textTracks.length && <TextLayerLabel layer="behind" />}
+            {behindText.map((t) => <TextTrackLabel key={t.id} track={t} active={ui.activeTextOverlayId === t.id} />)}
             {project.audio && <AudioLabel track={project.audio} onRemove={() => setAudio(null)} />}
             <button type="button" onClick={() => setAddOpen(true)} className="label flex h-8 w-full items-center gap-1.5 px-3 text-muted hover:text-fg">
               <Icon name="plus" size={11} />Add track
@@ -511,7 +506,7 @@ export function Timeline() {
           onPointerDown={(e) => {
             // a drag starting on empty track space marquee-selects keyframes and whole shots
             const t = e.target as HTMLElement;
-            if (e.button !== 0 || t.closest("[data-kf]") || t.closest("[data-shot]") || t.closest("[data-ruler]") || t.closest("[data-clip]")) return;
+            if (e.button !== 0 || t.closest("[data-kf]") || t.closest("[data-shot]") || t.closest("[data-ruler]") || t.closest("[data-clip]") || t.closest("[data-text-overlay]") || t.closest("[data-camera-pose]")) return;
             const el = scrollRef.current!;
             const r = el.getBoundingClientRect();
             const x = e.clientX - r.left + el.scrollLeft, y = e.clientY - r.top + el.scrollTop;
@@ -569,6 +564,8 @@ export function Timeline() {
             </div>
             {/* rows */}
             <div>
+              {!!textTracks.length && <div className="h-6 border-b border-line bg-fill/40" />}
+              {frontText.map((t) => <TextTrackBar key={t.id} track={t} active={ui.activeTextOverlayId === t.id} pps={pps} />)}
               {!advanced && (
                 <>
                   <div className="relative border-b border-line" style={{ height: ROW_H }}>
@@ -594,6 +591,14 @@ export function Timeline() {
                         )}
                       </Fragment>
                     ))}
+                  </div>
+                  <div className="relative border-b border-line" style={{ height: ROW_H }}>
+                    {rows.filter(({ shot }) => shotKind(shot) === "media").map(({ shot, start }) => {
+                      const times = cameraPoseTimes(shot);
+                      return <div key={shot.id} className="absolute inset-y-1 flex overflow-hidden rounded border border-line-2" style={{ left: 8 + start * pps, width: shot.duration * pps }}>
+                        {times.map((time, index) => <button key={index} data-camera-pose={`${shot.id}|${index}`} title={`Pose ${index + 1}: ${time.toFixed(2)}s into ${shot.name}`} aria-label={`${shot.name} camera pose ${index + 1}`} onClick={() => useEditor.getState().selectCameraPose(shot.id, index)} className={cn("label-sm min-w-0 flex-1 truncate border-r border-line px-1 last:border-r-0", ui.cameraPose?.shotId === shot.id && ui.cameraPose.index === index ? "bg-accent-soft text-accent" : "bg-fill text-muted hover:text-fg")}>{index + 1}</button>)}
+                      </div>;
+                    })}
                   </div>
                   <div className="relative border-b border-line" style={{ height: LANE_H }}>
                     {stacks.map(({ shot, start, realStart, t, props, custom }) => {
@@ -741,6 +746,8 @@ export function Timeline() {
                   ))}
                 </div>
               ))}
+              {!!textTracks.length && <div className="h-6 border-b border-line bg-fill/40" />}
+              {behindText.map((t) => <TextTrackBar key={t.id} track={t} active={ui.activeTextOverlayId === t.id} pps={pps} />)}
               {project.audio && <AudioBlock track={project.audio} pps={pps} total={total} toDisplay={toDisplayTime} toReal={toRealTime} />}
             </div>
             {snapAt !== null && (

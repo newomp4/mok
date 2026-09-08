@@ -7,6 +7,8 @@ import { normalizeProject } from "./defaults";
 import { validateMediaRef } from "./validateProject";
 import { draftKey, leaseKey, ownedTransaction, ProjectOwnershipError, useProjectOwnership, writeTicket, type WriteTicket, type ProjectLease } from "./projectOwnership";
 
+import { MEDIA_ORPHAN_PREFIX, MEDIA_RETENTION_VERSION, MEDIA_SESSION_PREFIX, oldOrphan, referencedMediaIds, retainMedia, validMediaManifest, withMediaMaintenance, type MediaOrphan } from "./mediaRetention";
+
 const PROJECT_PREFIX = "project:";
 const INDEX_KEY = "projects:index";
 const TEMPLATE_PREFIX = "template:";
@@ -110,8 +112,10 @@ function writeProjectRecord(p: Project, onlyIfSaved: boolean, ticket: WriteTicke
 function queueProjectSave(p: Project, onlyIfSaved: boolean): Promise<void> {
   p = structuredClone(p);
   const ticket = writeTicket(p.id);
+  const retained = retainMedia(referencedMediaIds(p));
   return writeInOrder(async () => {
     try {
+      await retained;
       await writeProjectRecord(p, onlyIfSaved, ticket);
       lastFailure = { message: "", at: 0 };
     } catch (e) {
@@ -166,8 +170,10 @@ export async function saveAutosave(p: Project, explicitTicket?: WriteTicket): Pr
   p = structuredClone(p);
   const ticket = explicitTicket ?? writeTicket(p.id);
   if (ticket === null) return;
+  const retained = retainMedia(referencedMediaIds(p));
   return writeInOrder(async () => {
     try {
+      await retained;
       if (ticket === undefined) await idbSet(AUTOSAVE_KEY, p);
       else await ownedTransaction<void>(p.id, ticket, (store) => { store.put(p, draftKey(p.id)); store.put(p, AUTOSAVE_KEY); });
       autosaveWarned = false;
@@ -207,37 +213,112 @@ export function collectMedia(p: Project): MediaRef[] {
 }
 
 /**
- * Drop stored media that no project references any more. Without this, every screenshot ever
- * dropped on the canvas stays in IndexedDB for good and the quota fills up on its own.
- * Returns how many records were removed.
+ * Reclaim only old, repeatedly unreferenced bytes. Web Locks prove which tab manifests are live;
+ * the IndexedDB transaction scans records directly, so an out-of-date index cannot hide a project.
+ * Missing evidence, damaged records and unsupported locks all retain media instead of guessing.
  */
 export async function pruneMedia(live?: Project): Promise<number> {
-  // Another tab's pending imports and undo history are not visible here. A global sweep would
-  // delete live bytes; retaining them is preferable until a cross-tab media manifest exists.
-  if (useProjectOwnership.getState().enabled) return 0;
   try {
     await writeTail;
-    const keep = new Set<string>();
-    // Session media can still belong to an in-flight import or an undo state. Only reclaim unused
-    // records from previous sessions; deleting a freshly decoded blob here loses it on reload.
-    for (const id of Object.keys(useMediaStore.getState().items)) keep.add(id);
-    for (const id of Object.keys(useMediaStore.getState().loading)) keep.add(id);
-    const add = (p: Project | null | undefined) => { if (p) for (const m of collectMedia(p)) keep.add(m.id); };
-    add(live);
-    add((await idbGet(AUTOSAVE_KEY)) as Project | undefined);
-    const idx = ((await idbGet(INDEX_KEY)) as ProjectMeta[] | undefined) ?? [];
-    for (const meta of idx) add((await idbGet(PROJECT_PREFIX + meta.id)) as Project | undefined);
-    const all = (await idbKeys()) as string[];
-    let removed = 0;
-    for (const k of all) {
-      if (typeof k !== "string" || !k.startsWith("media:")) continue;
-      if (keep.has(k.slice(6))) continue;
-      await idbDel(k);
-      removed++;
-    }
-    return removed;
+    const local = new Set([...Object.keys(useMediaStore.getState().items), ...Object.keys(useMediaStore.getState().loading)]);
+    if (live) for (const id of referencedMediaIds(live)) local.add(id);
+    await retainMedia(local);
+    return await withMediaMaintenance((sessions) => projectStore("readwrite", (store) => new Promise<number>((resolve, reject) => {
+      const tx = store.transaction, now = Date.now();
+      let removed = 0, deletedBytes = 0, marked = 0;
+      tx.oncomplete = () => resolve(removed);
+      tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("Media cleanup was interrupted"));
+      const fail = () => { try { tx.abort(); } catch {} };
+      const keys = store.getAllKeys(undefined, 50_001);
+      keys.onsuccess = () => {
+        if (keys.result.length > 50_000) { fail(); return; }
+        const all = keys.result.filter((key): key is string => typeof key === "string");
+        const keySet = new Set(all);
+        const records = new Map<string, unknown>();
+        const metadata = all.filter((key) => !key.startsWith("media:"));
+        let remaining = metadata.length;
+        const scan = () => {
+          try {
+            const keep = new Set(local), knownTokens = new Set<string>(), activeTokens = new Set<string>();
+            for (const [key, record] of records) {
+              if (key.startsWith(MEDIA_SESSION_PREFIX) && validMediaManifest(record, key.slice(MEDIA_SESSION_PREFIX.length))) {
+                for (const token of record.tokens) knownTokens.add(token);
+              }
+            }
+            for (const session of sessions) {
+              const manifest = records.get(MEDIA_SESSION_PREFIX + session);
+              if (!validMediaManifest(manifest, session)) throw new Error("A live tab has no complete media manifest");
+              for (const id of manifest.ids) keep.add(id);
+            }
+            let unknownWriter = false;
+            for (const [key, record] of records) {
+              if (key.startsWith("ownership:")) {
+                const lease = record as ProjectLease;
+                if (!lease || typeof lease.token !== "string" || !Number.isFinite(lease.expires)) throw new Error("Project lease is damaged");
+                if (lease.expires > now) { activeTokens.add(lease.token); if (!knownTokens.has(lease.token)) unknownWriter = true; }
+              }
+              const isProject = key === AUTOSAVE_KEY || key.startsWith(PROJECT_PREFIX) || key.startsWith("draft:");
+              const isTemplate = key.startsWith(TEMPLATE_PREFIX);
+              const project = isProject ? record : isTemplate ? (record as { project?: unknown })?.project : undefined;
+              if (isProject || isTemplate) {
+                if (!project || typeof project !== "object" || (project as Project).version !== 1 || !Array.isArray((project as Project).shots)) throw new Error("A stored project is damaged or uses an unfamiliar format");
+                for (const id of referencedMediaIds(project)) keep.add(id);
+              }
+            }
+            // Unindexed records were already included above; index entries with missing records
+            // instead indicate damaged storage, so give recovery priority over reclaiming bytes.
+            for (const [indexKey, prefix] of [[INDEX_KEY, PROJECT_PREFIX], [TEMPLATE_INDEX_KEY, TEMPLATE_PREFIX]]) {
+              const index = records.get(indexKey);
+              if (index !== undefined && (!Array.isArray(index) || index.some((meta) => !meta || typeof meta.id !== "string" || !records.has(prefix + meta.id)))) throw new Error("A stored index is damaged");
+            }
+            for (const key of all) {
+              if (key.startsWith(MEDIA_SESSION_PREFIX) && !sessions.has(key.slice(MEDIA_SESSION_PREFIX.length))) {
+                const manifest = records.get(key);
+                // A closed tab's lease may outlive its browser lock when pagehide could not finish.
+                // Keep only the protocol evidence until that lease expires; its media pins are
+                // already excluded above. No ownership lease is modified or extended by cleanup.
+                if (!validMediaManifest(manifest, key.slice(MEDIA_SESSION_PREFIX.length)) || !manifest.tokens.some((token) => activeTokens.has(token))) store.delete(key);
+              }
+              if (key.startsWith(MEDIA_ORPHAN_PREFIX) && !keySet.has("media:" + key.slice(MEDIA_ORPHAN_PREFIX.length))) store.delete(key);
+            }
+            // An old application tab can still be writing without the new manifest protocol.
+            if (unknownWriter) return;
+            for (const key of all) {
+              if (!key.startsWith("media:")) continue;
+              const id = key.slice(6), orphanKey = MEDIA_ORPHAN_PREFIX + id;
+              if (keep.has(id)) { if (records.has(orphanKey)) store.delete(orphanKey); continue; }
+              const request = store.get(key);
+              request.onsuccess = () => {
+                try {
+                  const record = request.result as { ref?: MediaRef; blob?: Blob; storedAt?: number; retentionVersion?: number } | undefined;
+                  if (!record || record.ref?.id !== id || !(record.blob instanceof Blob)) throw new Error("A stored media record is damaged");
+                  // Pre-protocol tabs cannot publish their private undo history. Only explicit new
+                  // imports opt in; loading or inspecting legacy bytes must never retrofit a tag.
+                  if (record.retentionVersion !== MEDIA_RETENTION_VERSION) { if (records.has(orphanKey)) store.delete(orphanKey); return; }
+                  const candidate = { blob: record.blob, storedAt: record.storedAt, retentionVersion: record.retentionVersion };
+                  const previous = records.get(orphanKey) as MediaOrphan | undefined;
+                  if (oldOrphan(previous, candidate, now)) {
+                    if (removed < 32 && (removed === 0 || deletedBytes + record.blob.size <= 128 * 1024 * 1024)) {
+                      store.delete(key); store.delete(orphanKey); removed++; deletedBytes += record.blob.size;
+                    }
+                  } else if (marked < 512 && (!previous || previous.version !== 1 || !Number.isFinite(previous.observedAt) || previous.observedAt <= 0 || previous.observedAt > now || previous.observedAt < (record.storedAt ?? 0) || previous.storedAt !== (record.storedAt ?? null) || previous.size !== record.blob.size || previous.type !== record.blob.type)) {
+                    const marker: MediaOrphan = { version: 1, observedAt: now, storedAt: record.storedAt ?? null, size: record.blob.size, type: record.blob.type };
+                    store.put(marker, orphanKey); marked++;
+                  }
+                } catch { fail(); }
+              };
+            }
+          } catch { fail(); }
+        };
+        if (!remaining) scan();
+        for (const key of metadata) {
+          const request = store.get(key);
+          request.onsuccess = () => { records.set(key, request.result); if (--remaining === 0) scan(); };
+        }
+      };
+    })), 0);
   } catch (e) {
-    console.warn("media prune failed", e);
+    console.warn("media prune skipped", e);
     return 0;
   }
 }

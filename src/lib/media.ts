@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { get as idbGet, set as idbSet, del as idbDel } from "idb-keyval";
 import { uid } from "./ids";
 import type { MediaRef } from "./types";
+import { MEDIA_RETENTION_VERSION, retainMedia } from "./mediaRetention";
 
 export interface LoadedMedia {
   ref: MediaRef;
@@ -190,6 +191,7 @@ export async function importMedia(file: Blob & { name?: string }): Promise<Media
   // a still GIF makes a fine screen, an animated one would silently lose every frame but one
   if (file.type === "image/gif" && (await gifIsAnimated(file))) throw new Error(ANIMATED_GIF_MESSAGE);
   const id = uid();
+  await retainMedia([id]);
   const url = URL.createObjectURL(file);
   let width = 0, height = 0, duration: number | undefined;
   let element: HTMLImageElement | HTMLVideoElement | HTMLAudioElement;
@@ -218,7 +220,7 @@ export async function importMedia(file: Blob & { name?: string }): Promise<Media
   }
   const ref: MediaRef = { id, kind, width, height, name: file.name ?? "media", duration };
   try {
-    await idbSet(`media:${id}`, { ref, blob: file });
+    await idbSet(`media:${id}`, { ref, blob: file, storedAt: Date.now(), retentionVersion: MEDIA_RETENTION_VERSION });
   } catch (e) {
     // the media works this session but will not survive a reload — say so rather than losing it quietly
     console.warn("media persist failed", e);
@@ -236,8 +238,9 @@ export function getMedia(id: string | undefined | null): LoadedMedia | null {
 /** Ensure a media ref is loaded into memory (from IndexedDB if needed). */
 export function ensureMedia(ref: MediaRef | null | undefined): Promise<LoadedMedia | null> {
   if (!ref) return Promise.resolve(null);
+  const retained = retainMedia([ref.id]);
   const existing = useMediaStore.getState().items[ref.id];
-  if (existing?.kind === ref.kind) return Promise.resolve(existing);
+  if (existing?.kind === ref.kind) return retained.then(() => existing);
   const p = pending.get(ref.id);
   if (p) return p;
   if (useMediaStore.getState().missing[ref.id]) return Promise.resolve(null);
@@ -245,6 +248,7 @@ export function ensureMedia(ref: MediaRef | null | undefined): Promise<LoadedMed
   const promise = (async () => {
     useMediaStore.setState((s) => ({ loading: { ...s.loading, [ref.id]: true } }));
     try {
+      await retained;
       const rec = (await idbGet(`media:${ref.id}`)) as { ref: MediaRef; blob: Blob } | undefined;
       if (!rec) return null;
       if (rec.ref?.id !== ref.id || rec.ref.kind !== ref.kind || !(rec.blob instanceof Blob)) return null;
@@ -328,6 +332,7 @@ export async function dataURLToBlob(dataUrl: string): Promise<Blob> {
 
 /** Register a media blob under a given id (used when importing a .mok file). */
 export async function registerMedia(ref: MediaRef, blob: Blob): Promise<LoadedMedia> {
+  await retainMedia([ref.id]);
   // a file written before the import guard existed can still carry one, and it would restore frozen
   if (blob.type === "image/gif" && (await gifIsAnimated(blob))) throw new Error(ANIMATED_GIF_MESSAGE);
   const version = revision(ref.id);
@@ -344,7 +349,7 @@ export async function registerMedia(ref: MediaRef, blob: Blob): Promise<LoadedMe
     throw error;
   }
   if (version !== revisions.get(ref.id)) { release(loaded); throw new Error("This media was replaced while it was loading"); }
-  try { await idbSet(`media:${ref.id}`, { ref: loaded.ref, blob }); } catch { mediaPersistFailed(ref.name, "storage"); }
+  try { await idbSet(`media:${ref.id}`, { ref: loaded.ref, blob, storedAt: Date.now(), retentionVersion: MEDIA_RETENTION_VERSION }); } catch { mediaPersistFailed(ref.name, "storage"); }
   if (version !== revisions.get(ref.id)) { release(loaded); throw new Error("This media was replaced while it was saving"); }
   // media ids survive an export, so re-importing the same file replaces an entry that owns a url
   const previous = useMediaStore.getState().items[ref.id];

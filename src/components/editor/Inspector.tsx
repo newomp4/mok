@@ -4,8 +4,8 @@ import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { useEditor, redo, undo, beginInteraction, endInteraction, isShotScoped } from "@/store/editor";
 import { useUI } from "@/store/ui";
-import { ANIM_LABELS, ANIM_PROPS, type AnimProp, type BlurMode, type EffectId, type EffectInstance, type EnterExit, type EnterExitEffect, type FitMode, type LogoEffect, type Shot, type TextStyle } from "@/lib/types";
-import { hasKeyframeAt, locate, sampleTrack, getBase, shotBase } from "@/lib/animation";
+import { ANIM_LABELS, ANIM_PROPS, type AnimProp, type BlurMode, type EffectId, type EffectInstance, type EnterExit, type EnterExitEffect, type FitMode, type LogoEffect, type Shot, type TextOverlay, type TextStyle } from "@/lib/types";
+import { hasKeyframeAt, cameraPoseTimes, locate, sampleTrack, getBase, shotBase } from "@/lib/animation";
 import { DEVICES, FAMILY_LABELS, deviceGroup, getDevice, getFinish, type DeviceBrand, type DeviceFamily } from "@/lib/devices";
 import { BG_PRESETS, CAMERA_PRESETS, EFFECT_DEFS, LIGHTINGS, SCENES, getBgPreset, getEffectDef, getScene } from "@/lib/presets";
 import { paintPreset } from "@/three/background";
@@ -25,7 +25,7 @@ import { pickFiles } from "./hooks";
 import { createProject, defaultCaptionStyle, defaultLogoStyle, defaultTextStyle, shotKind } from "@/lib/defaults";
 import { FONTS, cssFamily, ensureFont, getFont, nearestWeight, type FontDef } from "@/lib/fonts";
 import { anim } from "@/three/anim";
-import { previewCaption, startCaptionPosition } from "@/lib/captionPosition";
+import { previewCaption, startCaptionPosition, startTextOverlayPosition } from "@/lib/captionPosition";
 
 /* ---------- animated value helpers ---------- */
 /** What each animated property ships at, so a right-click on its row can put it back. */
@@ -237,11 +237,11 @@ const ENTER_EXIT: { value: EnterExitEffect; label: string }[] = [
   { value: "slideLeft", label: "Slide left" }, { value: "slideRight", label: "Slide right" }, { value: "scale", label: "Scale" }, { value: "blur", label: "Soft" },
 ];
 
-function EnterExitRows({ shot, caption = false }: { shot: Shot; caption?: boolean }) {
+function EnterExitRows({ shot, caption = false, overlay }: { shot?: Shot; caption?: boolean; overlay?: TextOverlay }) {
   const updateShot = useEditor((s) => s.updateShot);
   const row = (key: "enter" | "exit", label: string) => {
-    const fx: EnterExit = (caption ? shot.caption?.[key] : shot[key]) ?? { effect: "none", duration: 0.4 };
-    const set = (mut: (f: EnterExit) => void) => updateShot(shot.id, (s) => {
+    const fx: EnterExit = (overlay ? overlay[key] : caption ? shot?.caption?.[key] : shot?.[key]) ?? { effect: "none", duration: 0.4 };
+    const set = (mut: (f: EnterExit) => void) => overlay ? useEditor.getState().updateTextOverlay(overlay.id, (t) => { const fx = t[key] ?? { effect: "fade", duration: 0.4 }; mut(fx); t[key] = fx; delete t.timing; }) : shot && updateShot(shot.id, (s) => {
       const target = caption ? (s.caption ??= defaultCaptionStyle()) : s;
       const f = target[key] ?? { effect: "fade", duration: 0.4 }; mut(f); target[key] = f;
       if (caption && s.caption) delete s.caption.timing;
@@ -250,7 +250,7 @@ function EnterExitRows({ shot, caption = false }: { shot: Shot; caption?: boolea
       <>
         <div className="label-sm px-0.5 pt-2 text-muted">{label}</div>
         <SelectRow label="Effect" value={fx.effect} onChange={(v) => set((f) => { f.effect = v; })} options={ENTER_EXIT} />
-        <NumberRow label="Duration" value={fx.duration} min={0} max={Math.max(0.1, shot.duration / 2)} step={0.05} unit="s" disabled={fx.effect === "none"} onChange={(v) => set((f) => { f.duration = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+        <NumberRow label="Duration" value={fx.duration} min={0} max={Math.max(0.1, (overlay?.duration ?? shot?.duration ?? 1) / 2)} step={0.05} unit="s" disabled={fx.effect === "none"} onChange={(v) => set((f) => { f.duration = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
       </>
     );
   };
@@ -320,25 +320,25 @@ function FontPicker({ value, onChange }: { value: string; onChange: (v: string) 
   );
 }
 
-function TextEditor({ shot, caption = false }: { shot: Shot; caption?: boolean }) {
+function TextEditor({ shot, caption = false, overlay }: { shot?: Shot; caption?: boolean; overlay?: TextOverlay }) {
   const updateShot = useEditor((s) => s.updateShot);
-  const st = (caption ? shot.caption?.text : shot.text) ?? defaultTextStyle();
-  const set = (mut: (t: TextStyle) => void) => updateShot(shot.id, (s) => { if (caption) { s.caption ??= defaultCaptionStyle(); mut(s.caption.text); } else { s.text ??= defaultTextStyle(); mut(s.text); } });
+  const st = (overlay?.text ?? (caption ? shot?.caption?.text : shot?.text)) ?? defaultTextStyle();
+  const set = (mut: (t: TextStyle) => void) => overlay ? useEditor.getState().updateTextOverlay(overlay.id, (t) => mut(t.text)) : shot && updateShot(shot.id, (s) => { if (caption) { s.caption ??= defaultCaptionStyle(); mut(s.caption.text); } else { s.text ??= defaultTextStyle(); mut(s.text); } });
   // warm the picker so each family previews in its own face
   useEffect(() => { for (const f of FONTS) void ensureFont(f.family, 500); }, []);
   const font = getFont(st.font);
   return (
     <div className="flex flex-col gap-1">
-      <TextAreaRow value={st.text} onChange={(v) => set((t) => { t.text = v; })} placeholder={caption ? "Type your caption" : "Type your text"} />
+      <TextAreaRow value={st.text} onChange={(v) => set((t) => { t.text = v; })} placeholder={caption || overlay ? "Type your caption" : "Type your text"} />
       <FontPicker value={st.font} onChange={(v) => set((t) => { t.font = v; t.weight = nearestWeight(v, t.weight); })} />
       <SelectRow label="Weight" value={String(nearestWeight(st.font, st.weight))} onChange={(v) => set((t) => { t.weight = Number(v); })} options={font.weights.map((w) => ({ value: String(w), label: WEIGHT_NAMES[w] ?? String(w) }))} />
       <NumberRow label="Size" value={st.size} min={0.02} max={0.3} step={0.005} onChange={(v) => set((t) => { t.size = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
       <Segmented size="sm" value={st.align} onChange={(v) => set((t) => { t.align = v; })} options={[{ value: "left", label: <span className="sr-only">Align left</span>, icon: "align-left" }, { value: "center", label: <span className="sr-only">Align center</span>, icon: "align-center" }, { value: "right", label: <span className="sr-only">Align right</span>, icon: "align-right" }]} />
       <ColorRow label="Text colour" value={st.color} onChange={(v) => set((t) => { t.color = v; })} />
-      {!caption && <ColorRow label="Background" value={st.background} onChange={(v) => set((t) => { t.background = v; })} />}
+      {!caption && !overlay && <ColorRow label="Background" value={st.background} onChange={(v) => set((t) => { t.background = v; })} />}
       <NumberRow label="Line height" value={st.lineHeight} min={0.8} max={2} step={0.05} onChange={(v) => set((t) => { t.lineHeight = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
       <NumberRow label="Letter spacing" value={st.letterSpacing} min={-0.1} max={0.3} step={0.005} unit="em" onChange={(v) => set((t) => { t.letterSpacing = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
-      <EnterExitRows shot={shot} caption={caption} />
+      <EnterExitRows shot={shot} caption={caption} overlay={overlay} />
     </div>
   );
 }
@@ -350,6 +350,7 @@ function CaptionSection() {
   const c = shot.caption;
   const set = (edit: (caption: NonNullable<Shot["caption"]>) => void) => updateShot(shot.id, (s) => { s.caption ??= defaultCaptionStyle(); edit(s.caption); });
   return <Section title="Caption" sub={c?.enabled ? shot.name : "Overlay text"} open={open} onToggle={() => setOpen((v) => !v)}>
+    <Button size="sm" icon="plus" onClick={() => useEditor.getState().addTextOverlay()}>Add independent text track</Button>
     <ToggleRow label="Show caption" checked={c?.enabled ?? false} onChange={(enabled) => { set((c) => { c.enabled = enabled; }); if (enabled) previewCaption(shot.id); }} />
     {c?.enabled && <>
       <SelectRow label="Layer" value={c.layer} options={[{ value: "front", label: "In front of device" }, { value: "behind", label: "Behind device" }]} onChange={(layer) => set((c) => { c.layer = layer; })} />
@@ -358,9 +359,42 @@ function CaptionSection() {
       <NumberRow label="Vertical offset" value={c.y * 100} min={-50} max={50} step={1} unit="%" onChange={(v) => set((c) => { c.y = v / 100; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
       <TextEditor shot={shot} caption />
       <p className="label-sm pt-1 text-muted">One caption for {shot.name}. It follows this shot&apos;s timing.{c.timing ? " Split and trimmed clips retain their original animation until you edit Enter or Exit." : ""}</p>
+      <Button variant="soft" size="sm" onClick={() => useEditor.getState().convertCaption(shot.id)}>Make independent track</Button>
       <Button variant="ghost" size="sm" icon="trash" onClick={() => updateShot(shot.id, (s) => { delete s.caption; })}>Remove caption</Button>
     </>}
   </Section>;
+}
+
+function TextOverlaySection({ track }: { track: TextOverlay }) {
+  const [open, setOpen] = useState(true);
+  const set = (mut: (t: TextOverlay) => void) => useEditor.getState().updateTextOverlay(track.id, mut);
+  return <Section title="Text track" sub={track.name} open={open} onToggle={() => setOpen((v) => !v)}>
+    <Button size="sm" variant="ghost" onClick={() => useUI.getState().setActiveTextOverlay(null)}>Back to scene</Button>
+    <input aria-label="Text track name" value={track.name} onChange={(e) => set((t) => { t.name = e.target.value; })} className="h-8 w-full rounded-md bg-fill px-2 text-sm outline-none focus:ring-1 focus:ring-accent" />
+    <ToggleRow label="Show text" checked={track.enabled} onChange={(enabled) => set((t) => { t.enabled = enabled; })} />
+    <NumberRow label="Text start" value={track.start} min={0} max={180 - track.duration} step={0.1} unit="s" onChange={(v) => set((t) => { t.start = v; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+    <NumberRow label="Text duration" value={track.duration} min={0.1} max={180 - track.start} step={0.1} unit="s" onChange={(v) => set((t) => { t.duration = v; delete t.timing; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+    <SelectRow label="Layer" value={track.layer} options={[{ value: "front", label: "In front of device" }, { value: "behind", label: "Behind device" }]} onChange={(layer) => set((t) => { t.layer = layer; })} />
+    <div className="flex gap-1"><Button size="sm" variant="soft" onClick={() => useEditor.getState().reorderTextOverlay(track.id, 1)}>Bring forward</Button><Button size="sm" variant="soft" onClick={() => useEditor.getState().reorderTextOverlay(track.id, -1)}>Send backward</Button></div>
+    <Button size="sm" disabled={!track.enabled} onClick={() => startTextOverlayPosition(track.id)}>Position on canvas</Button>
+    <NumberRow label="Horizontal offset" value={track.x * 100} min={-100} max={100} step={1} unit="%" onChange={(v) => set((t) => { t.x = v / 100; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+    <NumberRow label="Vertical offset" value={track.y * 100} min={-100} max={100} step={1} unit="%" onChange={(v) => set((t) => { t.y = v / 100; })} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+    <TextEditor overlay={track} />
+    <p className="label-sm text-muted">This text has its own timing and can overlap other text or span scenes. Drag its row to change the layer order.</p>
+    <div className="flex gap-1"><Button size="sm" variant="ghost" icon="copy" onClick={() => useEditor.getState().duplicateTextOverlay(track.id)}>Duplicate</Button><Button size="sm" variant="ghost" icon="trash" onClick={() => useEditor.getState().removeTextOverlay(track.id)}>Delete text</Button></div>
+  </Section>;
+}
+
+function CameraPoseControls() {
+  const shot = useRenderShot();
+  const mode = useUI((s) => s.timelineMode), pose = useUI((s) => s.cameraPose);
+  if (mode !== "simple" || !shot || shotKind(shot) !== "media") return null;
+  const times = cameraPoseTimes(shot);
+  return <div className="flex flex-col gap-1 rounded-md border border-line p-1.5">
+    <NumberRow label="Camera pose slots" value={times.length} min={2} max={12} step={1} onChange={(count) => { useEditor.getState().updateShot(shot.id, (s) => { s.cameraPoseCount = Math.round(count); }); useUI.setState({ cameraPose: null }); }} onDragStart={beginInteraction} onDragEnd={endInteraction} />
+    <div className="grid grid-cols-4 gap-1">{times.map((time, i) => <Button key={i} size="sm" variant={pose?.shotId === shot.id && pose.index === i ? "soft" : "ghost"} title={`${time.toFixed(2)} seconds into scene`} onClick={() => useEditor.getState().selectCameraPose(shot.id, i)}>Pose {i + 1}</Button>)}</div>
+    <p className="label-sm text-muted">Select a pose, then adjust the camera. Slots are evenly spaced within this scene; existing Advanced keys stay in place.</p>
+  </div>;
 }
 
 const LOGO_EFFECTS: { value: LogoEffect; label: string; preview: string }[] = [
@@ -858,6 +892,7 @@ function CameraSection() {
   const setTab = useUI((s) => s.setCameraTab);
   return (
     <Section title="Camera" open={open} onToggle={() => setOpen((o) => !o)} tour="camera" right={<IconButton icon="rotate-ccw" size={12} label="Reset camera" onClick={resetCamera} className="h-6 w-6" />}>
+      <CameraPoseControls />
       <Segmented value={tab} onChange={setTab} options={[{ value: "manual", label: "Manual" }, { value: "presets", label: "Presets" }]} />
       {tab === "manual" ? (
         <>
@@ -1093,6 +1128,8 @@ export function Inspector() {
   const canRedo = useStore(useEditor.temporal, (s) => s.futureStates.length > 0);
   const shot = useRenderShot();
   const card = shotKind(shot) !== "media";
+  const selectedText = useUI((s) => s.activeTextOverlayId);
+  const textTrack = useEditor((s) => s.project.textOverlays?.find((t) => t.id === selectedText));
   return (
     <div className={cn("fixed bottom-2 right-2 top-[104px] z-30 w-[min(300px,calc(100vw-16px))] shrink-0 flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-xl md:static md:z-auto md:flex md:w-[240px] md:shadow-none", inspectorOpen ? "flex" : "hidden")}>
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-line px-1.5">
@@ -1103,7 +1140,7 @@ export function Inspector() {
         <div className="flex"><IconButton icon={theme === "dark" ? "sun" : "moon"} label="Toggle theme (D)" onClick={toggleTheme} /><IconButton className="md:hidden" icon="x" label="Close adjustments" onClick={() => useUI.setState({ inspectorOpen: false })} /></div>
       </div>
       <div className="scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-        <ShotSection />
+        {textTrack ? <TextOverlaySection track={textTrack} /> : <><ShotSection />
         {card ? (
           <div className="label-sm border-b border-line px-3 py-3 leading-relaxed text-muted">Text and logo shots fill the frame. Scene, mockup, camera and blur settings apply to media shots.</div>
         ) : (
@@ -1115,6 +1152,7 @@ export function Inspector() {
             <BlurSection />
           </>
         )}
+        </>}
         <EffectsSection />
         <VideoSection />
         <div className="h-6" />

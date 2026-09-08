@@ -200,22 +200,33 @@ export function contentDuration(p: Project): number {
   return p.shots.reduce((a, s) => a + Math.max(0, s.gap ?? 0) + s.duration, 0);
 }
 
+/** Independently timed text can extend beyond the underlying device sequence. */
+export function visualDuration(p: Project): number {
+  return Math.max(contentDuration(p), ...(p.textOverlays ?? []).map((t) => t.start + t.duration));
+}
+
+export const CAMERA_POSE_PROPS: AnimProp[] = ["camera.x", "camera.y", "camera.z", "camera.fov", "camera.zoom", "camera.panX", "camera.panY"];
+export function cameraPoseTimes(shot: Pick<Shot, "duration" | "cameraPoseCount">): number[] {
+  const count = Math.max(2, Math.min(12, Math.round(shot.cameraPoseCount ?? 3)));
+  return Array.from({ length: count }, (_, i) => Math.round(shot.duration * i / (count - 1) * 1000) / 1000);
+}
+
 export const MAX_PROJECT_DURATION = 180;
 
 export function totalDuration(p: Project): number {
-  return typeof p.duration === "number" && Number.isFinite(p.duration) && p.duration > 0 ? p.duration : contentDuration(p);
+  return typeof p.duration === "number" && Number.isFinite(p.duration) && p.duration > 0 ? p.duration : visualDuration(p);
 }
 
 /** Editing can inspect retained clips outside the playback/export endpoint. */
 export function editableDuration(p: Project): number {
-  return Math.max(totalDuration(p), contentDuration(p));
+  return Math.max(totalDuration(p), visualDuration(p));
 }
 
 /** Trimming or deleting clips keeps the endpoint; extending the sequence can grow it. */
 export function preserveProjectDuration(before: Project, after: Project): void {
   if (after.duration !== before.duration) return; // explicit endpoint edit or template reset
   const end = totalDuration(before);
-  after.duration = Math.min(MAX_PROJECT_DURATION, contentDuration(after) > contentDuration(before) + 1e-6 ? Math.max(end, contentDuration(after)) : end);
+  after.duration = Math.min(MAX_PROJECT_DURATION, visualDuration(after) > visualDuration(before) + 1e-6 ? Math.max(end, visualDuration(after)) : end);
 }
 
 /** Keep the ruler bounded even when a migrated file retains long clips beyond its endpoint. */

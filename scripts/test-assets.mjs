@@ -105,6 +105,30 @@ test('shadow bias scales with actual texel coverage and fitted light camera cont
   device.children[0].geometry.dispose(); device.children[0].material.dispose();
 });
 
+test('spotlight VSM reserves depth precision near its actual caster without clipping or detaching shadows', () => {
+  for (const scale of [.5, 1, 4]) {
+    const device = new THREE.Group();
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, .12, 1.4), new THREE.MeshStandardMaterial());
+    const lid = new THREE.Mesh(new THREE.BoxGeometry(2, 1.3, .03), new THREE.MeshStandardMaterial()); lid.position.set(0, .65, -.65);
+    device.add(mesh, lid); device.scale.setScalar(scale); device.rotation.y = .3; device.updateWorldMatrix(true, true);
+    const light = new THREE.SpotLight(); light.position.set(-4 * scale, 7 * scale, -4 * scale); light.distance = 44 * scale; light.angle = .6; light.shadow.radius = 52;
+    calibrateShadow(light, device, -.12 * scale, 2 * scale, 2048);
+    const camera = light.shadow.camera, previous = camera.projectionMatrix.clone(), radius = light.shadow.radius;
+    assert.ok(camera.near > scale, 'empty space near the light must not consume VSM precision');
+    assert.equal(camera.far, light.distance, 'shadow calibration must preserve light falloff');
+    assert.ok(light.shadow.normalBias < .01 * scale, 'precision fix must not detach receiver shadows');
+    const corners = new THREE.Box3().setFromObject(device), point = new THREE.Vector3();
+    for(let i=0;i<8;i++) {
+      point.set(i & 1 ? corners.max.x : corners.min.x, i & 2 ? corners.max.y : corners.min.y, i & 4 ? corners.max.z : corners.min.z).project(camera);
+      assert.ok(point.z > -1 && point.z < 1, 'fitted near/far clips the deck or articulated lid');
+    }
+    light.shadow.updateMatrices(light);
+    assert.deepEqual(camera.projectionMatrix, previous, 'Three must not replace calibration on the first shadow draw');
+    calibrateShadow(light, device, -.12 * scale, 2 * scale, 2048); assert.equal(light.shadow.radius, radius);
+    mesh.geometry.dispose(); mesh.material.dispose(); lid.geometry.dispose(); lid.material.dispose();
+  }
+});
+
 test('all 129 shipped model textures carry complete validated KTX2 mip chains and unchanged image dimensions', () => {
   let images = 0;
   for (const file of readdirSync('public/models').filter((name) => name.endsWith('.glb'))) {

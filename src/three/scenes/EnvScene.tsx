@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { useFrame, useThree } from "@react-three/fiber";
 import { MeshReflectorMaterial as FloorMaterial } from "@react-three/drei/materials/MeshReflectorMaterial.js";
 import { BlurPass } from "@react-three/drei/materials/BlurPass.js";
+import { RectAreaLightUniformsLib } from "three/addons/lights/RectAreaLightUniformsLib.js";
 import { anim } from "@/three/anim";
 import { useRenderFlags } from "@/three/registry";
 import { useEditor } from "@/store/editor";
@@ -16,6 +17,9 @@ import { clipReflectionCamera, isEffectivelyVisible, withHiddenObjects, withOffs
 import { reflectionSamples } from "@/three/reflectionSamples";
 import { addVsmReceiverBoundaryGuard, createReceiverOnlyShadowMaterial, shadowStrength } from "@/three/shadowCalibration";
 import { acquireConcrete, configureConcreteMaps, type ConcreteMaps } from "@/three/concreteAssets";
+import { addSweepFade } from "@/three/sweepFade";
+
+RectAreaLightUniformsLib.init();
 
 /**
  * A transparent export asks for the device on an empty frame. The lights still belong there, but
@@ -57,34 +61,16 @@ function useSceneShadow(spread: number, resolution: number) {
 
 
 /**
- * Infinite sweep: a radial gradient floor that fades into fog of the same colour, so the horizon
- * has no seam. The gradient is tight enough around the device to read as a lit sweep rather than
- * flat paper, and the fog starts well past the subject so the shadow is never washed out.
+ * A neutral photographic sweep. Its pool comes from the same finite lights illuminating the
+ * device, instead of a painted gradient that stays bright when those lights move or dim.
  */
-function SoftFloor({ size, center, edge, roughness = 0.96 }: { size: number; center: string; edge: string; roughness?: number }) {
+function SoftFloor({ size, color = "#d8d8da", roughness = 0.92 }: { size: number; color?: string; roughness?: number }) {
   const noRoom = useNoRoom();
-  const tex = useMemo(() => {
-    const c = document.createElement("canvas");
-    c.width = c.height = 512;
-    const ctx = c.getContext("2d")!;
-    const g = ctx.createRadialGradient(256, 256, 20, 256, 256, 256);
-    g.addColorStop(0, center);
-    g.addColorStop(0.32, center);
-    g.addColorStop(1, edge);
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, 512, 512);
-    const t = new THREE.CanvasTexture(c);
-    t.colorSpace = THREE.SRGBColorSpace;
-    // Extend the sweep beyond the fog's far plane without enlarging its central light pool.
-    t.repeat.set(2, 2); t.offset.set(-0.5, -0.5);
-    return t;
-  }, [center, edge]);
-  useEffect(() => () => tex.dispose(), [tex]);
   if (noRoom) return null;
   return (
     <mesh renderOrder={-100} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
       <planeGeometry args={[size * 2, size * 2]} />
-      <meshStandardMaterial ref={(m) => { if (m) { addEnvironmentGain(m); addVsmReceiverBoundaryGuard(m); } }} map={tex} roughness={roughness} metalness={0} envMapIntensity={0.3} />
+      <meshStandardMaterial ref={(m) => { if (m) { addEnvironmentGain(m); addVsmReceiverBoundaryGuard(m); addSweepFade(m, size / 40); } }} color={color} roughness={roughness} metalness={0} envMapIntensity={0.22} />
     </mesh>
   );
 }
@@ -278,25 +264,27 @@ export function EnvScene({ preset, floorY, fitSize, backdrop }: { preset: SceneP
       {preset === "studio" && (
         // light tent: a big soft key from behind-left throws a long shadow across a grey sweep
         <>
-          <SoftFloor size={f * 40} center="#eeeef0" edge={backdrop ?? "#b0b0b6"} />
+          <SoftFloor size={f * 40} />
           <SceneFog color={backdrop ?? "#d5d5d8"} near={f * 7} far={f * 26} />
-          <directionalLight ref={shadowRef} position={[-f * 2.2, f * 3.4, -f * 2.6]} intensity={2.6} castShadow shadow-mapSize={[quality.shadow, quality.shadow]} shadow-bias={-0.0004} shadow-normalBias={0.02} {...keyShadow}>
+          <directionalLight ref={shadowRef} position={[-f * 2.2, f * 3.4, -f * 2.6]} intensity={0.95} castShadow shadow-mapSize={[quality.shadow, quality.shadow]} shadow-bias={-0.0004} shadow-normalBias={0.02} {...keyShadow}>
             <orthographicCamera attach="shadow-camera" args={[shadow.left, shadow.right, shadow.top, shadow.bottom, shadow.near, shadow.far]} />
           </directionalLight>
-          <directionalLight position={[f * 3, f * 2, f * 3]} intensity={0.8} color="#ffffff" />
-          <hemisphereLight intensity={0.5} color="#ffffff" groundColor="#c8c8cc" />
+          <rectAreaLight position={[-f * 2.2, f * 3.4, -f * 2.6]} width={f * 4} height={f * 3} intensity={6} color="#fff8f0" />
+          <rectAreaLight position={[f * 3.5, f * 2.8, f * 1.5]} width={f * 2} height={f * 2.5} intensity={3} color="#f0f4ff" />
+          <hemisphereLight intensity={0.12} color="#ffffff" groundColor="#b4b4b8" />
         </>
       )}
       {preset === "gallery" && (
         // high key: near-white sweep, a soft shadow pooling under the device
         <>
-          <SoftFloor size={f * 40} center="#fcfcfd" edge={backdrop ?? "#d4d4da"} />
+          <SoftFloor size={f * 40} color="#eeeeef" />
           <SceneFog color={backdrop ?? "#f2f2f4"} near={f * 8} far={f * 28} />
-          <directionalLight ref={shadowRef} position={[-f * 1.6, f * 4.2, f * 2.2]} intensity={2.1} castShadow shadow-mapSize={[quality.shadow, quality.shadow]} shadow-bias={-0.0004} shadow-normalBias={0.02} {...keyShadow}>
+          <directionalLight ref={shadowRef} position={[-f * 1.6, f * 4.2, f * 2.2]} intensity={0.8} castShadow shadow-mapSize={[quality.shadow, quality.shadow]} shadow-bias={-0.0004} shadow-normalBias={0.02} {...keyShadow}>
             <orthographicCamera attach="shadow-camera" args={[shadow.left, shadow.right, shadow.top, shadow.bottom, shadow.near, shadow.far]} />
           </directionalLight>
-          <directionalLight position={[f * 2.4, f * 2.4, -f * 2]} intensity={0.7} />
-          <hemisphereLight intensity={0.7} color="#ffffff" groundColor="#e6e6ea" />
+          <rectAreaLight position={[-f * 1.6, f * 4.2, f * 2.2]} width={f * 5} height={f * 3.5} intensity={5} />
+          <rectAreaLight position={[f * 2.4, f * 2.4, -f * 2]} width={f * 3} height={f * 3} intensity={1.2} color="#f2f6ff" />
+          <hemisphereLight intensity={0.2} color="#ffffff" groundColor="#d0d0d4" />
         </>
       )}
       {preset === "concrete" && (
@@ -304,12 +292,11 @@ export function EnvScene({ preset, floorY, fitSize, backdrop }: { preset: SceneP
         <>
           <ConcreteFloor size={f * 64} />
           <SceneFog color={backdrop ?? "#0f1013"} near={f * 8} far={f * 24} />
-          <directionalLight ref={shadowRef} position={[f * 3.4, f * 2.6, f * 1.6]} intensity={3.4} color="#ffeedd" castShadow shadow-mapSize={[quality.shadow, quality.shadow]} shadow-bias={-0.0005} shadow-normalBias={0.02} {...keyShadow}>
-            <orthographicCamera attach="shadow-camera" args={[shadow.left, shadow.right, shadow.top, shadow.bottom, shadow.near, shadow.far]} />
-          </directionalLight>
-          <directionalLight position={[-f * 2.6, f * 1.6, -f * 3]} intensity={1.2} color="#93b0e8" />
+          <spotLight ref={shadowRef} position={[f * 3.4, f * 2.6, f * 1.6]} intensity={f * f * 22} angle={0.72} penumbra={1} distance={f * 18} color="#fff3e3" castShadow shadow-mapSize={[quality.shadow, quality.shadow]} shadow-bias={-0.0005} shadow-normalBias={0.02} {...keyShadow} />
+          <rectAreaLight position={[f * 3.4, f * 2.6, f * 1.6]} width={f * 3} height={f * 2} intensity={6} color="#fff3e3" />
+          <rectAreaLight position={[-f * 2.6, f * 1.6, -f * 3]} width={f * 0.7} height={f * 3.2} intensity={2} color="#93b0e8" />
           <ScreenGlow distance={f * 0.6} intensity={f * f * 3.2} height={f * 0.3} />
-          <hemisphereLight intensity={0.26} color="#8fa0bd" groundColor="#332f2a" />
+          <hemisphereLight intensity={0.1} color="#8fa0bd" groundColor="#332f2a" />
         </>
       )}
       {preset === "darkroom" && !noRoom && <MirrorFloor size={f * 64} />}

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef } from "react";
-import { useEditor, redo, undo, beginInteraction, endInteraction, cancelInteraction, hasKeyClipboard, hasShotClipboard, lastCopyWasKeyframes } from "@/store/editor";
+import { useEditor, redo, undo, beginInteraction, endInteraction, cancelInteraction, hasKeyClipboard, hasShotClipboard, lastCopyWasKeyframes, lastCopyWasTextOverlay } from "@/store/editor";
 import { APP_VERSION } from "@/lib/version";
 import type { AnimProp, Project } from "@/lib/types";
 import { useUI } from "@/store/ui";
@@ -75,7 +75,7 @@ export function useOwnership() {
         const safe = structuredClone(p); migrateToModels(safe);
         useEditor.getState().replaceProject(safe, true);
         useEditor.temporal.getState().clear();
-        useUI.setState({ selectedKeys: [], selectedShots: [], activeShotId: safe.shots[0]?.id ?? null, time: 0 });
+        useUI.setState({ selectedKeys: [], selectedShots: [], activeShotId: safe.shots[0]?.id ?? null, activeTextOverlayId: null, cameraPose: null, time: 0 });
         try { sessionStorage.setItem("mok:open-project", safe.id); } catch {}
       },
       flush: (p, ticket) => saveAutosave(p, ticket),
@@ -129,12 +129,13 @@ export function migrateToModels(p: Project): boolean {
 
 /** Sweep unreferenced media out of storage once the editor has settled after load. */
 export function useMediaPrune() {
+  const projectId = useEditor((s) => s.project.id);
   useEffect(() => {
     const t = window.setTimeout(() => {
       void pruneMedia(useEditor.getState().project);
     }, 6000);
     return () => window.clearTimeout(t);
-  }, []);
+  }, [projectId]);
 }
 
 export function useAutosave() {
@@ -175,7 +176,9 @@ export function usePasteImport() {
       if (files.length) { e.preventDefault(); requestPaste(files); return; }
       // Let the native paste event deliver files before considering the editor's internal copy.
       // Otherwise copying a keyframe once makes later clipboard screenshots impossible to paste.
-      if (lastCopyWasKeyframes() && hasKeyClipboard()) {
+      if (lastCopyWasTextOverlay()) {
+        e.preventDefault(); useEditor.getState().pasteTextOverlay();
+      } else if (lastCopyWasKeyframes() && hasKeyClipboard()) {
         e.preventDefault(); useEditor.getState().pasteKeyframes(); useUI.getState().showToast("Keyframes pasted at the playhead");
       } else if (hasShotClipboard()) {
         e.preventDefault(); useEditor.getState().pasteShot(useUI.getState().activeShotId ?? undefined);
@@ -300,6 +303,7 @@ export function useShortcuts() {
       const ed = useEditor.getState();
       if (mod && e.key.toLowerCase() === "d") {
         e.preventDefault();
+        if (ui.activeTextOverlayId) { if (!e.shiftKey) ed.duplicateTextOverlay(ui.activeTextOverlayId); return; }
         const active = ui.activeShotId ?? ed.project.shots[0]?.id;
         if (!active) return;
         if (e.shiftKey) { const start = shotStart(ed.project, active); ed.splitShot(active, ui.time - start); }
@@ -307,7 +311,8 @@ export function useShortcuts() {
         return;
       }
       if (mod && e.key.toLowerCase() === "c") {
-        if (ui.selectedKeys.length) { e.preventDefault(); ed.copyKeyframes(ui.selectedKeys); ui.showToast(`Copied ${ui.selectedKeys.length} keyframe${ui.selectedKeys.length === 1 ? "" : "s"}`); }
+        if (ui.activeTextOverlayId) { e.preventDefault(); ed.copyTextOverlay(ui.activeTextOverlayId); ui.showToast("Text track copied"); }
+        else if (ui.selectedKeys.length) { e.preventDefault(); ed.copyKeyframes(ui.selectedKeys); ui.showToast(`Copied ${ui.selectedKeys.length} keyframe${ui.selectedKeys.length === 1 ? "" : "s"}`); }
         else if (ui.activeShotId) { e.preventDefault(); ed.copyShot(ui.activeShotId); ui.showToast("Shot copied"); }
         return;
       }
@@ -362,6 +367,7 @@ export function useShortcuts() {
           break;
         }
         case "Backspace": case "Delete": {
+          if (ui.activeTextOverlayId) { e.preventDefault(); ed.removeTextOverlay(ui.activeTextOverlayId); break; }
           // keyframes come first: a shot selection is the fallback, so one press never spends both
           if (ui.selectedKeys.length) {
             e.preventDefault();

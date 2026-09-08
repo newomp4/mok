@@ -60,11 +60,13 @@ test("material HDR gain composes with animated scene intensity for diffuse, spec
   material.envMap.dispose(); material.dispose();
 });
 
-test("screen reflection gain remains live and composes with the existing mirror shader", () => {
+test("screen reflection gain remains live and local geometry occludes environment radiance before the BRDF", () => {
   const texture = new THREE.Texture();
   const material = createScreenMaterial(texture);
   const shader = compilePhysical(material);
-  assert.ok(shader.fragmentShader.includes("reflectedLight.indirectSpecular += mirror * mirrorGain"));
+  assert.ok(shader.fragmentShader.includes("radiance = radiance * (1.0 - coverage) + localRadiance"));
+  assert.ok(shader.fragmentShader.includes("clearcoatRadiance = clearcoatRadiance * (1.0 - coverage) + localRadiance"));
+  assert.equal(shader.uniforms.reflectAmount, material.reflection.amount);
   for (const reflection of [0, 0.2, 1]) {
     material.envMapIntensity = reflection;
     assert.equal(shader.uniforms.mokEnvironmentGain.value, reflection);

@@ -3,6 +3,7 @@ import * as THREE from "three";
 import type { Finish } from "@/lib/devices";
 import { addMetalSurfaceDetail } from "@/three/surfaceDetail";
 import { addEnvironmentGain } from "@/three/environmentGain";
+import { screenGlassProfile, screenMirrorRadiance } from "@/three/screenGlass";
 
 export interface FinishMaterials {
   frame: THREE.MeshStandardMaterial;
@@ -77,7 +78,17 @@ export interface ScreenReflection {
   amount: { value: number };
 }
 
-export type ScreenMaterial = THREE.MeshPhysicalMaterial & { reflection: ScreenReflection };
+export type ScreenMaterial = THREE.MeshPhysicalMaterial & {
+  reflection: ScreenReflection;
+  glassF0: { value: number };
+};
+
+/** Uses the displayed layout, which may be the previous model while its replacement loads. */
+export function applyScreenGlassProfile(material: ScreenMaterial, deviceId: string): void {
+  const profile = screenGlassProfile(deviceId);
+  material.glassF0.value = profile.f0;
+  material.clearcoatRoughness = profile.roughness;
+}
 
 /** Screen material: emissive content + glossy clear coat for environment reflections. */
 export function createScreenMaterial(texture: THREE.Texture): ScreenMaterial {
@@ -89,19 +100,21 @@ export function createScreenMaterial(texture: THREE.Texture): ScreenMaterial {
     roughness: 0.08,
     metalness: 0,
     ior: 1.5,
-    // The clear coat supplies the air/glass reflection. Keep the layer below it subtle so the
-    // display does not receive two equally bright glass highlights over the uploaded artwork.
-    specularIntensity: 0.25,
+    // One glass interface over emissive pixels. A second base-layer dielectric reflection would
+    // lift the blacks again and make the coating's normal-incidence reflectance incorrect.
+    specularIntensity: 0,
     clearcoat: 1,
     clearcoatRoughness: 0.04,
     envMapIntensity: 1,
     side: THREE.DoubleSide,
   }) as ScreenMaterial;
+  m.glassF0 = { value: screenGlassProfile("").f0 };
   m.reflection = { map: { value: null }, matrix: { value: new THREE.Matrix4() }, amount: { value: 0 } };
   m.onBeforeCompile = (shader) => {
     shader.uniforms.reflectMap = m.reflection.map;
     shader.uniforms.reflectMatrix = m.reflection.matrix;
     shader.uniforms.reflectAmount = m.reflection.amount;
+    shader.uniforms.mokGlassF0 = m.glassF0;
     shader.vertexShader = `uniform mat4 reflectMatrix;
 varying vec4 vReflectUv;
 ${shader.vertexShader}`.replace(
@@ -109,7 +122,8 @@ ${shader.vertexShader}`.replace(
       `#include <worldpos_vertex>
       vReflectUv = reflectMatrix * modelMatrix * vec4( transformed, 1.0 );`,
     );
-    shader.fragmentShader = `uniform sampler2D reflectMap;
+    shader.fragmentShader = `uniform float mokGlassF0;
+uniform sampler2D reflectMap;
 uniform float reflectAmount;
 varying vec4 vReflectUv;
 ${shader.fragmentShader}`
@@ -118,27 +132,22 @@ ${shader.fragmentShader}`
         // anything mapped outside the content window (bezel overshoot on glTF screens) renders black
         `#include <emissivemap_fragment>
       #ifdef USE_EMISSIVEMAP
-      { vec2 w = step(vec2(0.0), vEmissiveMapUv) * step(vEmissiveMapUv, vec2(1.0)); if (w.x * w.y < 0.5) discard; }
+      { vec2 w = step(vec2(0.0), vEmissiveMapUv) * step(vEmissiveMapUv, vec2(1.0)); totalEmissiveRadiance *= w.x * w.y; }
       #endif`,
       )
       .replace(
-        "#include <aomap_fragment>",
-        // The glass is mostly transparent head-on and reflects more at grazing angles. Projected
-        // coordinates outside the mirror camera must not clamp into streaks along the screen edge.
-        `if ( reflectAmount > 0.0 && vReflectUv.w > 0.0 ) {
-        vec2 mirrorUv = vReflectUv.xy / vReflectUv.w;
-        vec2 mirrorEdge = smoothstep(vec2(0.0), vec2(0.01), mirrorUv) *
-                          smoothstep(vec2(0.0), vec2(0.01), vec2(1.0) - mirrorUv);
-        vec3 mirror = texture2D( reflectMap, mirrorUv ).rgb;
-        float grazing = pow( 1.0 - saturate( dot( geometryNormal, geometryViewDir ) ), 5.0 );
-        float mirrorGain = pow(clamp(reflectAmount, 0.0, 1.0), 1.5) * mix(0.035, 0.55, grazing);
-        mirrorGain *= mirrorEdge.x * mirrorEdge.y;
-        reflectedLight.indirectSpecular += mirror * mirrorGain;
-      }
-      #include <aomap_fragment>`,
+        "#include <lights_physical_fragment>",
+        `#include <lights_physical_fragment>
+        #ifdef USE_CLEARCOAT
+          material.clearcoatF0 = vec3(mokGlassF0);
+        #endif`,
+      )
+      .replace(
+        "#include <lights_fragment_maps>",
+        `#include <lights_fragment_maps>\n${screenMirrorRadiance}`,
       );
   };
-  m.customProgramCacheKey = () => "mok-screen-glass-v2";
+  m.customProgramCacheKey = () => "mok-screen-glass-v4";
   addEnvironmentGain(m);
   installScreenGrid(m);
   m.fog = false;

@@ -90,9 +90,9 @@ Open http://localhost:3000. Production build: `pnpm build && pnpm start`. Deploy
 
 ## Latest changes
 
-Version 0.12.0 adds height-aware contact shadows, clearer imported display glass, seamless room floors and captions that can sit in front of or behind a device. It also repairs failed-upload insertion, orientation-aware cropping, asynchronous editing, trimmed fades and export budgeting/seeking.
+Version 0.13.0 adds shaped area lighting, corrected screen-glass reflection composition, independent overlapping text tracks, Simple camera pose slots and conservative unused-media reclamation. Existing projects, captions and Advanced animation keys remain compatible.
 
-Run `npm test`, `npm run typecheck` and `npm run lint` for application checks. Browser, visual and workflow verification details are in [the 0.12.0 release report](docs/research/release-0.12.0.md). MCP setup and tests are separate in [automation/README.md](automation/README.md).
+Run `npm test`, `npm run typecheck` and `npm run lint` for application checks. Browser, visual and workflow verification details are in [the 0.13.0 release report](docs/research/release-0.13.0.md). MCP setup and tests are separate in [automation/README.md](automation/README.md).
 
 ## How it works
 
